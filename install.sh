@@ -51,14 +51,21 @@ chmod 755 "$APP_DIR"
 chmod -R u+rwX,go+rX "$APP_DIR"
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$APP_DIR"
 
-# 3. Install System & Python Dependencies (including git, python3-pip, and aider)
-echo "[+] Installing system packages, Python runtime, and agent tooling..."
+# 3. Install System & Python Dependencies
+echo "[+] Installing system packages and Python dependencies..."
 apt-get update -y
-apt-get install -y curl ca-certificates jq gnupg git python3 python3-pip python3-venv python3-uvicorn python3-fastapi python3-requests
+apt-get install -y curl ca-certificates jq gnupg git pipx python3 python3-pip python3-venv python3-uvicorn python3-fastapi python3-requests
 
+# Install Aider using pipx or dedicated isolated venv
+echo "[+] Configuring Aider AI Agent in isolated environment..."
 if ! command -v aider >/dev/null 2>&1; then
-  echo "[+] Installing Aider CLI AI Agent..."
-  pip3 install --upgrade aider-chat || pip3 install --break-system-packages --upgrade aider-chat || true
+  PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install --force aider-chat || {
+    echo "[*] Falling back to dedicated virtualenv for Aider..."
+    python3 -m venv "${APP_DIR}/venv_aider"
+    "${APP_DIR}/venv_aider/bin/pip" install --upgrade pip
+    "${APP_DIR}/venv_aider/bin/pip" install aider-chat || true
+    ln -sf "${APP_DIR}/venv_aider/bin/aider" /usr/local/bin/aider
+  }
 fi
 
 # 4. Install / Update LM Studio CLI & llmster Daemon
@@ -99,7 +106,7 @@ fi
 chmod +x "$LMS_BIN"
 ln -sf "$LMS_BIN" /usr/local/bin/lms
 
-# 5. Model Linking & Non-Interactive Indexing
+# 5. Model Library Linking & Indexing
 echo ""
 echo "--- [ Model Library Linking & Indexing ] ---"
 for model_dir in "$MODELS_DIR"/*; do
@@ -124,23 +131,25 @@ curl -fsSL "${REPO_RAW_URL}/model_manager.py" -o "${APP_DIR}/model_manager.py"
 chmod 755 "${APP_DIR}/model_manager.py"
 chown "${SERVICE_USER}:${SERVICE_GROUP}" "${APP_DIR}/model_manager.py"
 
-# 7. Configure Agent Workspace & Guardrails
+# 7. Configure AI Agent Workspace & Guardrails
 echo ""
 echo "--- [ Configuring AI Agent Workspace ] ---"
+mkdir -p "$WORKSPACE_DIR"
 
-# Copy local source files into isolated workspace if git repo is absent
 if [ ! -d "${WORKSPACE_DIR}/.git" ]; then
-  git -C "$WORKSPACE_DIR" init >/dev/null 2>&1 || true
-  git -C "$WORKSPACE_DIR" config user.name "AI Coding Agent"
-  git -C "$WORKSPACE_DIR" config user.email "agent@lmstudio.local"
+  (
+    cd "$WORKSPACE_DIR"
+    git init
+    git config user.name "AI Coding Agent"
+    git config user.email "agent@lmstudio.local"
+  )
 fi
 
-cp -u "${APP_DIR}/model_manager.py" "${WORKSPACE_DIR}/" 2>/dev/null || true
-if [ -f "./install.sh" ]; then
-  cp -u "./install.sh" "${WORKSPACE_DIR}/" 2>/dev/null || true
-fi
+# Mirror codebase into workspace
+cp -f "${APP_DIR}/model_manager.py" "${WORKSPACE_DIR}/" 2>/dev/null || true
+curl -fsSL "${REPO_RAW_URL}/install.sh" -o "${WORKSPACE_DIR}/install.sh" 2>/dev/null || true
 
-# Write Aider Configuration for LM Studio integration
+# Aider Configuration for local LM Studio API
 cat > "${WORKSPACE_DIR}/.aider.conf.yml" <<EOF
 openai-api-base: http://127.0.0.1:${LM_PORT}/v1
 openai-api-key: lm-studio
@@ -152,26 +161,26 @@ attribute-committer: false
 show-diffs: true
 EOF
 
-# Create Pre-Push Syntax Validator Script
+# Pre-Push Syntax Validator Script
 cat > "${WORKSPACE_DIR}/validate-and-push.sh" << 'EOF'
 #!/usr/bin/env bash
 set -e
 
-echo "[*] Validating Python files..."
+echo "[*] Validating Python syntax..."
 find . -maxdepth 2 -name "*.py" -exec python3 -m py_compile {} +
 
-echo "[*] Validating Bash scripts..."
+echo "[*] Validating Shell script syntax..."
 find . -maxdepth 2 -name "*.sh" -exec bash -n {} +
 
-echo "[✓] All syntax checks passed!"
+echo "[✓] All syntax tests passed!"
 
 TARGET_BRANCH="${1:-dev}"
-echo "[*] Pushing current changes to branch '${TARGET_BRANCH}'..."
+echo "[*] Pushing verified changes to branch '${TARGET_BRANCH}'..."
 git push origin "$TARGET_BRANCH"
 EOF
 chmod +x "${WORKSPACE_DIR}/validate-and-push.sh"
 
-# Create system-wide 'lms-agent' launcher command
+# Global CLI launcher for the workspace
 cat > /usr/local/bin/lms-agent << EOF
 #!/usr/bin/env bash
 cd "${WORKSPACE_DIR}"
