@@ -159,7 +159,7 @@ echo "[✓] Model library indexing complete."
 echo ""
 echo "--- [ Systemd Service Configuration ] ---"
 
-# LM Studio Headless Daemon Service (Fixed: no --host flag)
+# LM Studio Headless Daemon Service
 tee /etc/systemd/system/lmstudio.service > /dev/null <<EOF
 [Unit]
 Description=LM Studio Headless Server & Link Daemon
@@ -167,14 +167,16 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=forking
 User=${SERVICE_USER}
 Group=${SERVICE_GROUP}
 WorkingDirectory=${APP_DIR}
 Environment=HOME=${APP_DIR}
 Environment=PATH=/usr/local/bin:${APP_DIR}/.cache/lm-studio/bin:${APP_DIR}/.lmstudio/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=${LMS_BIN} server start --port ${LM_PORT} --cors
-Restart=always
+ExecStop=${LMS_BIN} server stop
+RemainAfterExit=yes
+Restart=on-failure
 RestartSec=5
 
 [Install]
