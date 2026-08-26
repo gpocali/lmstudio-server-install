@@ -1,6 +1,7 @@
 import os
 import re
 import glob
+import ctypes
 import shutil
 import subprocess
 import threading
@@ -22,10 +23,10 @@ class DownloadRequest(BaseModel):
 
 def get_system_hardware_info():
     """
-    Detects System RAM from /proc/meminfo and GPU VRAM via:
-    1. /sys/class/drm kernel interface (works on open kernel modules/drivers)
-    2. /sys/bus/pci device resources
-    3. nvidia-smi utility (if installed)
+    Detects System RAM and Dedicated GPU VRAM using:
+    1. Direct NVML C-Library bindings (same method as nvtop).
+    2. nvidia-smi CLI.
+    3. sysfs / PCI bus inspection specifically filtering for dedicated GPUs.
     """
     # --- 1. System RAM Detection ---
     sys_ram_total_gb = 0.0
@@ -42,74 +43,69 @@ def get_system_hardware_info():
     except Exception:
         pass
 
-    # --- 2. GPU Detection via Kernel DRM & sysfs (No nvidia-smi required) ---
+    # --- 2. GPU Detection ---
     gpu_found = False
-    gpu_name = "NVIDIA / Dedicated GPU"
+    gpu_name = "NVIDIA Dedicated GPU"
     gpu_vram_total_gb = 0.0
     gpu_vram_free_gb = 0.0
 
-    # Method A: Check DRM subsystem (e.g. /sys/class/drm/card*/device)
-    drm_cards = glob.glob('/sys/class/drm/card[0-9]*/device')
-    for card in drm_cards:
-        # Check for VRAM sysfs files (common on open drivers)
-        vram_total_file = os.path.join(card, "mem_info_vram_total")
-        vram_used_file = os.path.join(card, "mem_info_vram_used")
-        
-        if os.path.exists(vram_total_file):
+    # Method A: Direct NVML ctypes library query (Exact method nvtop uses)
+    try:
+        # Check standard NVML shared library locations
+        nvml_lib_names = ["libnvidia-ml.so.1", "libnvidia-ml.so", "/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1"]
+        nvml = None
+        for name in nvml_lib_names:
             try:
-                with open(vram_total_file, 'r') as f:
-                    v_tot_bytes = int(f.read().strip())
-                v_used_bytes = 0
-                if os.path.exists(vram_used_file):
-                    with open(vram_used_file, 'r') as f:
-                        v_used_bytes = int(f.read().strip())
-                
-                tot_gb = round(v_tot_bytes / (1024**3), 2)
-                free_gb = round((v_tot_bytes - v_used_bytes) / (1024**3), 2)
-                if tot_gb > 0.5:  # Filter out virtual dummy frames
-                    gpu_found = True
-                    gpu_vram_total_gb += tot_gb
-                    gpu_vram_free_gb += free_gb
+                nvml = ctypes.CDLL(name)
+                break
             except Exception:
-                pass
+                continue
 
-    # Method B: Check PCI device BAR size for NVIDIA GPUs (Vendor 0x10de)
-    if not gpu_found:
-        pci_devices = glob.glob('/sys/bus/pci/devices/*')
-        for dev in pci_devices:
-            vendor_file = os.path.join(dev, "vendor")
-            resource_file = os.path.join(dev, "resource")
-            if os.path.exists(vendor_file) and os.path.exists(resource_file):
+        if nvml:
+            # Struct for NVML memory return
+            class nvmlMemory_t(ctypes.Structure):
+                _fields_ = [
+                    ('total', ctypes.c_ulonglong),
+                    ('free', ctypes.c_ulonglong),
+                    ('used', ctypes.c_ulonglong)
+                ]
+
+            if nvml.nvmlInit_v2() == 0 or nvml.nvmlInit() == 0:
+                device_count = ctypes.c_uint()
+                nvml.nvmlDeviceGetCount_v2(ctypes.byref(device_count))
+                
+                tot_bytes = 0
+                free_bytes = 0
+                names = []
+
+                for i in range(device_count.value):
+                    handle = ctypes.c_void_p()
+                    if nvml.nvmlDeviceGetHandleByIndex_v2(i, ctypes.byref(handle)) == 0:
+                        # Get Name
+                        name_buf = ctypes.create_string_buffer(64)
+                        nvml.nvmlDeviceGetName(handle, name_buf, 64)
+                        names.append(name_buf.value.decode('utf-8'))
+
+                        # Get Memory
+                        mem = nvmlMemory_t()
+                        if nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(mem)) == 0:
+                            tot_bytes += mem.total
+                            free_bytes += mem.free
+
+                if tot_bytes > 0:
+                    gpu_found = True
+                    gpu_name = ", ".join(names)
+                    gpu_vram_total_gb = round(tot_bytes / (1024**3), 2)
+                    gpu_vram_free_gb = round(free_bytes / (1024**3), 2)
+
                 try:
-                    with open(vendor_file, 'r') as f:
-                        vendor = f.read().strip().lower()
-                    # 0x10de = NVIDIA, 0x1002 = AMD
-                    if "0x10de" in vendor or "0x1002" in vendor:
-                        # Inspect memory BAR windows
-                        with open(resource_file, 'r') as f:
-                            res_lines = f.readlines()
-                        max_bar_bytes = 0
-                        for line in res_lines:
-                            parts = line.strip().split()
-                            if len(parts) >= 3:
-                                start = int(parts[0], 16)
-                                end = int(parts[1], 16)
-                                if end > start:
-                                    bar_size = end - start + 1
-                                    # Large BAR memory windows (>1GB) represent physical VRAM aperture
-                                    if bar_size > max_bar_bytes and bar_size >= (1024**3):
-                                        max_bar_bytes = bar_size
-                        
-                        if max_bar_bytes > 0:
-                            gpu_found = True
-                            gpu_vram_total_gb = round(max_bar_bytes / (1024**3), 2)
-                            gpu_vram_free_gb = gpu_vram_total_gb  # Static estimation via hardware BAR
-                            gpu_name = "NVIDIA GPU (Open Driver / Sysfs)"
-                            break
+                    nvml.nvmlShutdown()
                 except Exception:
                     pass
+    except Exception:
+        gpu_found = False
 
-    # Method C: Try nvidia-smi if installed
+    # Method B: Fallback to nvidia-smi CLI
     if not gpu_found:
         nvidia_smi_path = shutil.which("nvidia-smi") or "/usr/bin/nvidia-smi"
         if os.path.exists(nvidia_smi_path):
@@ -134,6 +130,38 @@ def get_system_hardware_info():
                         gpu_vram_free_gb = round(free_mb / 1024, 2)
             except Exception:
                 pass
+
+    # Method C: Dedicated PCI Inspection (Explicitly prioritizing Vendor 0x10de)
+    if not gpu_found:
+        pci_devices = sorted(glob.glob('/sys/bus/pci/devices/*'))
+        for dev in pci_devices:
+            vendor_file = os.path.join(dev, "vendor")
+            resource_file = os.path.join(dev, "resource")
+            if os.path.exists(vendor_file) and os.path.exists(resource_file):
+                try:
+                    with open(vendor_file, 'r') as f:
+                        vendor = f.read().strip().lower()
+                    if "0x10de" in vendor:  # NVIDIA Dedicated Vendor ID
+                        with open(resource_file, 'r') as f:
+                            res_lines = f.readlines()
+                        max_bar_bytes = 0
+                        for line in res_lines:
+                            parts = line.strip().split()
+                            if len(parts) >= 3:
+                                start = int(parts[0], 16)
+                                end = int(parts[1], 16)
+                                if end > start:
+                                    bar_size = end - start + 1
+                                    if bar_size > max_bar_bytes and bar_size >= (1024**3):
+                                        max_bar_bytes = bar_size
+                        if max_bar_bytes > 0:
+                            gpu_found = True
+                            gpu_vram_total_gb = round(max_bar_bytes / (1024**3), 2)
+                            gpu_vram_free_gb = gpu_vram_total_gb
+                            gpu_name = "NVIDIA Dedicated GPU"
+                            break
+                except Exception:
+                    pass
 
     return {
         "system_ram": {
@@ -299,10 +327,10 @@ def get_ui():
           </div>
           
           <div class="flex flex-wrap items-center gap-3 text-xs">
-            <!-- GPU VRAM Badge -->
+            <!-- Dedicated GPU VRAM Badge -->
             <div id="gpuCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
-              <span class="text-slate-400">GPU VRAM:</span>
-              <span id="vramStat" class="font-semibold text-emerald-400">Probing hardware...</span>
+              <span class="text-slate-400">Dedicated VRAM:</span>
+              <span id="vramStat" class="font-semibold text-emerald-400">Probing NVML...</span>
             </div>
             
             <!-- System RAM Badge -->
@@ -348,14 +376,14 @@ def get_ui():
             const res = await fetch('/api/system_info');
             const data = await res.json();
             
-            // Render GPU Stats
+            // Render Dedicated GPU Stats
             if (data.gpu && data.gpu.has_gpu) {
               const freeStr = data.gpu.free_vram_gb > 0 ? `${data.gpu.free_vram_gb} GB Free / ` : '';
               document.getElementById('vramStat').innerHTML = 
                 `${freeStr}${data.gpu.total_vram_gb} GB <span class="text-slate-400 font-normal">(${data.gpu.gpu_name})</span>`;
             } else {
               document.getElementById('vramStat').innerHTML = 
-                `<span class="text-slate-400 font-normal">No Dedicated VRAM Detected</span>`;
+                `<span class="text-slate-400 font-normal">No Dedicated GPU Detected</span>`;
             }
 
             // Render System RAM Stats
