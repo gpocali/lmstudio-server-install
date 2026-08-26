@@ -48,17 +48,16 @@ QUANT_DESCRIPTIONS = {
 
 class DownloadRequest(BaseModel):
     repo_id: str
-    filename: str
+    group_name: str
+    files: list[str]  # Exact relative repository paths
 
 class DeleteRequest(BaseModel):
     filename: str
 
 def calculate_trust_score(downloads: int, likes: int, is_verified: bool) -> int:
-    """Calculates a normalized 0-100 Community Trust Score."""
     score = 0
     if is_verified:
         score += 35
-    
     if downloads >= 100000:
         score += 40
     elif downloads >= 10000:
@@ -228,58 +227,80 @@ def parse_model_metadata(filename: str, repo_id: str):
 
     return weight, variant
 
-def fetch_single_file_size(repo_id: str, filename: str):
-    url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+def fetch_single_file_size(repo_id: str, rel_path: str):
+    """Probe exact file size using HTTP HEAD directly against the exact repo path."""
+    url = f"https://huggingface.co/{repo_id}/resolve/main/{rel_path}"
     try:
-        r = requests.head(url, headers={"Accept-Encoding": "identity"}, allow_redirects=True, timeout=5)
+        r = requests.head(url, headers={"Accept-Encoding": "identity"}, allow_redirects=True, timeout=6)
         if r.status_code == 200:
             return int(r.headers.get("Content-Length", 0))
     except Exception:
         pass
     return 0
 
-def run_download_job(repo_id: str, filename: str):
-    DOWNLOAD_JOBS[filename] = {
+def run_download_job(repo_id: str, group_name: str, file_paths: list[str]):
+    """
+    Downloads all parts/shards of a model sequentially using full relative repo paths.
+    """
+    DOWNLOAD_JOBS[group_name] = {
         "status": "downloading",
         "downloaded_bytes": 0,
         "total_bytes": 0,
         "progress_str": "Connecting...",
         "percent": 0.0
     }
-    url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
     dest_dir = os.path.join(MODELS_PATH, repo_id.replace('/', '_'))
     os.makedirs(dest_dir, exist_ok=True)
-    dest_file = os.path.join(dest_dir, filename)
 
     try:
-        with requests.get(url, stream=True, timeout=30) as r:
-            r.raise_for_status()
-            total_size = int(r.headers.get('content-length', 0))
-            downloaded = 0
-            DOWNLOAD_JOBS[filename]["total_bytes"] = total_size
+        total_all_shards = 0
+        # Calculate total payload size across all shards
+        for rel_path in file_paths:
+            total_all_shards += fetch_single_file_size(repo_id, rel_path)
+        DOWNLOAD_JOBS[group_name]["total_bytes"] = total_all_shards
 
-            with open(dest_file, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=4 * 1024 * 1024):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        
-                        dl_gb = round(downloaded / (1024**3), 2)
-                        tot_gb = round(total_size / (1024**3), 2) if total_size > 0 else 0
-                        pct = round((downloaded / total_size) * 100, 1) if total_size > 0 else 0.0
+        cum_downloaded = 0
+        first_shard_file = None
 
-                        DOWNLOAD_JOBS[filename].update({
-                            "downloaded_bytes": downloaded,
-                            "progress_str": f"{dl_gb} GB / {tot_gb} GB ({pct}%)",
-                            "percent": pct
-                        })
+        for idx, rel_path in enumerate(file_paths, 1):
+            fname = os.path.basename(rel_path)
+            dest_file = os.path.join(dest_dir, fname)
+            if not first_shard_file:
+                first_shard_file = dest_file
 
-        DOWNLOAD_JOBS[filename]["status"] = "completed"
-        DOWNLOAD_JOBS[filename]["progress_str"] = "100% (Complete)"
-        DOWNLOAD_JOBS[filename]["percent"] = 100.0
-        subprocess.run(["/usr/local/bin/lms", "import", dest_file], capture_output=True)
+            url = f"https://huggingface.co/{repo_id}/resolve/main/{rel_path}"
+            
+            with requests.get(url, stream=True, timeout=30) as r:
+                r.raise_for_status()
+                shard_total = int(r.headers.get('content-length', 0))
+                
+                with open(dest_file, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=4 * 1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+                            cum_downloaded += len(chunk)
+                            
+                            dl_gb = round(cum_downloaded / (1024**3), 2)
+                            tot_gb = round(total_all_shards / (1024**3), 2) if total_all_shards > 0 else 0
+                            pct = round((cum_downloaded / total_all_shards) * 100, 1) if total_all_shards > 0 else 0.0
+                            
+                            shard_note = f" (Part {idx}/{len(file_paths)})" if len(file_paths) > 1 else ""
+                            DOWNLOAD_JOBS[group_name].update({
+                                "downloaded_bytes": cum_downloaded,
+                                "progress_str": f"{dl_gb} GB / {tot_gb} GB ({pct}%){shard_note}",
+                                "percent": pct
+                            })
+
+        DOWNLOAD_JOBS[group_name]["status"] = "completed"
+        DOWNLOAD_JOBS[group_name]["progress_str"] = "100% (Complete)"
+        DOWNLOAD_JOBS[group_name]["percent"] = 100.0
+        
+        # Import the primary model/first shard into LM Studio
+        if first_shard_file:
+            subprocess.run(["/usr/local/bin/lms", "import", first_shard_file], capture_output=True)
+
     except Exception as e:
-        DOWNLOAD_JOBS[filename] = {
+        DOWNLOAD_JOBS[group_name] = {
             "status": "failed",
             "progress_str": f"Error: {str(e)}",
             "percent": 0.0
@@ -357,6 +378,10 @@ def search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool = Fal
 
 @app.get("/api/model_files")
 def get_model_files(repo_id: str):
+    """
+    Retrieves full repository tree, groups multi-part shard models together, 
+    and verifies file paths.
+    """
     raw_files = {}
 
     tree_url = f"https://huggingface.co/api/models/{repo_id}/tree/main?recursive=true"
@@ -387,16 +412,52 @@ def get_model_files(repo_id: str):
         except Exception:
             pass
 
-    missing_sizes = [f for f, size in raw_files.items() if not size or size == 0]
-    if missing_sizes:
+    # Group multi-shard files (e.g. model-00001-of-00002.gguf + model-00002-of-00002.gguf)
+    # Key: Group name (basename without -0000X-of-0000Y)
+    grouped_variants = {}
+
+    for rel_path, size_bytes in raw_files.items():
+        fname = os.path.basename(rel_path)
+        # Check if file has shard pattern: -00001-of-00004
+        shard_match = re.search(r'(-\d{5}-of-\d{5})', fname)
+        if shard_match:
+            clean_name = fname.replace(shard_match.group(1), "")
+            is_sharded = True
+        else:
+            clean_name = fname
+            is_sharded = False
+
+        if clean_name not in grouped_variants:
+            grouped_variants[clean_name] = {
+                "group_name": clean_name,
+                "is_sharded": is_sharded,
+                "paths": [],
+                "total_bytes": 0
+            }
+        
+        grouped_variants[clean_name]["paths"].append(rel_path)
+        grouped_variants[clean_name]["total_bytes"] += size_bytes
+
+    # Ensure paths in shards are sorted in proper sequence (00001 before 00002)
+    for group in grouped_variants.values():
+        group["paths"].sort()
+
+    # Missing size parallel probe
+    missing_probes = []
+    for gname, gdata in grouped_variants.items():
+        if gdata["total_bytes"] == 0:
+            for p in gdata["paths"]:
+                missing_probes.append((gname, p))
+
+    if missing_probes:
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-            future_to_file = {executor.submit(fetch_single_file_size, repo_id, f): f for f in missing_sizes}
-            for future in concurrent.futures.as_completed(future_to_file):
-                f_name = future_to_file[future]
+            future_to_probe = {executor.submit(fetch_single_file_size, repo_id, p): (gname, p) for gname, p in missing_probes}
+            for future in concurrent.futures.as_completed(future_to_probe):
+                gname, p = future_to_probe[future]
                 try:
-                    probed_size = future.result()
-                    if probed_size > 0:
-                        raw_files[f_name] = probed_size
+                    sz = future.result()
+                    if sz > 0:
+                        grouped_variants[gname]["total_bytes"] += sz
                 except Exception:
                     pass
 
@@ -412,10 +473,11 @@ def get_model_files(repo_id: str):
                     local_files_on_disk.add(f)
 
     parsed_files = []
-    for fname, size_bytes in raw_files.items():
-        weight, variant = parse_model_metadata(fname, repo_id)
+    for gname, gdata in grouped_variants.items():
+        weight, variant = parse_model_metadata(gname, repo_id)
         description = get_quant_description(variant)
         
+        size_bytes = gdata["total_bytes"]
         size_gb = round(size_bytes / (1024**3), 2) if size_bytes > 0 else 0.0
         est_mem_req = round(size_gb * 1.2, 2) if size_gb > 0 else 0.0
 
@@ -434,14 +496,22 @@ def get_model_files(repo_id: str):
                 else:
                     fit_status = "exceeds"
 
-        is_downloaded = fname in local_files_on_disk
-        is_downloading = fname in DOWNLOAD_JOBS and DOWNLOAD_JOBS[fname].get("status") == "downloading"
+        # Check if all required shard files exist on disk
+        shard_basenames = [os.path.basename(p) for p in gdata["paths"]]
+        is_downloaded = all(sb in local_files_on_disk for sb in shard_basenames)
+        is_downloading = gname in DOWNLOAD_JOBS and DOWNLOAD_JOBS[gname].get("status") == "downloading"
 
         size_label = f"{size_gb} GB" if size_gb > 0 else "Pending..."
         est_vram_label = f"~{est_mem_req} GB" if est_mem_req > 0 else "N/A"
+        
+        shard_info = f" ({len(gdata['paths'])} Shards Complete Package)" if len(gdata['paths']) > 1 else ""
 
         parsed_files.append({
-            "filename": fname,
+            "group_name": gname,
+            "display_name": gname + shard_info,
+            "paths": gdata["paths"],
+            "is_sharded": len(gdata["paths"]) > 1,
+            "shard_count": len(gdata["paths"]),
             "weight": weight,
             "variant": variant,
             "description": description,
@@ -463,23 +533,30 @@ def get_model_files(repo_id: str):
 
 @app.post("/api/download")
 def start_download(req: DownloadRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(run_download_job, req.repo_id, req.filename)
-    return {"status": "started", "file": req.filename}
+    background_tasks.add_task(run_download_job, req.repo_id, req.group_name, req.files)
+    return {"status": "started", "group_name": req.group_name}
 
 @app.post("/api/delete")
 def delete_local_model(req: DeleteRequest):
+    """Deletes a model or all related shards from disk."""
     deleted = False
     if os.path.exists(MODELS_PATH):
+        # Match exact file or split shards belonging to this model
+        prefix_pattern = req.filename.replace(".gguf", "")
         for root, _, filenames in os.walk(MODELS_PATH):
-            if req.filename in filenames:
-                file_path = os.path.join(root, req.filename)
+            for f in filenames:
+                if f == req.filename or (prefix_pattern in f and f.endswith(".gguf")):
+                    file_path = os.path.join(root, f)
+                    try:
+                        os.remove(file_path)
+                        deleted = True
+                    except Exception:
+                        pass
+            if not os.listdir(root):
                 try:
-                    os.remove(file_path)
-                    deleted = True
-                    if not os.listdir(root):
-                        os.rmdir(root)
-                except Exception as e:
-                    return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+                    os.rmdir(root)
+                except Exception:
+                    pass
 
     if req.filename in DOWNLOAD_JOBS:
         del DOWNLOAD_JOBS[req.filename]
@@ -662,7 +739,6 @@ def get_ui():
 
         function searchAuthor(author) {
           document.getElementById('searchInput').value = author;
-          // Uncheck verified-only if looking up a custom creator to avoid filtering issues
           document.getElementById('verifiedOnly').checked = false;
           searchModels();
         }
@@ -777,11 +853,13 @@ def get_ui():
               fitBadge = '<span class="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-medium">Exceeds Memory</span>';
             }
 
-            const isDownloaded = f.is_downloaded || localModelSet.has(f.filename);
-            const isDownloading = f.is_downloading || (activeTasksMap[f.filename] && activeTasksMap[f.filename].status === 'downloading');
+            const isDownloaded = f.is_downloaded || localModelSet.has(f.group_name);
+            const isDownloading = f.is_downloading || (activeTasksMap[f.group_name] && activeTasksMap[f.group_name].status === 'downloading');
 
             let btnHtml = '';
-            const btnId = `btn-${btoa(f.filename).replace(/=/g, '')}`;
+            const btnId = `btn-${btoa(f.group_name).replace(/=/g, '')}`;
+
+            const filesPayload = encodeURIComponent(JSON.stringify(f.paths));
 
             if (isDownloaded) {
               btnHtml = `
@@ -795,16 +873,21 @@ def get_ui():
                 </button>`;
             } else {
               btnHtml = `
-                <button id="${btnId}" onclick="triggerDownload('${repoId}', '${f.filename}', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition">
+                <button id="${btnId}" onclick="triggerDownload('${repoId}', '${f.group_name}', '${filesPayload}', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition">
                   Download
                 </button>`;
             }
+
+            const shardBadge = f.is_sharded ? `<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded ml-1 font-mono">${f.shard_count} Shards</span>` : '';
 
             const row = document.createElement('div');
             row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
             row.innerHTML = `
               <div class="space-y-1 overflow-hidden pr-2">
-                <div class="font-medium text-sky-200 truncate" title="${f.filename}">${f.filename}</div>
+                <div class="font-medium text-sky-200 truncate flex items-center" title="${f.display_name}">
+                  <span class="truncate">${f.group_name}</span>
+                  ${shardBadge}
+                </div>
                 <div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">
                   <span>Weight: <strong class="text-slate-200">${f.weight}</strong></span>
                   <span>•</span>
@@ -825,15 +908,17 @@ def get_ui():
           fileContainer.appendChild(table);
         }
 
-        async function triggerDownload(repoId, filename, btn) {
+        async function triggerDownload(repoId, groupName, filesPayloadEncoded, btn) {
           btn.disabled = true;
           btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
           btn.innerHTML = "⏳ Downloading...";
 
+          const filePaths = JSON.parse(decodeURIComponent(filesPayloadEncoded));
+
           await fetch('/api/download', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({repo_id: repoId, filename: filename})
+            body: JSON.stringify({repo_id: repoId, group_name: groupName, files: filePaths})
           });
           updateTasks();
         }
