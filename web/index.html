@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LM Studio Remote Code & Model Studio</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+  
+  <!-- Global Top Navbar -->
+  <header class="bg-slate-950 border-b border-slate-800 px-6 py-3.5 flex flex-wrap justify-between items-center gap-4 shrink-0">
+    <div class="flex items-center gap-3">
+      <h1 class="text-lg font-bold text-sky-400">LM Studio Studio</h1>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded border border-slate-700">Modular Edition</span>
+    </div>
+
+    <!-- Navigation Page Buttons -->
+    <div class="flex items-center gap-2">
+      <button onclick="switchView('studio')" id="navBtnStudio" class="px-4 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5">
+        💻 Project Studio
+      </button>
+      <button onclick="switchView('github')" id="navBtnGithub" class="px-4 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
+        🔑 GitHub Accounts
+      </button>
+      <button onclick="switchView('models')" id="navBtnModels" class="px-4 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
+        📦 Model Manager
+      </button>
+    </div>
+
+    <!-- Hardware Readouts -->
+    <div class="flex items-center gap-3 text-xs">
+      <div class="bg-slate-900 px-3 py-1 rounded border border-slate-800 text-slate-400">
+        VRAM: <span id="vramStat" class="font-semibold text-emerald-400">--</span>
+      </div>
+      <div class="bg-slate-900 px-3 py-1 rounded border border-slate-800 text-slate-400">
+        Storage: <span id="storageStat" class="font-semibold text-amber-400">--</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ==================== VIEW 1: PROJECT STUDIO (IDE & CHAT) ==================== -->
+  <main id="viewStudio" class="flex-1 flex overflow-hidden">
+    
+    <!-- Left Sidebar: Gemini-Style Workspace & Project List -->
+    <aside class="w-80 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0">
+      <div class="p-4 border-b border-slate-800 flex justify-between items-center">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Active Workspaces</h2>
+        <button onclick="switchView('github')" class="text-xs text-sky-400 hover:text-sky-300 hover:underline">+ Clone New</button>
+      </div>
+
+      <div id="sidebarProjectList" class="flex-1 overflow-y-auto p-3 space-y-2 text-xs">
+        <p class="text-slate-500">Loading workspaces...</p>
+      </div>
+
+      <div id="sidebarFilesBlock" class="hidden border-t border-slate-800 p-4 bg-slate-950/80 flex flex-col space-y-3">
+        <div class="flex justify-between items-center">
+          <h3 class="text-xs font-bold text-slate-300">Context Files</h3>
+          <button onclick="openNewFileDialog()" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-sky-300 px-2 py-0.5 rounded border border-slate-700">
+            + New Script
+          </button>
+        </div>
+        <p class="text-[11px] text-slate-400">Check files to include in AI context (or leave empty):</p>
+        <div id="filesCheckboxList" class="max-h-48 overflow-y-auto space-y-1.5 pr-1 font-mono text-[11px] text-slate-300">
+          <p class="text-slate-500">Select a project</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Front & Center Chat / Code Studio -->
+    <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden">
+      <div class="bg-slate-950/60 border-b border-slate-800 px-6 py-3 flex justify-between items-center shrink-0">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-base font-bold text-slate-100" id="studioProjectHeader">Select a Project from Left Pane</span>
+            <span id="studioBranchBadge" class="hidden text-xs bg-sky-950 text-sky-300 border border-sky-800 px-2 py-0.5 rounded font-mono">main</span>
+          </div>
+          <span class="text-[11px] text-slate-400" id="studioAccountSubtitle">--</span>
+        </div>
+
+        <div id="studioActionsGroup" class="hidden flex items-center gap-2">
+          <button onclick="runSyntaxValidation()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs px-3 py-1.5 rounded text-slate-200 transition">
+            🧪 Validate Syntax
+          </button>
+          <button onclick="pushChangesToGitHub()" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-3.5 py-1.5 rounded font-medium transition flex items-center gap-1">
+            🚀 Push to GitHub
+          </button>
+        </div>
+      </div>
+
+      <div id="chatHistoryWindow" class="flex-1 overflow-y-auto p-6 space-y-4">
+        <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">
+          <div class="font-bold text-sky-400 mb-1">🤖 Local AI Software Engineer Ready</div>
+          Select a project on the left, check any files you want to refactor (or create new files), and enter your instructions below.
+        </div>
+      </div>
+
+      <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0">
+        <div class="max-w-4xl mx-auto space-y-2">
+          <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
+            <span>Model: <strong id="agentModelBadge" class="text-sky-400 font-mono">Scanning...</strong></span>
+            <span id="selectedFilesSummary" class="text-slate-400 italic">0 files selected for context</span>
+          </div>
+          <div class="flex gap-2">
+            <textarea id="studioPromptInput" rows="2" 
+                      placeholder="e.g. In install.sh and model_manager.py, add multi-file context support and validate bash syntax..."
+                      class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none font-mono"></textarea>
+            <button id="studioSendBtn" onclick="executeStudioTask()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
+              ⚡ Run
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==================== VIEW 2: GITHUB ACCOUNTS & REPOS ==================== -->
+  <main id="viewGithub" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-6xl mx-auto w-full">
+    <section class="bg-slate-800 p-5 rounded-lg border border-slate-700 space-y-3">
+      <div class="flex justify-between items-center cursor-pointer" onclick="togglePatGuide()">
+        <div class="flex items-center gap-2">
+          <span class="text-lg">📖</span>
+          <h2 class="text-sm font-bold text-sky-300 uppercase tracking-wide">How to Generate a GitHub Personal Access Token (PAT)</h2>
+        </div>
+        <button id="toggleGuideBtn" class="text-xs text-slate-400 hover:text-slate-200">Show Instructions ▼</button>
+      </div>
+      
+      <div id="patGuideContent" class="hidden text-xs text-slate-300 space-y-2 border-t border-slate-700 pt-3">
+        <ol class="list-decimal list-inside space-y-1.5 text-slate-300">
+          <li>Log into your GitHub account.</li>
+          <li>Click <strong>Profile Photo (top-right)</strong> ➔ <strong>Settings</strong> ➔ <strong>Developer settings</strong>.</li>
+          <li>Click <strong>Personal access tokens</strong> ➔ <strong>Tokens (classic)</strong>.</li>
+          <li>Click <strong>Generate new token (classic)</strong>.</li>
+          <li>Check the <strong><code class="text-emerald-400 font-semibold">repo</code></strong> scope.</li>
+          <li>Click <strong>Generate token</strong> and paste the token below.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
+      <div class="flex justify-between items-center border-b border-slate-700 pb-3">
+        <div>
+          <h2 class="text-base font-semibold text-slate-100">Registered GitHub Accounts</h2>
+          <p class="text-xs text-slate-400">Add or manage multiple personal or organizational accounts.</p>
+        </div>
+        <button onclick="toggleAddAccountForm()" class="bg-sky-600 hover:bg-sky-500 text-xs px-3.5 py-1.5 rounded font-medium transition">
+          + Register New Account
+        </button>
+      </div>
+
+      <div id="addAccountForm" class="hidden bg-slate-950 p-4 rounded border border-slate-700 space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Account Label / Alias:</label>
+            <input id="newAccountLabel" type="text" placeholder="e.g. Personal or Work" 
+                   class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs focus:border-sky-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">GitHub Personal Access Token (PAT):</label>
+            <input id="newAccountToken" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" 
+                   class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs focus:border-sky-500 focus:outline-none font-mono">
+          </div>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button onclick="toggleAddAccountForm()" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded">Cancel</button>
+          <button onclick="submitAddAccount()" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-4 py-1.5 rounded font-medium">Verify & Save Account</button>
+        </div>
+      </div>
+
+      <div id="accountsList" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <p class="text-xs text-slate-500">Loading accounts...</p>
+      </div>
+    </section>
+
+    <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
+      <div class="border-b border-slate-700 pb-3">
+        <h2 class="text-base font-semibold text-slate-100">Clone Repository to Workspace</h2>
+        <p class="text-xs text-slate-400">Select an account, choose a repository and branch, and clone it locally.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">1. Choose Account:</label>
+          <select id="cloneAccountDropdown" onchange="onCloneAccountSelected()" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
+            <option value="">-- Choose Account --</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">2. Select Repository:</label>
+          <select id="cloneRepoDropdown" onchange="fetchBranchesForCloneRepo()" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
+            <option value="">-- Select account first --</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">3. Branch:</label>
+          <select id="cloneBranchDropdown" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
+            <option value="main">main</option>
+            <option value="dev">dev</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-2">
+        <button onclick="submitCloneProject()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded text-xs font-bold transition">
+          📥 Clone & Open in Studio
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==================== VIEW 3: MODEL MANAGER ==================== -->
+  <main id="viewModels" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-7xl mx-auto w-full">
+    <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+        <h2 id="catalogHeader" class="text-lg font-semibold">Available Models (Top GGUFs on Hugging Face)</h2>
+        <div class="flex flex-wrap gap-1.5 text-xs items-center">
+          <span class="text-slate-400 mr-1">Filter:</span>
+          <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">🔥 All</button>
+          <button onclick="searchAuthor('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ bartowski</button>
+          <button onclick="searchAuthor('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ unsloth</button>
+          <button onclick="searchAuthor('TheBloke')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ TheBloke</button>
+          <button onclick="searchAuthor('Qwen')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen</button>
+          <button onclick="quickSearch('Llama-3')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Llama 3</button>
+        </div>
+      </div>
+      
+      <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
+        <input id="searchInput" type="text" placeholder="Search models or creators..." 
+               onkeydown="if(event.key === 'Enter') searchModels()"
+               class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500 text-sm">
+        
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none bg-slate-950 px-3 py-2 rounded border border-slate-700">
+            <input type="checkbox" id="verifiedOnly" onchange="searchModels()" class="rounded bg-slate-900 border-slate-700 text-sky-600 focus:ring-0">
+            <span>🛡️ Verified Creators Only</span>
+          </label>
+
+          <div class="flex items-center gap-2">
+            <label for="sortSelect" class="text-xs text-slate-400 shrink-0">Sort:</label>
+            <select id="sortSelect" onchange="searchModels()" class="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
+              <option value="downloads">Most Downloads</option>
+              <option value="trust">⭐ Trust Score</option>
+              <option value="likes">Most Likes</option>
+              <option value="lastModified">Recent Release</option>
+              <option value="alphabetical">Alphabetical (A-Z)</option>
+            </select>
+          </div>
+
+          <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm transition">Search</button>
+          <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition">Reset</button>
+        </div>
+      </div>
+      
+      <div id="searchResults" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+        <p class="text-slate-400">Loading models...</p>
+      </div>
+    </section>
+
+    <!-- Active Tasks & Local Models -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <section class="bg-slate-800 p-6 rounded-lg">
+        <h2 class="text-lg font-semibold mb-4">Download Tasks</h2>
+        <div id="tasksList" class="space-y-3 text-sm text-slate-300">No active downloads</div>
+      </section>
+
+      <section class="bg-slate-800 p-6 rounded-lg space-y-4">
+        <div class="flex justify-between items-center">
+          <div>
+            <h2 class="text-lg font-semibold">Installed Models on Server</h2>
+            <span id="diskSubStat" class="text-xs text-slate-400">-- / -- GB</span>
+          </div>
+          <button onclick="unloadActiveModel(this)" class="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-xs px-3 py-1.5 rounded transition">
+            ⏹ Unload All
+          </button>
+        </div>
+        <div id="localList" class="space-y-2 text-sm text-slate-300">Scanning...</div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    let localModelSet = new Set();
+    let activeTasksMap = {};
+    let loadedModelsList = [];
+    let currentWorkspaceDir = "";
+    let currentBranch = "main";
+    let currentDisplayName = "";
+
+    function switchView(viewName) {
+      document.getElementById('viewStudio').classList.toggle('hidden', viewName !== 'studio');
+      document.getElementById('viewGithub').classList.toggle('hidden', viewName !== 'github');
+      document.getElementById('viewModels').classList.toggle('hidden', viewName !== 'models');
+
+      document.getElementById('navBtnStudio').className = viewName === 'studio' 
+        ? 'px-4 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
+        : 'px-4 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
+      
+      document.getElementById('navBtnGithub').className = viewName === 'github' 
+        ? 'px-4 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
+        : 'px-4 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
+
+      document.getElementById('navBtnModels').className = viewName === 'models' 
+        ? 'px-4 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
+        : 'px-4 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
+
+      if (viewName === 'studio') {
+        loadSidebarWorkspaces();
+      } else if (viewName === 'github') {
+        loadAccounts();
+      } else if (viewName === 'models') {
+        fetchLocalModels();
+        searchModels();
+      }
+    }
+
+    async function initHardwareInfo() {
+      try {
+        const res = await fetch('/api/system_info');
+        const data = await res.json();
+        loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
+        
+        if (data.gpu && data.gpu.has_gpu) {
+          const freeStr = data.gpu.free_vram_gb > 0 ? `${data.gpu.free_vram_gb} GB Free / ` : '';
+          document.getElementById('vramStat').innerHTML = `${freeStr}${data.gpu.total_vram_gb} GB`;
+        } else {
+          document.getElementById('vramStat').textContent = 'No GPU';
+        }
+
+        if (data.storage) {
+          document.getElementById('storageStat').innerHTML = `${data.storage.used_gb} / ${data.storage.total_gb} GB`;
+          const sub = document.getElementById('diskSubStat');
+          if (sub) sub.innerHTML = `Storage: <span class="text-amber-300">${data.storage.used_gb} GB</span> / ${data.storage.total_gb} GB (${data.storage.percent_used}%)`;
+        }
+
+        const agentBadge = document.getElementById('agentModelBadge');
+        if (agentBadge) {
+          agentBadge.textContent = loadedModelsList.length > 0 ? loadedModelsList[0] : "Default (Auto-Load)";
+        }
+      } catch(e) {}
+    }
+
+    async function loadSidebarWorkspaces() {
+      const container = document.getElementById('sidebarProjectList');
+      try {
+        const res = await fetch('/api/workspaces/active');
+        const workspaces = await res.json();
+
+        if (!workspaces || workspaces.length === 0) {
+          container.innerHTML = '<p class="text-slate-500 p-2">No local workspaces.<br><a href="#" onclick="switchView(\'github\')" class="text-sky-400 underline">Clone from GitHub</a></p>';
+          return;
+        }
+
+        container.innerHTML = workspaces.map(w => `
+          <div onclick="selectStudioProject('${w.dir_name}', '${w.display_name}', '${w.branch}')" 
+               class="p-2.5 rounded-lg border ${currentWorkspaceDir === w.dir_name ? 'bg-sky-950/40 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'} cursor-pointer transition">
+            <div class="font-bold truncate">${w.display_name}</div>
+            <div class="flex justify-between items-center text-[10px] text-slate-400 mt-1">
+              <span class="bg-slate-800 px-1.5 py-0.5 rounded font-mono">${w.branch}</span>
+              <span class="text-slate-500">Local Git</span>
+            </div>
+          </div>
+        `).join('');
+      } catch(e) {
+        container.innerHTML = '<p class="text-rose-400 p-2">Error loading workspaces.</p>';
+      }
+    }
+
+    async function selectStudioProject(dirName, displayName, branch) {
+      currentWorkspaceDir = dirName;
+      currentDisplayName = displayName;
+      currentBranch = branch;
+
+      document.getElementById('studioProjectHeader').textContent = displayName;
+      document.getElementById('studioBranchBadge').textContent = branch;
+      document.getElementById('studioBranchBadge').classList.remove('hidden');
+      document.getElementById('studioAccountSubtitle').textContent = `Workspace Path: /storage/lmstudio/workspaces/${dirName}`;
+      document.getElementById('studioActionsGroup').classList.remove('hidden');
+      document.getElementById('sidebarFilesBlock').classList.remove('hidden');
+
+      loadSidebarWorkspaces();
+      await loadWorkspaceFiles();
+    }
+
+    async function loadWorkspaceFiles() {
+      const container = document.getElementById('filesCheckboxList');
+      container.innerHTML = '<p class="text-slate-500">Scanning files...</p>';
+      try {
+        const res = await fetch(`/api/workspace/files?repo_dir_name=${encodeURIComponent(currentWorkspaceDir)}`);
+        const files = await res.json();
+
+        if (!files || files.length === 0) {
+          container.innerHTML = '<p class="text-slate-500">No editable files found.</p>';
+          updateSelectedFilesCount();
+          return;
+        }
+
+        container.innerHTML = files.map(f => `
+          <label class="flex items-center gap-2 hover:bg-slate-900 p-1 rounded cursor-pointer select-none">
+            <input type="checkbox" value="${f}" onchange="updateSelectedFilesCount()" class="rounded bg-slate-900 border-slate-700 text-sky-600 focus:ring-0">
+            <span class="truncate" title="${f}">${f}</span>
+          </label>
+        `).join('');
+        updateSelectedFilesCount();
+      } catch(e) {
+        container.innerHTML = '<p class="text-rose-400">Error loading files.</p>';
+      }
+    }
+
+    function updateSelectedFilesCount() {
+      const checked = document.querySelectorAll('#filesCheckboxList input[type="checkbox"]:checked');
+      const count = checked.length;
+      const summary = document.getElementById('selectedFilesSummary');
+      if (count === 0) {
+        summary.textContent = '0 files selected (General Question / New Script mode)';
+      } else if (count === 1) {
+        summary.textContent = `1 file selected: ${checked[0].value}`;
+      } else {
+        summary.textContent = `${count} files selected for coordinated refactoring`;
+      }
+    }
+
+    async function openNewFileDialog() {
+      if (!currentWorkspaceDir) return alert('Please select an active project first.');
+      const path = prompt('Enter relative path for the new file (e.g. tests/test_runner.py or deploy.sh):');
+      if (!path) return;
+
+      try {
+        const res = await fetch('/api/workspace/create_file', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, file_path: path, initial_content: ""})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          await loadWorkspaceFiles();
+          alert(`Created file: ${data.file_path}`);
+        } else {
+          alert('Error: ' + data.message);
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+    }
+
+    async function executeStudioTask() {
+      const promptInput = document.getElementById('studioPromptInput');
+      const instruction = promptInput.value.trim();
+      const sendBtn = document.getElementById('studioSendBtn');
+      const chatWindow = document.getElementById('chatHistoryWindow');
+
+      if (!currentWorkspaceDir) return alert('Select an active workspace from the left pane first.');
+      if (!instruction) return alert('Please enter a task or coding instruction.');
+
+      const checkedBoxes = document.querySelectorAll('#filesCheckboxList input[type="checkbox"]:checked');
+      const selectedFiles = Array.from(checkedBoxes).map(cb => cb.value);
+
+      const userMsgDiv = document.createElement('div');
+      userMsgDiv.className = 'bg-slate-800 p-4 rounded-lg border border-slate-700 text-xs text-slate-100 space-y-1';
+      userMsgDiv.innerHTML = `
+        <div class="font-bold text-sky-300 flex items-center justify-between">
+          <span>You</span>
+          <span class="text-[10px] text-slate-400 font-normal">${selectedFiles.length > 0 ? selectedFiles.join(', ') : 'No files selected'}</span>
+        </div>
+        <p class="whitespace-pre-wrap font-mono mt-1">${instruction}</p>
+      `;
+      chatWindow.appendChild(userMsgDiv);
+
+      promptInput.value = '';
+      sendBtn.disabled = true;
+      sendBtn.textContent = '⏳ Thinking...';
+
+      const aiMsgDiv = document.createElement('div');
+      aiMsgDiv.className = 'bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-emerald-300 space-y-2 font-mono';
+      aiMsgDiv.innerHTML = `<span class="animate-pulse">🤖 Loading model context & analyzing files...</span>`;
+      chatWindow.appendChild(aiMsgDiv);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+
+      try {
+        const res = await fetch('/api/agent/execute', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            repo_dir_name: currentWorkspaceDir,
+            target_files: selectedFiles,
+            instruction: instruction
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const modStr = data.modified_files && data.modified_files.length > 0 
+            ? `✓ Modified Files: ${data.modified_files.join(', ')}`
+            : `ℹ Advisory / Conversational Response`;
+
+          aiMsgDiv.innerHTML = `
+            <div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">
+              <span>🤖 Local AI Agent</span>
+              <span class="text-[10px] text-slate-400 font-normal">${modStr}</span>
+            </div>
+            <div class="text-slate-200 whitespace-pre-wrap mt-2">${data.ai_response.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+            ${data.diff && data.diff.length > 20 ? `<details class="mt-3 bg-slate-900 p-2.5 rounded border border-slate-800 text-slate-300"><summary class="cursor-pointer font-bold text-sky-400">View Git Diff Commit</summary><pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">${data.diff}</pre></details>` : ''}
+          `;
+          await loadWorkspaceFiles();
+        } else {
+          aiMsgDiv.innerHTML = `<span class="text-rose-400">❌ Error: ${data.message}</span>`;
+        }
+      } catch(e) {
+        aiMsgDiv.innerHTML = `<span class="text-rose-400">❌ Communication Error: ${e.message}</span>`;
+      }
+
+      sendBtn.disabled = false;
+      sendBtn.textContent = '⚡ Run';
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    async function runSyntaxValidation() {
+      if (!currentWorkspaceDir) return alert('Select an active project first.');
+      const chatWindow = document.getElementById('chatHistoryWindow');
+      const valDiv = document.createElement('div');
+      valDiv.className = 'bg-slate-950 p-4 rounded border border-slate-800 text-xs font-mono text-slate-300';
+      valDiv.innerHTML = `<span class="animate-pulse">🧪 Running Python & Shell script syntax validation...</span>`;
+      chatWindow.appendChild(valDiv);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+
+      try {
+        const res = await fetch('/api/workspace/validate', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
+        });
+        const data = await res.json();
+        valDiv.innerHTML = `
+          <div class="font-bold ${data.passed ? 'text-emerald-400' : 'text-rose-400'} border-b border-slate-800 pb-1">
+            ${data.passed ? '✓ Syntax Checks Passed' : '❌ Syntax Errors Detected'}
+          </div>
+          <pre class="mt-2 text-[11px] whitespace-pre-wrap">${data.logs}</pre>
+        `;
+      } catch(e) {
+        valDiv.innerHTML = `<span class="text-rose-400">Validator Error: ${e.message}</span>`;
+      }
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    async function pushChangesToGitHub() {
+      if (!currentWorkspaceDir) return alert('Select an active project first.');
+      if (!confirm(`Push verified commits to branch '${currentBranch}' on GitHub?`)) return;
+      
+      const chatWindow = document.getElementById('chatHistoryWindow');
+      const pushDiv = document.createElement('div');
+      pushDiv.className = 'bg-slate-950 p-4 rounded border border-slate-800 text-xs font-mono text-slate-300';
+      pushDiv.innerHTML = `<span class="animate-pulse">🚀 Pushing commits to GitHub origin/${currentBranch}...</span>`;
+      chatWindow.appendChild(pushDiv);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+
+      try {
+        const res = await fetch('/api/workspace/push', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          pushDiv.innerHTML = `<div class="font-bold text-emerald-400">✓ Push Successful</div><p class="mt-1">${data.message}</p>`;
+        } else {
+          pushDiv.innerHTML = `<div class="font-bold text-rose-400">❌ Push Failed</div><p class="mt-1">${data.message}</p>`;
+        }
+      } catch(e) {
+        pushDiv.innerHTML = `<span class="text-rose-400">Push Error: ${e.message}</span>`;
+      }
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    function togglePatGuide() {
+      const el = document.getElementById('patGuideContent');
+      const btn = document.getElementById('toggleGuideBtn');
+      if (el.classList.contains('hidden')) {
+        el.classList.remove('hidden');
+        btn.textContent = 'Hide Instructions ▲';
+      } else {
+        el.classList.add('hidden');
+        btn.textContent = 'Show Instructions ▼';
+      }
+    }
+
+    function toggleAddAccountForm() {
+      document.getElementById('addAccountForm').classList.toggle('hidden');
+    }
+
+    async function loadAccounts() {
+      const container = document.getElementById('accountsList');
+      const dropdown = document.getElementById('cloneAccountDropdown');
+      
+      try {
+        const res = await fetch('/api/github/accounts');
+        const accounts = await res.json();
+        
+        if (!accounts || accounts.length === 0) {
+          container.innerHTML = '<p class="text-xs text-slate-500 col-span-3">No GitHub accounts registered yet. Click "+ Register New Account" above.</p>';
+          dropdown.innerHTML = '<option value="">-- No accounts available --</option>';
+          return;
+        }
+
+        container.innerHTML = accounts.map(a => `
+          <div class="bg-slate-950 p-3 rounded border border-slate-700 flex justify-between items-center text-xs">
+            <div class="flex items-center gap-2.5 overflow-hidden">
+              <img src="${a.avatar_url || 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png'}" class="w-7 h-7 rounded-full border border-slate-700">
+              <div class="truncate">
+                <div class="font-bold text-slate-200 truncate">${a.label}</div>
+                <div class="text-[11px] text-slate-400">@${a.username} • <span class="font-mono text-[10px] text-slate-500">${a.masked_token}</span></div>
+              </div>
+            </div>
+            <button onclick="removeAccount('${a.username}')" class="text-rose-400 hover:text-rose-300 px-2 py-1 bg-slate-900 rounded border border-slate-800 text-[11px] shrink-0" title="Remove Account">
+              ✕
+            </button>
+          </div>
+        `).join('');
+
+        dropdown.innerHTML = '<option value="">-- Choose Account --</option>' + accounts.map(a => `
+          <option value="${a.username}">${a.label} (@${a.username})</option>
+        `).join('');
+      } catch(e) {
+        container.innerHTML = '<p class="text-xs text-rose-400">Error loading accounts.</p>';
+      }
+    }
+
+    async function submitAddAccount() {
+      const label = document.getElementById('newAccountLabel').value.trim();
+      const token = document.getElementById('newAccountToken').value.trim();
+
+      if (!token) return alert('Please enter a valid GitHub token');
+
+      try {
+        const res = await fetch('/api/github/accounts/add', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({token: token, label: label})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert(`Account @${data.username} registered successfully!`);
+          document.getElementById('newAccountLabel').value = '';
+          document.getElementById('newAccountToken').value = '';
+          toggleAddAccountForm();
+          loadAccounts();
+        } else {
+          alert('Failed to add account: ' + data.message);
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+    }
+
+    async function removeAccount(username) {
+      if (!confirm(`Are you sure you want to remove account @${username}?`)) return;
+      try {
+        const res = await fetch('/api/github/accounts/remove', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({username: username})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          loadAccounts();
+        } else {
+          alert('Error: ' + data.message);
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+    }
+
+    async function onCloneAccountSelected() {
+      const username = document.getElementById('cloneAccountDropdown').value;
+      const repoDropdown = document.getElementById('cloneRepoDropdown');
+      if (!username) {
+        repoDropdown.innerHTML = '<option value="">-- Select account first --</option>';
+        return;
+      }
+
+      repoDropdown.innerHTML = '<option value="">Loading repositories...</option>';
+      try {
+        const res = await fetch(`/api/github/repos?account_username=${encodeURIComponent(username)}`);
+        const repos = await res.json();
+        if (Array.isArray(repos) && repos.length > 0) {
+          repoDropdown.innerHTML = repos.map(r => `
+            <option value="${r.full_name}">${r.is_private ? '🔒 ' : ''}${r.full_name}</option>
+          `).join('');
+          fetchBranchesForCloneRepo();
+        } else {
+          repoDropdown.innerHTML = '<option value="">No repositories found</option>';
+        }
+      } catch(e) {
+        repoDropdown.innerHTML = '<option value="">Error loading repos</option>';
+      }
+    }
+
+    async function fetchBranchesForCloneRepo() {
+      const username = document.getElementById('cloneAccountDropdown').value;
+      const repoFullName = document.getElementById('cloneRepoDropdown').value;
+      const branchSelect = document.getElementById('cloneBranchDropdown');
+      if (!repoFullName || !username) return;
+
+      try {
+        const res = await fetch(`/api/github/branches?account_username=${encodeURIComponent(username)}&repo_full_name=${encodeURIComponent(repoFullName)}`);
+        const branches = await res.json();
+        branchSelect.innerHTML = branches.map(b => `<option value="${b}">${b}</option>`).join('');
+      } catch(e) {}
+    }
+
+    async function submitCloneProject() {
+      const username = document.getElementById('cloneAccountDropdown').value;
+      const repoFullName = document.getElementById('cloneRepoDropdown').value;
+      const branch = document.getElementById('cloneBranchDropdown').value;
+
+      if (!username || !repoFullName) return alert('Please select both an account and a repository');
+
+      try {
+        const res = await fetch('/api/github/clone', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({account_username: username, repo_full_name: repoFullName, branch: branch})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          switchView('studio');
+          selectStudioProject(data.dir_name, data.display_name, data.branch);
+        } else {
+          alert('Clone failed: ' + data.message);
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+    }
+
+    function quickSearch(tag) {
+      document.getElementById('searchInput').value = tag;
+      searchModels();
+    }
+
+    function searchAuthor(author) {
+      document.getElementById('searchInput').value = author;
+      document.getElementById('verifiedOnly').checked = false;
+      searchModels();
+    }
+
+    async function searchModels() {
+      const q = document.getElementById('searchInput').value.trim();
+      const sortBy = document.getElementById('sortSelect').value;
+      const verifiedOnly = document.getElementById('verifiedOnly').checked;
+      const container = document.getElementById('searchResults');
+      const header = document.getElementById('catalogHeader');
+      const sortLabel = document.getElementById('sortSelect').selectedOptions[0].text;
+      
+      header.textContent = q === "" ? `All Available Models (${sortLabel})` : `Search Results for "${q}" (${sortLabel})`;
+      container.innerHTML = '<p class="text-slate-400">Loading catalog from Hugging Face...</p>';
+      
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort_by=${encodeURIComponent(sortBy)}&verified_only=${verifiedOnly}`);
+        let models = await res.json();
+        container.innerHTML = '';
+        
+        if (!models || models.length === 0) {
+          container.innerHTML = '<p class="text-slate-400">No GGUF models found.</p>';
+          return;
+        }
+
+        if (sortBy === 'alphabetical') {
+          models.sort((a, b) => (a.model_name || '').localeCompare(b.model_name || '', undefined, { sensitivity: 'base' }));
+        }
+
+        models.forEach(m => {
+          const card = document.createElement('div');
+          card.className = 'bg-slate-950 p-4 rounded border border-slate-700 space-y-3';
+          
+          const verifiedBadge = m.is_verified 
+            ? `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer">🛡️ ${m.maker}</button>`
+            : `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition cursor-pointer">${m.maker}</button>`;
+
+          const trustBadge = `<span class="text-[10px] bg-slate-800 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono">⭐ ${m.trust_score}/100</span>`;
+
+          card.innerHTML = `
+            <div class="flex justify-between items-start">
+              <div class="overflow-hidden pr-2">
+                <div class="flex items-center gap-1.5">
+                  ${verifiedBadge}
+                  ${trustBadge}
+                </div>
+                <h3 class="font-bold text-slate-100 text-base mt-1.5 truncate" title="${m.model_name}">${m.model_name}</h3>
+                <div class="text-[11px] text-slate-400 mt-0.5">
+                  Author: <button onclick="searchAuthor('${m.maker}')" class="font-semibold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer">${m.maker}</button> • Updated: ${m.lastModified || 'Recent'}
+                </div>
+              </div>
+              <div class="text-right text-xs text-slate-400 shrink-0">
+                <div>⬇ ${(m.downloads || 0).toLocaleString()}</div>
+                <div>❤ ${(m.likes || 0).toLocaleString()}</div>
+              </div>
+            </div>
+            <button onclick="toggleFiles('${m.id}', this)" class="toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">
+                  Inspect Quantizations & Memory Fit
+            </button>
+            <div class="file-container mt-3 hidden space-y-2"></div>
+          `;
+          container.appendChild(card);
+        });
+      } catch(err) {
+        container.innerHTML = '<p class="text-rose-400">Error retrieving models from Hugging Face.</p>';
+      }
+    }
+
+    async function toggleFiles(repoId, btn) {
+      const parent = btn.parentElement;
+      const fileContainer = parent.querySelector('.file-container');
+      
+      if (!fileContainer.classList.contains('hidden')) {
+        fileContainer.classList.add('hidden');
+        btn.textContent = 'Inspect Quantizations & Memory Fit';
+        btn.className = 'toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition';
+        return;
+      }
+
+      fileContainer.classList.remove('hidden');
+      btn.textContent = '▲ Minimize Quantizations';
+      btn.className = 'toggle-btn w-full text-xs bg-slate-700 hover:bg-slate-600 border border-slate-500 text-sky-300 px-3 py-1.5 rounded transition';
+      fileContainer.innerHTML = '<span class="text-xs text-slate-500">Fetching file metadata & calculating VRAM footprint...</span>';
+      
+      const res = await fetch(`/api/model_files?repo_id=${encodeURIComponent(repoId)}`);
+      const data = await res.json();
+      fileContainer.innerHTML = '';
+
+      if (!data.files || data.files.length === 0) {
+        fileContainer.innerHTML = '<span class="text-xs text-slate-500">No .gguf files found in repository.</span>';
+        return;
+      }
+
+      const table = document.createElement('div');
+      table.className = 'space-y-2';
+
+      data.files.forEach(f => {
+        let fitBadge = '';
+        if (f.fit_status === 'fits_gpu') {
+          fitBadge = '<span class="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded font-medium">Fits GPU VRAM</span>';
+        } else if (f.fit_status === 'split_gpu_ram') {
+          fitBadge = '<span class="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-1.5 py-0.5 rounded font-medium">Split GPU + RAM</span>';
+        } else if (f.fit_status === 'fits_ram') {
+          fitBadge = '<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded font-medium">Fits System RAM</span>';
+        } else if (f.fit_status === 'exceeds') {
+          fitBadge = '<span class="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-medium">Exceeds Memory</span>';
+        }
+
+        const isDownloaded = f.is_downloaded || localModelSet.has(f.group_name);
+        const isDownloading = f.is_downloading || (activeTasksMap[f.group_name] && activeTasksMap[f.group_name].status === 'downloading');
+
+        let btnHtml = '';
+        const btnId = `btn-${btoa(f.group_name).replace(/=/g, '')}`;
+        const filesPayload = encodeURIComponent(JSON.stringify(f.paths));
+
+        if (isDownloaded) {
+          btnHtml = `
+            <button id="${btnId}" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">
+              ✓ Installed
+            </button>`;
+        } else if (isDownloading) {
+          btnHtml = `
+            <button id="${btnId}" disabled class="bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1">
+              ⏳ Downloading...
+            </button>`;
+        } else {
+          btnHtml = `
+            <button id="${btnId}" onclick="triggerDownload('${repoId}', '${f.group_name}', '${filesPayload}', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition">
+              Download
+            </button>`;
+        }
+
+        const shardBadge = f.is_sharded ? `<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded ml-1 font-mono">${f.shard_count} Shards</span>` : '';
+
+        const row = document.createElement('div');
+        row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
+        row.innerHTML = `
+          <div class="space-y-1 overflow-hidden pr-2">
+            <div class="font-medium text-sky-200 truncate flex items-center" title="${f.display_name}">
+              <span class="truncate">${f.group_name}</span>
+              ${shardBadge}
+            </div>
+            <div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">
+              <span>Weight: <strong class="text-slate-200">${f.weight}</strong></span>
+              <span>•</span>
+              <span>Variant: <strong class="text-slate-200">${f.variant}</strong></span>
+              <span>•</span>
+              <span>Size: <strong class="text-emerald-400">${f.size_gb}</strong></span>
+              <span>(${f.est_vram} Req)</span>
+              ${fitBadge}
+            </div>
+            <div class="text-[11px] text-slate-400 italic bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/80">
+              ℹ ${f.description}
+            </div>
+          </div>
+          ${btnHtml}
+        `;
+        table.appendChild(row);
+      });
+      fileContainer.appendChild(table);
+    }
+
+    async function triggerDownload(repoId, groupName, filesPayloadEncoded, btn) {
+      btn.disabled = true;
+      btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
+      btn.innerHTML = "⏳ Downloading...";
+
+      const filePaths = JSON.parse(decodeURIComponent(filesPayloadEncoded));
+      await fetch('/api/download', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({repo_id: repoId, group_name: groupName, files: filePaths})
+      });
+      updateTasks();
+    }
+
+    async function loadModelIntoGPU(modelPath, btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Loading (32k ctx)...';
+      btn.className = 'bg-sky-950 text-sky-300 border border-sky-800 px-2.5 py-1 rounded text-xs animate-pulse';
+
+      try {
+        const res = await fetch('/api/load_model', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({model_path: modelPath, gpu_offload: 'max', context_length: 32768, ttl: 3600})
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') {
+          alert('Load Failure Output from LMS:\\n\\n' + (data.message || JSON.stringify(data)));
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+      await initHardwareInfo();
+      await fetchLocalModels();
+    }
+
+    async function unloadActiveModel(btn) {
+      if (btn) btn.textContent = '⏳ Unloading...';
+      try {
+        await fetch('/api/unload_model', {method: 'POST'});
+      } catch(e) {}
+      if (btn) btn.textContent = '⏹ Unload All';
+      await initHardwareInfo();
+      await fetchLocalModels();
+    }
+
+    async function deleteModel(filename) {
+      if (!confirm(`Are you sure you want to delete ${filename} to free up space?`)) return;
+      const res = await fetch('/api/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({filename: filename})
+      });
+      const data = await res.json();
+      localModelSet.delete(filename);
+      if (data.storage) renderStorageMetrics(data.storage);
+      fetchLocalModels();
+    }
+
+    async function updateTasks() {
+      const res = await fetch('/api/tasks');
+      const data = await res.json();
+      activeTasksMap = data;
+      const list = document.getElementById('tasksList');
+      if (!list) return;
+      
+      if (Object.keys(data).length === 0) {
+        list.innerHTML = '<span class="text-slate-500">No active downloads</span>';
+        return;
+      }
+
+      list.innerHTML = Object.entries(data).map(([file, info]) => {
+        const pct = info.percent || 0;
+        const isDone = info.status === 'completed';
+        const barColor = isDone ? 'bg-emerald-500' : 'bg-sky-500';
+
+        return `
+          <div class="bg-slate-950 p-3 rounded border border-slate-700 space-y-2">
+            <div class="flex justify-between items-center text-xs">
+              <div class="font-medium truncate pr-2">${file}</div>
+              <div class="text-sky-300 font-mono shrink-0">${info.progress_str || info.status}</div>
+            </div>
+            <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+              <div class="${barColor} h-1.5 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function fetchLocalModels() {
+      const res = await fetch('/api/local_models');
+      const data = await res.json();
+      const list = document.getElementById('localList');
+      if (!list) return;
+      localModelSet.clear();
+      loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
+
+      if (data.storage) renderStorageMetrics(data.storage);
+
+      if (!data.files || data.files.length === 0) {
+        list.innerHTML = '<span class="text-slate-500">No GGUF models on disk</span>';
+        return;
+      }
+
+      data.files.forEach(m => localModelSet.add(m.filename));
+
+      list.innerHTML = data.files.map(m => {
+        const fLower = m.filename.toLowerCase().replace('.gguf', '');
+        const pLower = m.path.toLowerCase();
+        
+        const isLoaded = loadedModelsList.some(loaded => {
+          if (!loaded || loaded.length < 3) return false;
+          const cleanSlug = loaded.replace(/[^a-z0-9]/g, '');
+          const cleanF = fLower.replace(/[^a-z0-9]/g, '');
+          return cleanF.includes(cleanSlug) || cleanSlug.includes(cleanF) || pLower.includes(loaded);
+        });
+        
+        let actionBtn = '';
+        if (isLoaded) {
+          actionBtn = `
+            <div class="flex items-center gap-1.5">
+              <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">
+                ⚡ Loaded
+              </span>
+              <button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">
+                ⏹
+              </button>
+            </div>`;
+        } else {
+          actionBtn = `
+            <button onclick="loadModelIntoGPU('${m.path}', this)" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1">
+              🚀 Load to GPU
+            </button>`;
+        }
+
+        return `
+          <div class="flex justify-between items-center bg-slate-950 p-3 rounded border ${isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700'} text-xs gap-3">
+            <div class="truncate pr-2">
+              <div class="font-medium text-slate-200 truncate" title="${m.filename}">${m.filename}</div>
+              <div class="text-slate-400 text-[10px] mt-0.5">Weight: ${m.weight} | Variant: ${m.variant}</div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">${m.size_gb}</span>
+              ${actionBtn}
+              <button onclick="deleteModel('${m.filename}')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">
+                🗑️
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    initHardwareInfo();
+    switchView('studio');
+    setInterval(updateTasks, 1000);
+    setInterval(initHardwareInfo, 5000);
+  </script>
+</body>
+</html>

@@ -10,8 +10,10 @@ SERVICE_USER="lmstudio"
 SERVICE_GROUP="lmstudio"
 BASE_STORAGE="/storage"
 APP_DIR="${BASE_STORAGE}/lmstudio"
+CORE_DIR="${APP_DIR}/core"
+WEB_DIR="${APP_DIR}/web"
 MODELS_DIR="${APP_DIR}/models"
-WORKSPACE_DIR="${APP_DIR}/workspace"
+WORKSPACES_DIR="${APP_DIR}/workspaces"
 CONFIG_FILE="${APP_DIR}/.install_config"
 LM_PORT="1234"
 WEBUI_PORT="3000"
@@ -25,38 +27,43 @@ fi
 
 echo "================================================================="
 if [ "$IS_UPDATE" = true ]; then
-  echo "        LM Studio Stack Updater (Non-Interactive Mode)          "
+  echo "        LM Studio Modular Stack Updater (Non-Interactive)        "
 else
-  echo "        LM Studio Stack Initial Installer                        "
+  echo "        LM Studio Modular Stack Initial Installer                "
 fi
 echo "   Target Directory: ${APP_DIR}                                  "
 echo "================================================================="
 
 # 1. Check Mount Point
 if [ ! -d "$BASE_STORAGE" ]; then
-  echo "[-] Base storage mount '${BASE_STORAGE}' not found. Please ensure the drive is mounted."
+  echo "[-] Base storage mount '${BASE_STORAGE}' not found. Please ensure the storage volume is mounted."
   exit 1
 fi
 
-# 2. Setup Dedicated User & Directories
-echo "[+] Ensuring dedicated user '${SERVICE_USER}' and workspace structure..."
+# 2. Setup Dedicated User & Directory Hierarchy
+echo "[+] Ensuring service user '${SERVICE_USER}' and modular directory layout..."
 if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
   useradd -r -m -d "$APP_DIR" -s /bin/bash -c "LM Studio Service Account" "$SERVICE_USER"
 else
   usermod -d "$APP_DIR" -s /bin/bash "$SERVICE_USER"
 fi
 
-mkdir -p "$APP_DIR" "$MODELS_DIR" "$WORKSPACE_DIR" "${APP_DIR}/.cache/lm-studio/models" "${APP_DIR}/.lmstudio/models"
-chmod 755 "$APP_DIR"
-chmod -R u+rwX,go+rX "$APP_DIR"
+mkdir -p "$APP_DIR" "$CORE_DIR" "$WEB_DIR" "$MODELS_DIR" "$WORKSPACES_DIR" \
+         "${APP_DIR}/.cache/lm-studio/models" "${APP_DIR}/.lmstudio/models"
+
+chmod 755 "$APP_DIR" "$CORE_DIR" "$WEB_DIR" "$MODELS_DIR" "$WORKSPACES_DIR"
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$APP_DIR"
 
+# Configure Git safe directory globally across user accounts
+git config --global --add safe.directory "*" 2>/dev/null || true
+sudo -u "$SERVICE_USER" git config --global --add safe.directory "*" 2>/dev/null || true
+
 # 3. Install System & Python Dependencies
-echo "[+] Installing system packages and Python runtime..."
+echo "[+] Installing system packages and runtime dependencies..."
 apt-get update -y
 apt-get install -y curl ca-certificates jq gnupg git python3 python3-pip python3-venv python3-uvicorn python3-fastapi python3-requests
 
-# 4. Install / Verify Docker Engine
+# 4. Install / Verify Docker Engine (for Open WebUI)
 if ! command -v docker >/dev/null 2>&1; then
   echo "[+] Installing Docker Engine..."
   install -m 0755 -d /etc/apt/keyrings
@@ -70,10 +77,12 @@ if ! command -v docker >/dev/null 2>&1; then
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi
 
-echo "[+] Pre-fetching official Aider AI Agent container..."
-docker pull paulgauthier/aider:latest >/dev/null 2>&1 || true
+usermod -aG docker "$SERVICE_USER" 2>/dev/null || true
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+  usermod -aG docker "$SUDO_USER" 2>/dev/null || true
+fi
 
-# 5. Install / Update LM Studio CLI & llmster Daemon
+# 5. Install / Update LM Studio CLI & Daemon
 echo ""
 echo "--- [ LM Studio Engine Check ] ---"
 LMS_BIN=""
@@ -129,77 +138,35 @@ find "$MODELS_DIR" -type f -name "*.gguf" | while read -r gguf_path; do
 done
 echo "[✓] Model indexing complete."
 
-# 7. Fetch Model Manager UI
+# 7. Fetch & Deploy Modular Application Files
 echo ""
-echo "--- [ Updating Model Manager Script ] ---"
+echo "--- [ Deploying Modular Studio Files ] ---"
+
+# Root entrypoint
 curl -fsSL "${REPO_RAW_URL}/model_manager.py" -o "${APP_DIR}/model_manager.py"
-chmod 755 "${APP_DIR}/model_manager.py"
-chown "${SERVICE_USER}:${SERVICE_GROUP}" "${APP_DIR}/model_manager.py"
 
-# 8. Configure AI Agent Workspace & Guardrails
-echo ""
-echo "--- [ Configuring AI Agent Workspace ] ---"
-mkdir -p "$WORKSPACE_DIR"
+# Core backend modules
+touch "${CORE_DIR}/__init__.py"
+curl -fsSL "${REPO_RAW_URL}/core/hardware.py" -o "${CORE_DIR}/hardware.py"
+curl -fsSL "${REPO_RAW_URL}/core/models.py" -o "${CORE_DIR}/models.py"
+curl -fsSL "${REPO_RAW_URL}/core/github_vault.py" -o "${CORE_DIR}/github_vault.py"
+curl -fsSL "${REPO_RAW_URL}/core/agent_engine.py" -o "${CORE_DIR}/agent_engine.py"
 
-if [ ! -d "${WORKSPACE_DIR}/.git" ]; then
-  (
-    cd "$WORKSPACE_DIR"
-    git init
-    git config user.name "AI Coding Agent"
-    git config user.email "agent@lmstudio.local"
-  )
-fi
+# Frontend HTML/JS Studio UI
+curl -fsSL "${REPO_RAW_URL}/web/index.html" -o "${WEB_DIR}/index.html"
 
-cp -f "${APP_DIR}/model_manager.py" "${WORKSPACE_DIR}/" 2>/dev/null || true
-curl -fsSL "${REPO_RAW_URL}/install.sh" -o "${WORKSPACE_DIR}/install.sh" 2>/dev/null || true
+# Verify python syntax before activating
+echo "[*] Validating Python module compilation..."
+python3 -m py_compile "${APP_DIR}/model_manager.py"
+python3 -m py_compile "${CORE_DIR}/hardware.py"
+python3 -m py_compile "${CORE_DIR}/models.py"
+python3 -m py_compile "${CORE_DIR}/github_vault.py"
+python3 -m py_compile "${CORE_DIR}/agent_engine.py"
 
-# Pre-Push Syntax Validator Script
-cat > "${WORKSPACE_DIR}/validate-and-push.sh" << 'EOF'
-#!/usr/bin/env bash
-set -e
+chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$APP_DIR"
+echo "[✓] All modular application files deployed and verified."
 
-echo "[*] Validating Python syntax..."
-find . -maxdepth 2 -name "*.py" -exec python3 -m py_compile {} +
-
-echo "[*] Validating Shell script syntax..."
-find . -maxdepth 2 -name "*.sh" -exec bash -n {} +
-
-echo "[✓] All syntax tests passed!"
-
-TARGET_BRANCH="${1:-dev}"
-echo "[*] Pushing verified changes to branch '${TARGET_BRANCH}'..."
-git push origin "$TARGET_BRANCH"
-EOF
-chmod +x "${WORKSPACE_DIR}/validate-and-push.sh"
-
-# Global CLI launcher for the workspace using Docker runtime
-cat > /usr/local/bin/lms-agent << 'EOF'
-#!/usr/bin/env bash
-WORKSPACE="/storage/lmstudio/workspace"
-mkdir -p "$WORKSPACE"
-
-echo "====================================================="
-echo "   LM Studio AI Agent Workspace: ${WORKSPACE}        "
-echo "   Connecting to: http://127.0.0.1:1234/v1          "
-echo "====================================================="
-
-docker run -it --rm \
-  --net=host \
-  -v "${WORKSPACE}:${WORKSPACE}" \
-  -v "${WORKSPACE}:/app" \
-  -w /app \
-  -e OPENAI_API_BASE="http://127.0.0.1:1234/v1" \
-  -e OPENAI_API_KEY="lm-studio" \
-  paulgauthier/aider:latest \
-  --model openai/gemma-4-26b-a4b-it-ud \
-  --edit-format diff \
-  --auto-commits \
-  model_manager.py install.sh "$@"
-EOF
-chmod +x /usr/local/bin/lms-agent
-chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$WORKSPACE_DIR"
-
-# 9. Write Systemd Services
+# 8. Configure & Start Systemd Services
 echo ""
 echo "--- [ Systemd Service Configuration ] ---"
 
@@ -238,6 +205,7 @@ User=${SERVICE_USER}
 Group=${SERVICE_GROUP}
 WorkingDirectory=${APP_DIR}
 Environment=HOME=${APP_DIR}
+Environment=PYTHONPATH=${APP_DIR}
 Environment=PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/usr/bin/python3 ${APP_DIR}/model_manager.py
 Restart=always
@@ -251,7 +219,7 @@ systemctl daemon-reload
 systemctl enable --now lmstudio.service modelmanager.service
 systemctl restart lmstudio.service modelmanager.service
 
-# 10. Open WebUI Container Management
+# 9. Open WebUI Container Management
 echo ""
 echo "--- [ Open WebUI Container Management ] ---"
 INSTALL_WEBUI="y"
@@ -292,7 +260,7 @@ else
   ENABLE_WEBUI_CONF="false"
 fi
 
-# 11. Save Configuration
+# 10. Save Configuration
 cat > "$CONFIG_FILE" <<EOF
 INSTALLED_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 ENABLE_OPEN_WEBUI="${ENABLE_WEBUI_CONF}"
@@ -305,13 +273,10 @@ chmod 600 "$CONFIG_FILE"
 SERVER_IP=$(hostname -I | awk '{print $1}')
 echo ""
 echo "================================================================="
-echo "                   SETUP & AGENT READY                           "
+echo "                  MODULAR STACK READY                            "
 echo "================================================================="
 echo "• LM Studio API:          http://${SERVER_IP}:${LM_PORT}/v1"
-echo "• Model Manager UI:       http://${SERVER_IP}:${MANAGER_PORT}"
+echo "• Code & Model Studio:    http://${SERVER_IP}:${MANAGER_PORT}"
 echo "• Open WebUI:             http://${SERVER_IP}:${WEBUI_PORT}"
-echo "• AI Agent Workspace:     ${WORKSPACE_DIR}"
-echo ""
-echo "To start coding with the local AI agent, run:"
-echo "   lms-agent"
+echo "• Workspaces Root:        ${WORKSPACES_DIR}"
 echo "================================================================="
