@@ -73,38 +73,24 @@ def get_lms_bin():
     return shutil.which("lms") or "lms"
 
 def get_loaded_models():
-    """Extracts identifiers of loaded models from `lms ps` and the API."""
-    loaded = set()
+    """Extracts identifiers of loaded models non-blockingly from `lms ps`."""
+    loaded = []
     lms = get_lms_bin()
-    
     try:
-        res = subprocess.run([lms, "ps"], env=LMS_ENV, capture_output=True, text=True)
+        res = subprocess.run([lms, "ps"], env=LMS_ENV, capture_output=True, text=True, timeout=2)
         if res.returncode == 0:
-            lines = res.stdout.strip().split("\n")
-            for line in lines:
+            for line in res.stdout.strip().split("\n"):
                 l_str = line.strip()
                 if not l_str or "IDENTIFIER" in l_str or "---" in l_str or "No models" in l_str:
                     continue
                 parts = l_str.split()
                 if parts:
-                    loaded.add(parts[0].lower())
+                    loaded.append(parts[0].lower())
                     if len(parts) > 1:
-                        loaded.add(parts[1].lower())
+                        loaded.append(parts[1].lower())
     except Exception:
         pass
-
-    try:
-        r = requests.get("http://127.0.0.1:1234/v1/models", timeout=1.5)
-        if r.status_code == 200:
-            m_data = r.json().get("data", [])
-            for item in m_data:
-                mid = item.get("id", "").lower()
-                if mid and "nomic-embed" not in mid:
-                    loaded.add(mid)
-    except Exception:
-        pass
-
-    return list(loaded)
+    return list(set(loaded))
 
 def calculate_trust_score(downloads: int, likes: int, is_verified: bool) -> int:
     score = 35 if is_verified else 0
@@ -214,7 +200,7 @@ def parse_model_metadata(filename: str, repo_id: str):
 def fetch_single_file_size(repo_id: str, rel_path: str):
     url = f"https://huggingface.co/{repo_id}/resolve/main/{rel_path}"
     try:
-        r = requests.head(url, headers={"Accept-Encoding": "identity"}, allow_redirects=True, timeout=6)
+        r = requests.head(url, headers={"Accept-Encoding": "identity"}, allow_redirects=True, timeout=5)
         if r.status_code == 200:
             return int(r.headers.get("Content-Length", 0))
     except Exception:
@@ -400,9 +386,8 @@ def load_model(req: LoadRequest):
     fname = os.path.basename(req.model_path)
     ident = req.identifier or fname.replace(".gguf", "")
 
-    # 1. Unload all running models
+    # 1. Unload running models first
     subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True)
-    subprocess.run([lms, "unload", ident], env=LMS_ENV, capture_output=True)
 
     # 2. Try loading by absolute file path
     cmd = [
@@ -914,10 +899,12 @@ def get_ui():
             const fLower = m.filename.toLowerCase().replace('.gguf', '');
             const pLower = m.path.toLowerCase();
             
-            // Fuzzy match active slug from lms ps
+            // Compare normalized slugs
             const isLoaded = loadedModelsList.some(loaded => {
               if (!loaded || loaded.length < 3) return false;
-              return fLower.includes(loaded) || loaded.includes(fLower) || pLower.includes(loaded);
+              const cleanSlug = loaded.replace(/[^a-z0-9]/g, '');
+              const cleanF = fLower.replace(/[^a-z0-9]/g, '');
+              return cleanF.includes(cleanSlug) || cleanSlug.includes(cleanF) || pLower.includes(loaded);
             });
             
             let actionBtn = '';
@@ -925,7 +912,7 @@ def get_ui():
               actionBtn = `
                 <div class="flex items-center gap-1.5">
                   <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">
-                    ⚡ Loaded
+                    ⚡ Loaded (32k)
                   </span>
                   <button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">
                     ⏹
