@@ -1,4 +1,3 @@
-sudo tee /storage/lmstudio/model_manager.py > /dev/null <<'EOF'
 import os
 import subprocess
 import threading
@@ -40,17 +39,17 @@ def run_download_job(repo_id: str, filename: str):
 
 @app.get("/api/search")
 def search_hf(q: str = "llama"):
-    # Query Hugging Face API for GGUF tagged models
     url = f"https://huggingface.co/api/models?search={q}&filter=gguf&sort=downloads&direction=-1&limit=15"
     res = requests.get(url).json()
     results = []
-    for m in res:
-        results.append({
-            "id": m.get("id"),
-            "downloads": m.get("downloads", 0),
-            "likes": m.get("likes", 0),
-            "lastModified": m.get("lastModified", "")
-        })
+    if isinstance(res, list):
+        for m in res:
+            results.append({
+                "id": m.get("id"),
+                "downloads": m.get("downloads", 0),
+                "likes": m.get("likes", 0),
+                "lastModified": m.get("lastModified", "")
+            })
     return results
 
 @app.get("/api/model_files")
@@ -217,4 +216,3 @@ def get_ui():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)
-EOF
