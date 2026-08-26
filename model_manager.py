@@ -1,5 +1,6 @@
 import os
 import re
+import glob
 import shutil
 import subprocess
 import threading
@@ -20,56 +21,119 @@ class DownloadRequest(BaseModel):
     filename: str
 
 def get_system_hardware_info():
-    """Detect both System RAM and NVIDIA GPU VRAM independently."""
-    # 1. System RAM Detection
+    """
+    Detects System RAM from /proc/meminfo and GPU VRAM via:
+    1. /sys/class/drm kernel interface (works on open kernel modules/drivers)
+    2. /sys/bus/pci device resources
+    3. nvidia-smi utility (if installed)
+    """
+    # --- 1. System RAM Detection ---
     sys_ram_total_gb = 0.0
     sys_ram_avail_gb = 0.0
     try:
         with open('/proc/meminfo', 'r') as f:
             meminfo = f.read()
-        total_match = re.search(r'MemTotal:\s+(\d+)', meminfo)
-        avail_match = re.search(r'MemAvailable:\s+(\d+)', meminfo)
-        if total_match:
-            sys_ram_total_gb = round(int(total_match.group(1)) / (1024**2), 2)
-        if avail_match:
-            sys_ram_avail_gb = round(int(avail_match.group(1)) / (1024**2), 2)
+        total_m = re.search(r'MemTotal:\s+(\d+)\s+kB', meminfo)
+        avail_m = re.search(r'MemAvailable:\s+(\d+)\s+kB', meminfo)
+        if total_m:
+            sys_ram_total_gb = round(int(total_m.group(1)) / (1024**2), 2)
+        if avail_m:
+            sys_ram_avail_gb = round(int(avail_m.group(1)) / (1024**2), 2)
     except Exception:
         pass
 
-    # 2. NVIDIA GPU VRAM Detection
+    # --- 2. GPU Detection via Kernel DRM & sysfs (No nvidia-smi required) ---
     gpu_found = False
-    gpu_name = "N/A"
+    gpu_name = "NVIDIA / Dedicated GPU"
     gpu_vram_total_gb = 0.0
     gpu_vram_free_gb = 0.0
 
-    nvidia_smi_path = shutil.which("nvidia-smi") or "/usr/bin/nvidia-smi"
-    if os.path.exists(nvidia_smi_path):
-        try:
-            cmd = [
-                nvidia_smi_path,
-                "--query-gpu=name,memory.total,memory.free",
-                "--format=csv,nounits,noheader"
-            ]
-            output = subprocess.check_output(cmd, encoding='utf-8').strip()
-            if output:
-                lines = output.split('\n')
-                total_mb = 0.0
-                free_mb = 0.0
-                names = []
-                for line in lines:
-                    parts = [p.strip() for p in line.split(',')]
-                    if len(parts) >= 3:
-                        names.append(parts[0])
-                        total_mb += float(parts[1])
-                        free_mb += float(parts[2])
+    # Method A: Check DRM subsystem (e.g. /sys/class/drm/card*/device)
+    drm_cards = glob.glob('/sys/class/drm/card[0-9]*/device')
+    for card in drm_cards:
+        # Check for VRAM sysfs files (common on open drivers)
+        vram_total_file = os.path.join(card, "mem_info_vram_total")
+        vram_used_file = os.path.join(card, "mem_info_vram_used")
+        
+        if os.path.exists(vram_total_file):
+            try:
+                with open(vram_total_file, 'r') as f:
+                    v_tot_bytes = int(f.read().strip())
+                v_used_bytes = 0
+                if os.path.exists(vram_used_file):
+                    with open(vram_used_file, 'r') as f:
+                        v_used_bytes = int(f.read().strip())
                 
-                if total_mb > 0:
+                tot_gb = round(v_tot_bytes / (1024**3), 2)
+                free_gb = round((v_tot_bytes - v_used_bytes) / (1024**3), 2)
+                if tot_gb > 0.5:  # Filter out virtual dummy frames
                     gpu_found = True
-                    gpu_name = ", ".join(list(dict.fromkeys(names)))
-                    gpu_vram_total_gb = round(total_mb / 1024, 2)
-                    gpu_vram_free_gb = round(free_mb / 1024, 2)
-        except Exception:
-            gpu_found = False
+                    gpu_vram_total_gb += tot_gb
+                    gpu_vram_free_gb += free_gb
+            except Exception:
+                pass
+
+    # Method B: Check PCI device BAR size for NVIDIA GPUs (Vendor 0x10de)
+    if not gpu_found:
+        pci_devices = glob.glob('/sys/bus/pci/devices/*')
+        for dev in pci_devices:
+            vendor_file = os.path.join(dev, "vendor")
+            resource_file = os.path.join(dev, "resource")
+            if os.path.exists(vendor_file) and os.path.exists(resource_file):
+                try:
+                    with open(vendor_file, 'r') as f:
+                        vendor = f.read().strip().lower()
+                    # 0x10de = NVIDIA, 0x1002 = AMD
+                    if "0x10de" in vendor or "0x1002" in vendor:
+                        # Inspect memory BAR windows
+                        with open(resource_file, 'r') as f:
+                            res_lines = f.readlines()
+                        max_bar_bytes = 0
+                        for line in res_lines:
+                            parts = line.strip().split()
+                            if len(parts) >= 3:
+                                start = int(parts[0], 16)
+                                end = int(parts[1], 16)
+                                if end > start:
+                                    bar_size = end - start + 1
+                                    # Large BAR memory windows (>1GB) represent physical VRAM aperture
+                                    if bar_size > max_bar_bytes and bar_size >= (1024**3):
+                                        max_bar_bytes = bar_size
+                        
+                        if max_bar_bytes > 0:
+                            gpu_found = True
+                            gpu_vram_total_gb = round(max_bar_bytes / (1024**3), 2)
+                            gpu_vram_free_gb = gpu_vram_total_gb  # Static estimation via hardware BAR
+                            gpu_name = "NVIDIA GPU (Open Driver / Sysfs)"
+                            break
+                except Exception:
+                    pass
+
+    # Method C: Try nvidia-smi if installed
+    if not gpu_found:
+        nvidia_smi_path = shutil.which("nvidia-smi") or "/usr/bin/nvidia-smi"
+        if os.path.exists(nvidia_smi_path):
+            try:
+                cmd = [nvidia_smi_path, "--query-gpu=name,memory.total,memory.free", "--format=csv,nounits,noheader"]
+                output = subprocess.check_output(cmd, encoding='utf-8').strip()
+                if output:
+                    lines = output.split('\n')
+                    total_mb = 0.0
+                    free_mb = 0.0
+                    names = []
+                    for line in lines:
+                        parts = [p.strip() for p in line.split(',')]
+                        if len(parts) >= 3:
+                            names.append(parts[0])
+                            total_mb += float(parts[1])
+                            free_mb += float(parts[2])
+                    if total_mb > 0:
+                        gpu_found = True
+                        gpu_name = ", ".join(list(dict.fromkeys(names)))
+                        gpu_vram_total_gb = round(total_mb / 1024, 2)
+                        gpu_vram_free_gb = round(free_mb / 1024, 2)
+            except Exception:
+                pass
 
     return {
         "system_ram": {
@@ -238,13 +302,13 @@ def get_ui():
             <!-- GPU VRAM Badge -->
             <div id="gpuCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
               <span class="text-slate-400">GPU VRAM:</span>
-              <span id="vramStat" class="font-semibold text-emerald-400">Checking...</span>
+              <span id="vramStat" class="font-semibold text-emerald-400">Probing hardware...</span>
             </div>
             
             <!-- System RAM Badge -->
             <div id="ramCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
               <span class="text-slate-400">System RAM:</span>
-              <span id="ramStat" class="font-semibold text-sky-300">Checking...</span>
+              <span id="ramStat" class="font-semibold text-sky-300">Probing memory...</span>
             </div>
             
             <button onclick="initHardwareInfo(); fetchLocalModels();" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded text-xs text-slate-200 transition">
@@ -286,11 +350,12 @@ def get_ui():
             
             // Render GPU Stats
             if (data.gpu && data.gpu.has_gpu) {
+              const freeStr = data.gpu.free_vram_gb > 0 ? `${data.gpu.free_vram_gb} GB Free / ` : '';
               document.getElementById('vramStat').innerHTML = 
-                `${data.gpu.free_vram_gb} GB Free / ${data.gpu.total_vram_gb} GB <span class="text-slate-400 font-normal">(${data.gpu.gpu_name})</span>`;
+                `${freeStr}${data.gpu.total_vram_gb} GB <span class="text-slate-400 font-normal">(${data.gpu.gpu_name})</span>`;
             } else {
               document.getElementById('vramStat').innerHTML = 
-                `<span class="text-amber-400 font-normal">No NVIDIA GPU Detected</span>`;
+                `<span class="text-slate-400 font-normal">No Dedicated VRAM Detected</span>`;
             }
 
             // Render System RAM Stats
@@ -299,8 +364,8 @@ def get_ui():
                 `${data.system_ram.available_gb} GB Avail / ${data.system_ram.total_gb} GB Total`;
             }
           } catch(e) {
-            document.getElementById('vramStat').textContent = 'Error fetching stats';
-            document.getElementById('ramStat').textContent = 'Error fetching stats';
+            document.getElementById('vramStat').textContent = 'Error probing VRAM';
+            document.getElementById('ramStat').textContent = 'Error probing RAM';
           }
         }
 
