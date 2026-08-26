@@ -1,6 +1,7 @@
 import os
 import re
 import glob
+import json
 import ctypes
 import shutil
 import subprocess
@@ -262,7 +263,7 @@ def run_download_job(repo_id: str, group_name: str, file_paths: list[str]):
                 pass
 
         if first_shard_file:
-            subprocess.run([get_lms_bin(), "import", "--yes", "--symbolic-link", first_shard_file], env=LMS_ENV, capture_output=True)
+            subprocess.run([get_lms_bin(), "import", "--yes", "--symbolic-link", first_shard_file], env=LMS_ENV, capture_output=True, timeout=10)
 
     except Exception as e:
         DOWNLOAD_JOBS[group_name] = {"status": "failed", "progress_str": f"Error: {str(e)}", "percent": 0.0}
@@ -382,35 +383,26 @@ def get_model_files(repo_id: str):
 @app.post("/api/load_model")
 def load_model(req: LoadRequest):
     """
-    Robust multi-strategy model loader.
-    Auto-imports the file, extracts indexed candidates, and executes lms load.
+    Safely resolves model reference and loads into GPU VRAM.
     """
     lms = get_lms_bin()
     fname = os.path.basename(req.model_path)
     parent_dir = os.path.basename(os.path.dirname(req.model_path))
 
-    # 1. Ensure model is imported/indexed non-interactively
-    subprocess.run([lms, "import", "--yes", "--symbolic-link", req.model_path], env=LMS_ENV, capture_output=True)
+    try:
+        # 1. Non-interactive import check
+        subprocess.run([lms, "import", "--yes", "--symbolic-link", req.model_path], env=LMS_ENV, capture_output=True, timeout=5)
+    except Exception:
+        pass
 
-    # 2. Unload active models
-    subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True)
+    try:
+        # 2. Unload running models
+        subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, timeout=5)
+    except Exception:
+        pass
 
-    # 3. Generate candidate keys to attempt
-    # e.g., "gemma-4-26B-A4B-it", "unsloth/gemma-4-26b-a4b-it", raw filename, etc.
+    # Build prioritized list of targets
     candidates = []
-    
-    # Try directory/slug name
-    if "_" in parent_dir:
-        candidates.append(parent_dir.replace("_", "/"))
-    candidates.append(parent_dir)
-
-    # Clean name derived from filename
-    clean_base = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname)
-    candidates.append(clean_base)
-    candidates.append(fname)
-    candidates.append(req.model_path)
-
-    # Also parse `lms ls` output for direct matches
     try:
         ls_res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=3)
         if ls_res.returncode == 0:
@@ -418,37 +410,42 @@ def load_model(req: LoadRequest):
                 parts = line.split()
                 if parts and not parts[0].startswith("---") and parts[0] != "LLM" and parts[0] != "EMBEDDING":
                     key = parts[0]
-                    # Check if key matches filename base
                     k_clean = re.sub(r'[^a-zA-Z0-9]', '', key).lower()
                     f_clean = re.sub(r'[^a-zA-Z0-9]', '', fname).lower()
                     if k_clean in f_clean or f_clean in k_clean:
-                        candidates.insert(0, key)
+                        candidates.append(key)
     except Exception:
         pass
 
+    clean_base = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname)
+    candidates.extend([clean_base, fname, parent_dir, req.model_path])
+    
     last_error = ""
     for target in candidates:
-        cmd = [
-            lms, "load", target,
-            f"--gpu={req.gpu_offload}",
-            f"--context-length={req.context_length}",
-            f"--ttl={req.ttl}",
-            "--yes"
-        ]
-        res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True)
-        if res.returncode == 0:
-            return {"status": "success", "loaded_target": target, "output": res.stdout}
-        else:
-            last_error = res.stderr or res.stdout
+        try:
+            cmd = [
+                lms, "load", target,
+                f"--gpu={req.gpu_offload}",
+                f"--context-length={req.context_length}",
+                f"--ttl={req.ttl}",
+                "--yes"
+            ]
+            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=15)
+            if res.returncode == 0:
+                return {"status": "success", "loaded_target": target, "output": res.stdout}
+            else:
+                last_error = (res.stderr or res.stdout or "").strip()
+        except Exception as err:
+            last_error = str(err)
 
-    return JSONResponse(status_code=500, content={"status": "error", "message": last_error or "Unable to load model candidate"})
+    return JSONResponse(status_code=400, content={"status": "error", "message": last_error or "Unable to match model in library"})
 
 @app.post("/api/unload_model")
 def unload_model():
     """Unloads all running models from memory."""
     lms = get_lms_bin()
     try:
-        res = subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, text=True)
+        res = subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, text=True, timeout=5)
         return {"status": "success", "output": res.stdout}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
@@ -840,7 +837,7 @@ def get_ui():
           body: JSON.stringify({model_path: modelPath, gpu_offload: 'max', context_length: 32768, ttl: 3600})
         });
         const data = await res.json();
-        if (data.status !== 'success') {
+        if (!res.ok || data.status !== 'success') {
           alert('Load Failure Output from LMS:\\n\\n' + (data.message || JSON.stringify(data)));
         }
       } catch(e) {
