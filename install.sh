@@ -57,27 +57,51 @@ echo "[+] Updating system packages and Python dependencies..."
 apt-get update -y
 apt-get install -y curl ca-certificates jq gnupg python3 python3-pip python3-uvicorn python3-fastapi python3-requests
 
-# 4. Install / Update LM Studio CLI
-echo "[+] Fetching latest LM Studio CLI binary..."
-sudo -u "$SERVICE_USER" HOME="$APP_DIR" bash -c "curl -fsSL https://lmstudio.ai/install.sh | bash"
+# 4. Install / Update LM Studio CLI & llmster Daemon
+echo ""
+echo "--- [ LM Studio / llmster Engine Check ] ---"
 
+# Detect if lms binary is already installed
 LMS_BIN=""
 if [ -f "${APP_DIR}/.cache/lm-studio/bin/lms" ]; then
   LMS_BIN="${APP_DIR}/.cache/lm-studio/bin/lms"
 elif [ -f "${APP_DIR}/.lmstudio/bin/lms" ]; then
   LMS_BIN="${APP_DIR}/.lmstudio/bin/lms"
+elif command -v lms >/dev/null 2>&1; then
+  LMS_BIN="$(command -v lms)"
+fi
+
+if [ "$IS_UPDATE" = true ] && [ -n "$LMS_BIN" ] && [ -x "$LMS_BIN" ]; then
+  echo "[✓] Existing LM Studio / llmster installation found."
+  echo "[*] Checking for daemon updates without full re-download..."
+  
+  # Run the native daemon update check as the dedicated service user
+  sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" daemon update 2>/dev/null || true
+  
+  CURRENT_VER=$(sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" --version 2>/dev/null || echo "Installed")
+  echo "[✓] Current engine version: $CURRENT_VER"
 else
-  LMS_BIN=$(find "$APP_DIR" -type f -name "lms" -perm /111 2>/dev/null | head -n 1)
+  echo "[+] Fresh install or missing binary detected. Fetching LM Studio installer..."
+  sudo -u "$SERVICE_USER" HOME="$APP_DIR" bash -c "curl -fsSL https://lmstudio.ai/install.sh | bash"
+  
+  # Re-detect binary path after fresh install
+  if [ -f "${APP_DIR}/.cache/lm-studio/bin/lms" ]; then
+    LMS_BIN="${APP_DIR}/.cache/lm-studio/bin/lms"
+  elif [ -f "${APP_DIR}/.lmstudio/bin/lms" ]; then
+    LMS_BIN="${APP_DIR}/.lmstudio/bin/lms"
+  else
+    LMS_BIN=$(find "$APP_DIR" -type f -name "lms" -perm /111 2>/dev/null | head -n 1)
+  fi
 fi
 
 if [ -z "$LMS_BIN" ] || [ ! -x "$LMS_BIN" ]; then
-  echo "[-] Error: Failed to locate 'lms' executable."
+  echo "[-] Error: Failed to locate or execute 'lms' binary."
   exit 1
 fi
 
 chmod +x "$LMS_BIN"
 ln -sf "$LMS_BIN" /usr/local/bin/lms
-echo "[✓] LMS CLI ready at /usr/local/bin/lms"
+echo "[✓] LMS CLI linked to /usr/local/bin/lms"
 
 # 5. LM Link Setup (Interactive only on initial install)
 echo ""
