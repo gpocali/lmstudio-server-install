@@ -43,7 +43,6 @@ def get_system_hardware_info():
     gpu_vram_total_gb = 0.0
     gpu_vram_free_gb = 0.0
 
-    # Method A: Direct NVML ctypes library query
     try:
         nvml_lib_names = ["libnvidia-ml.so.1", "libnvidia-ml.so", "/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1"]
         nvml = None
@@ -95,7 +94,6 @@ def get_system_hardware_info():
     except Exception:
         gpu_found = False
 
-    # Method B: Fallback to nvidia-smi CLI
     if not gpu_found:
         nvidia_smi_path = shutil.which("nvidia-smi") or "/usr/bin/nvidia-smi"
         if os.path.exists(nvidia_smi_path):
@@ -121,38 +119,6 @@ def get_system_hardware_info():
             except Exception:
                 pass
 
-    # Method C: Dedicated PCI Inspection
-    if not gpu_found:
-        pci_devices = sorted(glob.glob('/sys/bus/pci/devices/*'))
-        for dev in pci_devices:
-            vendor_file = os.path.join(dev, "vendor")
-            resource_file = os.path.join(dev, "resource")
-            if os.path.exists(vendor_file) and os.path.exists(resource_file):
-                try:
-                    with open(vendor_file, 'r') as f:
-                        vendor = f.read().strip().lower()
-                    if "0x10de" in vendor:
-                        with open(resource_file, 'r') as f:
-                            res_lines = f.readlines()
-                        max_bar_bytes = 0
-                        for line in res_lines:
-                            parts = line.strip().split()
-                            if len(parts) >= 3:
-                                start = int(parts[0], 16)
-                                end = int(parts[1], 16)
-                                if end > start:
-                                    bar_size = end - start + 1
-                                    if bar_size > max_bar_bytes and bar_size >= (1024**3):
-                                        max_bar_bytes = bar_size
-                        if max_bar_bytes > 0:
-                            gpu_found = True
-                            gpu_vram_total_gb = round(max_bar_bytes / (1024**3), 2)
-                            gpu_vram_free_gb = gpu_vram_total_gb
-                            gpu_name = "NVIDIA Dedicated GPU"
-                            break
-                except Exception:
-                    pass
-
     return {
         "system_ram": {
             "total_gb": sys_ram_total_gb,
@@ -177,7 +143,6 @@ def parse_model_metadata(filename: str, repo_id: str):
     return weight, variant
 
 def fetch_single_file_size(repo_id: str, filename: str):
-    """Probe exact file size using HTTP HEAD directly against the resolve endpoint."""
     url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
     try:
         r = requests.head(url, headers={"Accept-Encoding": "identity"}, allow_redirects=True, timeout=5)
@@ -265,13 +230,8 @@ def search_hf(q: str = "", sort_by: str = "downloads"):
 
 @app.get("/api/model_files")
 def get_model_files(repo_id: str):
-    """
-    Retrieves GGUF files with exact byte sizes using recursive tree parsing 
-    and parallel HEAD request fallback.
-    """
     raw_files = {}
 
-    # Step 1: Query recursive tree endpoint
     tree_url = f"https://huggingface.co/api/models/{repo_id}/tree/main?recursive=true"
     try:
         resp = requests.get(tree_url, timeout=8)
@@ -288,7 +248,6 @@ def get_model_files(repo_id: str):
     except Exception:
         pass
 
-    # Step 2: Fallback to standard model metadata if tree returned nothing
     if not raw_files:
         try:
             url = f"https://huggingface.co/api/models/{repo_id}"
@@ -301,7 +260,6 @@ def get_model_files(repo_id: str):
         except Exception:
             pass
 
-    # Step 3: Run parallel HEAD probes for any file missing exact size
     missing_sizes = [f for f, size in raw_files.items() if not size or size == 0]
     if missing_sizes:
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
@@ -318,6 +276,14 @@ def get_model_files(repo_id: str):
     hw = get_system_hardware_info()
     vram_total = hw["gpu"]["total_vram_gb"]
     ram_total = hw["system_ram"]["total_gb"]
+
+    # Gather local file list for instant downloaded check
+    local_files_on_disk = set()
+    if os.path.exists(MODELS_PATH):
+        for root, _, filenames in os.walk(MODELS_PATH):
+            for f in filenames:
+                if f.endswith(".gguf"):
+                    local_files_on_disk.add(f)
 
     parsed_files = []
     for fname, size_bytes in raw_files.items():
@@ -341,6 +307,10 @@ def get_model_files(repo_id: str):
                 else:
                     fit_status = "exceeds"
 
+        # Determine download state
+        is_downloaded = fname in local_files_on_disk
+        is_downloading = fname in DOWNLOAD_JOBS and DOWNLOAD_JOBS[fname].get("status") == "downloading"
+
         size_label = f"{size_gb} GB" if size_gb > 0 else "Pending..."
         est_vram_label = f"~{est_mem_req} GB" if est_mem_req > 0 else "N/A"
 
@@ -351,10 +321,11 @@ def get_model_files(repo_id: str):
             "size_gb": size_label,
             "raw_size_gb": size_gb,
             "est_vram": est_vram_label,
-            "fit_status": fit_status
+            "fit_status": fit_status,
+            "is_downloaded": is_downloaded,
+            "is_downloading": is_downloading
         })
 
-    # Sort files by size ascending
     parsed_files.sort(key=lambda x: x["raw_size_gb"] if x["raw_size_gb"] > 0 else 999)
 
     return {
@@ -450,7 +421,6 @@ def get_ui():
                    onkeydown="if(event.key === 'Enter') searchModels()"
                    class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500 text-sm">
             
-            <!-- Sort Selector -->
             <div class="flex items-center gap-2">
               <label for="sortSelect" class="text-xs text-slate-400 shrink-0">Sort By:</label>
               <select id="sortSelect" onchange="searchModels()" class="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500">
@@ -485,6 +455,9 @@ def get_ui():
       </div>
 
       <script>
+        let localModelSet = new Set();
+        let activeTasksMap = {};
+
         async function initHardwareInfo() {
           try {
             const res = await fetch('/api/system_info');
@@ -574,7 +547,7 @@ def get_ui():
           const parent = btn.parentElement;
           const fileContainer = parent.querySelector('.file-container');
           fileContainer.classList.remove('hidden');
-          fileContainer.innerHTML = '<span class="text-xs text-slate-500">Fetching exact file sizes & calculating VRAM footprint...</span>';
+          fileContainer.innerHTML = '<span class="text-xs text-slate-500">Fetching file metadata & calculating VRAM footprint...</span>';
           
           const res = await fetch(`/api/model_files?repo_id=${encodeURIComponent(repoId)}`);
           const data = await res.json();
@@ -600,6 +573,30 @@ def get_ui():
               fitBadge = '<span class="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-medium">Exceeds Memory</span>';
             }
 
+            // Check current status
+            const isDownloaded = f.is_downloaded || localModelSet.has(f.filename);
+            const isDownloading = f.is_downloading || (activeTasksMap[f.filename] && activeTasksMap[f.filename].status === 'downloading');
+
+            let btnHtml = '';
+            const btnId = `btn-${btoa(f.filename).replace(/=/g, '')}`;
+
+            if (isDownloaded) {
+              btnHtml = `
+                <button id="${btnId}" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">
+                  ✓ Downloaded
+                </button>`;
+            } else if (isDownloading) {
+              btnHtml = `
+                <button id="${btnId}" disabled class="bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1">
+                  ⏳ Downloading...
+                </button>`;
+            } else {
+              btnHtml = `
+                <button id="${btnId}" onclick="triggerDownload('${repoId}', '${f.filename}', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1 rounded text-xs shrink-0 transition">
+                  Download
+                </button>`;
+            }
+
             const row = document.createElement('div');
             row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2 rounded border border-slate-800 text-xs gap-2';
             row.innerHTML = `
@@ -615,16 +612,19 @@ def get_ui():
                   ${fitBadge}
                 </div>
               </div>
-              <button onclick="triggerDownload('${repoId}', '${f.filename}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1 rounded text-xs shrink-0">
-                Download
-              </button>
+              ${btnHtml}
             `;
             table.appendChild(row);
           });
           fileContainer.appendChild(table);
         }
 
-        async function triggerDownload(repoId, filename) {
+        async function triggerDownload(repoId, filename, btn) {
+          // Immediately disable button and switch to Downloading state
+          btn.disabled = true;
+          btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
+          btn.innerHTML = "⏳ Downloading...";
+
           await fetch('/api/download', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -636,27 +636,55 @@ def get_ui():
         async function updateTasks() {
           const res = await fetch('/api/tasks');
           const data = await res.json();
+          activeTasksMap = data;
           const list = document.getElementById('tasksList');
+          
           if (Object.keys(data).length === 0) {
             list.innerHTML = '<span class="text-slate-500">No active downloads</span>';
             return;
           }
-          list.innerHTML = Object.entries(data).map(([file, info]) => `
-            <div class="bg-slate-950 p-2 rounded border border-slate-700">
-              <div class="font-medium truncate">${file}</div>
-              <div class="text-xs text-sky-400 mt-1">${info.status.toUpperCase()}: ${info.progress}</div>
-            </div>
-          `).join('');
+
+          list.innerHTML = Object.entries(data).map(([file, info]) => {
+            const btnId = `btn-${btoa(file).replace(/=/g, '')}`;
+            const targetBtn = document.getElementById(btnId);
+
+            if (info.status === 'completed') {
+              localModelSet.add(file);
+              if (targetBtn) {
+                targetBtn.disabled = true;
+                targetBtn.className = "bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1";
+                targetBtn.innerHTML = "✓ Downloaded";
+              }
+            } else if (info.status === 'downloading') {
+              if (targetBtn) {
+                targetBtn.disabled = true;
+                targetBtn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
+                targetBtn.innerHTML = "⏳ Downloading...";
+              }
+            }
+
+            return `
+              <div class="bg-slate-950 p-2 rounded border border-slate-700">
+                <div class="font-medium truncate">${file}</div>
+                <div class="text-xs text-sky-400 mt-1">${info.status.toUpperCase()}: ${info.progress}</div>
+              </div>
+            `;
+          }).join('');
         }
 
         async function fetchLocalModels() {
           const res = await fetch('/api/local_models');
           const data = await res.json();
           const list = document.getElementById('localList');
+          localModelSet.clear();
+
           if (data.length === 0) {
             list.innerHTML = '<span class="text-slate-500">No GGUF models on disk</span>';
             return;
           }
+
+          data.forEach(m => localModelSet.add(m.filename));
+
           list.innerHTML = data.map(m => `
             <div class="flex justify-between items-center bg-slate-950 p-2 rounded border border-slate-700 text-xs">
               <div class="truncate pr-2">
@@ -668,10 +696,13 @@ def get_ui():
           `).join('');
         }
 
+        // Initialize on load
         initHardwareInfo();
-        searchModels();
-        setInterval(updateTasks, 3000);
-        fetchLocalModels();
+        fetchLocalModels().then(() => {
+          searchModels();
+        });
+        setInterval(updateTasks, 2500);
+        setInterval(fetchLocalModels, 5000);
       </script>
     </body>
     </html>
