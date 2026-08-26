@@ -255,7 +255,7 @@ def parse_model_metadata(filename: str, repo_id: str):
     return weight, variant
 
 def fetch_single_file_size(repo_id: str, rel_path: str):
-    url = f"https://huggingface.co/{repo_id}/resolve/main/{rel_path}"
+    url = f"[https://huggingface.co/](https://huggingface.co/){repo_id}/resolve/main/{rel_path}"
     try:
         r = requests.head(url, headers={"Accept-Encoding": "identity"}, allow_redirects=True, timeout=5)
         if r.status_code == 200:
@@ -285,7 +285,7 @@ def run_download_job(repo_id: str, group_name: str, file_paths: list[str]):
             if not first_shard_file:
                 first_shard_file = dest_file
 
-            url = f"https://huggingface.co/{repo_id}/resolve/main/{rel_path}"
+            url = f"[https://huggingface.co/](https://huggingface.co/){repo_id}/resolve/main/{rel_path}"
             with requests.get(url, stream=True, timeout=30) as r:
                 r.raise_for_status()
                 with open(dest_file, 'wb') as f:
@@ -334,7 +334,7 @@ def search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool = Fal
     if q.strip(): params["search"] = q.strip()
 
     try:
-        resp = requests.get("https://huggingface.co/api/models", params=params, timeout=10)
+        resp = requests.get("[https://huggingface.co/api/models](https://huggingface.co/api/models)", params=params, timeout=10)
         res = resp.json() if resp.status_code == 200 else []
     except Exception:
         res = []
@@ -365,7 +365,7 @@ def search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool = Fal
 def get_model_files(repo_id: str):
     raw_files = {}
     try:
-        resp = requests.get(f"https://huggingface.co/api/models/{repo_id}/tree/main?recursive=true", timeout=8)
+        resp = requests.get(f"[https://huggingface.co/api/models/](https://huggingface.co/api/models/){repo_id}/tree/main?recursive=true", timeout=8)
         if resp.status_code == 200:
             for item in resp.json():
                 path = item.get("path", "")
@@ -376,7 +376,7 @@ def get_model_files(repo_id: str):
 
     if not raw_files:
         try:
-            res = requests.get(f"https://huggingface.co/api/models/{repo_id}", timeout=8).json()
+            res = requests.get(f"[https://huggingface.co/api/models/](https://huggingface.co/api/models/){repo_id}", timeout=8).json()
             for s in res.get("siblings", []):
                 fname = s.get("rfilename", "")
                 if fname.endswith(".gguf"): raw_files[fname] = s.get("size", 0)
@@ -555,7 +555,7 @@ def add_account(req: AddAccountRequest):
         return JSONResponse(status_code=400, content={"status": "error", "message": "Token cannot be empty"})
 
     try:
-        r = requests.get("https://api.github.com/user", headers={"Authorization": f"Bearer {token}"}, timeout=6)
+        r = requests.get("[https://api.github.com/user](https://api.github.com/user)", headers={"Authorization": f"Bearer {token}"}, timeout=6)
         if r.status_code != 200:
             return JSONResponse(status_code=401, content={"status": "error", "message": "Invalid GitHub Token. Please verify permissions."})
         
@@ -594,7 +594,7 @@ def list_repos_for_account(account_username: str):
         return JSONResponse(status_code=401, content={"status": "error", "message": f"No active token for user @{account_username}"})
 
     try:
-        r = requests.get("https://api.github.com/user/repos?per_page=100&sort=updated", headers={"Authorization": f"Bearer {token}"}, timeout=8)
+        r = requests.get("[https://api.github.com/user/repos?per_page=100&sort=updated](https://api.github.com/user/repos?per_page=100&sort=updated)", headers={"Authorization": f"Bearer {token}"}, timeout=8)
         if r.status_code == 200:
             repos = []
             for item in r.json():
@@ -615,7 +615,7 @@ def list_branches_for_repo(account_username: str, repo_full_name: str):
     token = get_token_for_user(account_username)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
-        r = requests.get(f"https://api.github.com/repos/{repo_full_name}/branches", headers=headers, timeout=6)
+        r = requests.get(f"[https://api.github.com/repos/](https://api.github.com/repos/){repo_full_name}/branches", headers=headers, timeout=6)
         if r.status_code == 200:
             return [b.get("name") for b in r.json()]
     except Exception: pass
@@ -649,7 +649,7 @@ def clone_or_open_project(req: GithubCloneRequest):
 
     dir_name = req.repo_full_name.replace("/", "_")
     dest_path = os.path.join(WORKSPACES_ROOT, dir_name)
-    auth_url = f"https://oauth2:{token}@github.com/{req.repo_full_name}.git"
+    auth_url = f"https://oauth2:{token}@[github.com/](https://github.com/){req.repo_full_name}.git"
 
     try:
         if os.path.exists(dest_path):
@@ -773,26 +773,11 @@ def execute_agent_task(req: AgentTaskRequest):
             "max_tokens": 16384
         }
         
-        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=150)
+        resp = requests.post("[http://127.0.0.1:1234/v1/chat/completions](http://127.0.0.1:1234/v1/chat/completions)", json=payload, timeout=150)
         if resp.status_code != 200:
             return JSONResponse(status_code=500, content={"status": "error", "message": f"LM Studio API Error: {resp.text}"})
 
         ai_response = resp.json()["choices"][0]["message"]["content"]
         
-        # Parse all file blocks: ### File: <path>\n```...\n```
-        file_pattern = re.compile(r'###\s*File:\s*([^\n\r]+)[\r\n]+```(?:[a-zA-Z0-9_\-]+)?[\r\n]+([\s\S]*?)[\r\n]+```', re.MULTILINE)
-        matches = file_pattern.findall(ai_response)
-        
-        modified_files = []
-        if matches:
-            for file_rel_path, file_content in matches:
-                clean_rel = file_rel_path.strip().lstrip("/")
-                dest_file_path = os.path.join(workspace_path, clean_rel)
-                os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
-                with open(dest_file_path, "w", encoding="utf-8") as f:
-                    f.write(file_content)
-                subprocess.run(["git", "-C", workspace_path, "add", clean_rel], capture_output=True)
-                modified_files.append(clean_rel)
-        elif len(req.target_files) == 1:
-            # Fallback if model omitted ### File header on single file task
-            code_match = re.search(r'```(?:[a-zA-Z0-9_\-]+)?\n([\s\S]*?)\n
+        # Robust hex-escaped regex to avoid markdown parser collisions
+        # Pattern matches: ### File: <filename>\n```...\n
