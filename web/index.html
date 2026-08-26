@@ -351,14 +351,24 @@
   </main>
 
   <script>
-    let localModelSet = new Set();
-    let activeTasksMap = {};
-    let loadedModelsList = [];
-    let currentWorkspaceDir = "";
-    let currentBranch = "main";
-    let currentDisplayName = "";
-    let activeThreadId = "thread-default";
-    let currentHistoryData = null;
+    var localModelSet = new Set();
+    var activeTasksMap = {};
+    var loadedModelsList = [];
+    var currentWorkspaceDir = "";
+    var currentBranch = "main";
+    var currentDisplayName = "";
+    var activeThreadId = "thread-default";
+    var currentHistoryData = null;
+
+    function escapeHtml(text) {
+      if (!text) return "";
+      return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
 
     function switchView(viewName) {
       document.getElementById('viewStudio').classList.toggle('hidden', viewName !== 'studio');
@@ -366,19 +376,19 @@
       document.getElementById('viewGithub').classList.toggle('hidden', viewName !== 'github');
       document.getElementById('viewModels').classList.toggle('hidden', viewName !== 'models');
 
-      document.getElementById('navBtnStudio').className = viewName === 'studio' 
+      document.getElementById('navBtnStudio').className = (viewName === 'studio') 
         ? 'px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
         : 'px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
       
-      document.getElementById('navBtnHistory').className = viewName === 'history' 
+      document.getElementById('navBtnHistory').className = (viewName === 'history') 
         ? 'px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
         : 'px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
 
-      document.getElementById('navBtnGithub').className = viewName === 'github' 
+      document.getElementById('navBtnGithub').className = (viewName === 'github') 
         ? 'px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
         : 'px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
 
-      document.getElementById('navBtnModels').className = viewName === 'models' 
+      document.getElementById('navBtnModels').className = (viewName === 'models') 
         ? 'px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
         : 'px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
 
@@ -413,8 +423,8 @@
         loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
         
         if (data.gpu && data.gpu.has_gpu) {
-          const freeStr = data.gpu.free_vram_gb > 0 ? `${data.gpu.free_vram_gb} GB Free / ` : '';
-          document.getElementById('vramStat').innerHTML = `${freeStr}${data.gpu.total_vram_gb} GB`;
+          const freeStr = data.gpu.free_vram_gb > 0 ? (data.gpu.free_vram_gb + ' GB Free / ') : '';
+          document.getElementById('vramStat').innerHTML = freeStr + data.gpu.total_vram_gb + ' GB';
         } else {
           document.getElementById('vramStat').textContent = 'No GPU';
         }
@@ -431,8 +441,8 @@
     function renderStorageMetrics(storage) {
       const mainStat = document.getElementById('storageStat');
       const subStat = document.getElementById('diskSubStat');
-      if (mainStat && storage) mainStat.innerHTML = `${storage.used_gb} /${storage.total_gb} GB`;
-      if (subStat && storage) subStat.innerHTML = `Storage: <span class="text-amber-300">${storage.used_gb} GB</span> / ${storage.total_gb} GB (${storage.percent_used}%)`;
+      if (mainStat && storage) mainStat.innerHTML = storage.used_gb + ' / ' + storage.total_gb + ' GB';
+      if (subStat && storage) subStat.innerHTML = 'Storage: <span class="text-amber-300">' + storage.used_gb + ' GB</span> / ' + storage.total_gb + ' GB (' + storage.percent_used + '%)';
     }
 
     // ---------------- Studio Left Sidebar, Threads & Workspaces ----------------
@@ -444,24 +454,22 @@
         const workspaces = await res.json();
 
         if (!workspaces || workspaces.length === 0) {
-          container.innerHTML = '<p class="text-slate-500 p-2">No local workspaces.<br><a href="#" onclick="switchView(\'github\')" class="text-sky-400 underline">Clone from GitHub</a></p>';
+          container.innerHTML = '<p class="text-slate-500 p-2">No local workspaces.<br><button onclick="switchView(\'github\')" class="text-sky-400 underline">Clone from GitHub</button></p>';
           return;
         }
 
         container.innerHTML = workspaces.map(w => {
-          const pendingBadge = w.has_pending_changes ? `<span class="bg-amber-950 text-amber-300 border border-amber-800 px-1 py-0.2 rounded font-mono text-[9px]">Pending</span>` : '';
-          const pushBadge = w.unpushed_commits > 0 ? `<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-1 py-0.2 rounded font-mono text-[9px]">${w.unpushed_commits} Unpushed</span>` : '';
+          const isSelected = (currentWorkspaceDir === w.dir_name);
+          const bgClass = isSelected ? 'bg-sky-950/40 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700';
+          const pendingBadge = w.has_pending_changes ? '<span class="bg-amber-950 text-amber-300 border border-amber-800 px-1 py-0.2 rounded font-mono text-[9px]">Pending</span>' : '';
+          const pushBadge = w.unpushed_commits > 0 ? ('<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-1 py-0.2 rounded font-mono text-[9px]">' + w.unpushed_commits + ' Unpushed</span>') : '';
 
-          return `
-            <div onclick="selectStudioProject('${w.dir_name}', '${w.display_name}', '${w.branch}')" 
-                 class="p-2.5 rounded-lg border ${currentWorkspaceDir === w.dir_name ? 'bg-sky-950/40 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'} cursor-pointer transition">
-              <div class="font-bold truncate">${w.display_name}</div>
-              <div class="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400 mt-1">
-                <span class="bg-slate-800 px-1.5 py-0.5 rounded font-mono">${w.branch}</span>
-                ${pendingBadge}${pushBadge}
-              </div>
-            </div>
-          `;
+          return '<div onclick="selectStudioProject(\'' + w.dir_name + '\', \'' + escapeHtml(w.display_name) + '\', \'' + w.branch + '\')" class="p-2.5 rounded-lg border ' + bgClass + ' cursor-pointer transition">' +
+                 '<div class="font-bold truncate">' + escapeHtml(w.display_name) + '</div>' +
+                 '<div class="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400 mt-1">' +
+                 '<span class="bg-slate-800 px-1.5 py-0.5 rounded font-mono">' + w.branch + '</span> ' +
+                 pendingBadge + ' ' + pushBadge +
+                 '</div></div>';
         }).join('');
       } catch(e) {
         container.innerHTML = '<p class="text-rose-400 p-2">Error loading workspaces.</p>';
@@ -475,7 +483,7 @@
 
       document.getElementById('studioProjectHeader').textContent = displayName;
       document.getElementById('studioBranchContainer').classList.remove('hidden');
-      document.getElementById('studioAccountSubtitle').textContent = `Workspace Path: /storage/lmstudio/workspaces/${dirName}`;
+      document.getElementById('studioAccountSubtitle').textContent = 'Workspace Path: /storage/lmstudio/workspaces/' + dirName;
       document.getElementById('studioActionsGroup').classList.remove('hidden');
       document.getElementById('sidebarFilesBlock').classList.remove('hidden');
       document.getElementById('sidebarThreadsBlock').classList.remove('hidden');
@@ -490,7 +498,7 @@
     async function refreshWorkspaceStatus() {
       if (!currentWorkspaceDir) return;
       try {
-        const res = await fetch(`/api/workspace/status?repo_dir_name=${encodeURIComponent(currentWorkspaceDir)}`);
+        const res = await fetch('/api/workspace/status?repo_dir_name=' + encodeURIComponent(currentWorkspaceDir));
         const status = await res.json();
         
         const banner = document.getElementById('pendingChangesBanner');
@@ -504,7 +512,7 @@
         }
 
         if (status.unpushed_commits > 0) {
-          pushBtn.textContent = `🚀 Push (${status.unpushed_commits})`;
+          pushBtn.textContent = '🚀 Push (' + status.unpushed_commits + ')';
           pushBtn.className = 'bg-emerald-600 hover:bg-emerald-500 text-xs px-3.5 py-1.5 rounded font-bold transition flex items-center gap-1 animate-pulse';
         } else {
           pushBtn.textContent = '🚀 Push to GitHub';
@@ -516,7 +524,7 @@
     async function loadWorkspaceHistoryAndRender() {
       if (!currentWorkspaceDir) return;
       try {
-        const res = await fetch(`/api/workspace/history?repo_dir_name=${encodeURIComponent(currentWorkspaceDir)}`);
+        const res = await fetch('/api/workspace/history?repo_dir_name=' + encodeURIComponent(currentWorkspaceDir));
         currentHistoryData = await res.json();
         activeThreadId = currentHistoryData.active_thread_id || "thread-default";
         
@@ -534,13 +542,15 @@
         return;
       }
 
-      container.innerHTML = currentHistoryData.threads.map(t => `
-        <div onclick="switchActiveThread('${t.id}')" 
-             class="p-2 rounded border ${t.id === activeThreadId ? 'bg-sky-950/60 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'} cursor-pointer truncate flex justify-between items-center">
-          <span class="truncate" title="${t.title}">💬 ${t.title}</span>
-          <span class="text-[9px] text-slate-500 ml-1 font-mono">${(t.messages || []).length}</span>
-        </div>
-      `).join('');
+      container.innerHTML = currentHistoryData.threads.map(t => {
+        const isSel = (t.id === activeThreadId);
+        const bg = isSel ? 'bg-sky-950/60 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700';
+        const count = (t.messages || []).length;
+
+        return '<div onclick="switchActiveThread(\'' + t.id + '\')" class="p-2 rounded border ' + bg + ' cursor-pointer truncate flex justify-between items-center">' +
+               '<span class="truncate">💬 ' + escapeHtml(t.title) + '</span>' +
+               '<span class="text-[9px] text-slate-500 ml-1 font-mono">' + count + '</span></div>';
+      }).join('');
     }
 
     async function switchActiveThread(threadId) {
@@ -584,27 +594,21 @@
       const chatWindow = document.getElementById('chatHistoryWindow');
       chatWindow.innerHTML = '';
 
-      const activeThread = (currentHistoryData?.threads || []).find(t => t.id === activeThreadId);
+      const activeThread = (currentHistoryData && currentHistoryData.threads) ? currentHistoryData.threads.find(t => t.id === activeThreadId) : null;
       if (!activeThread || !activeThread.messages || activeThread.messages.length === 0) {
-        chatWindow.innerHTML = `
-          <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">
-            <div class="font-bold text-sky-400 mb-1">💬 Thread: ${activeThread ? activeThread.title : 'New Thread'}</div>
-            Fresh context ready. Check your target files and run your next coding task.
-          </div>
-        `;
+        chatWindow.innerHTML = '<div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">' +
+          '<div class="font-bold text-sky-400 mb-1">💬 Thread: ' + escapeHtml(activeThread ? activeThread.title : 'New Thread') + '</div>' +
+          'Fresh context ready. Check your target files and run your next coding task.</div>';
         return;
       }
 
       activeThread.messages.forEach(msg => {
         const userMsgDiv = document.createElement('div');
         userMsgDiv.className = 'bg-slate-800 p-4 rounded-lg border border-slate-700 text-xs text-slate-100 space-y-1';
-        userMsgDiv.innerHTML = `
-          <div class="font-bold text-sky-300 flex items-center justify-between">
-            <span>You</span>
-            <span class="text-[10px] text-slate-400 font-normal">${(msg.target_files || []).join(', ') || 'No files selected'}</span>
-          </div>
-          <p class="whitespace-pre-wrap font-mono mt-1">${msg.instruction}</p>
-        `;
+        userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between">' +
+          '<span>You</span>' +
+          '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml((msg.target_files || []).join(', ') || 'No files selected') + '</span>' +
+          '</div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(msg.instruction) + '</p>';
         chatWindow.appendChild(userMsgDiv);
 
         const modFiles = msg.modified_files || [];
@@ -613,21 +617,17 @@
         
         let reviewDiff = '';
         if (modFiles.length > 0 && msg.diff) {
-          reviewDiff = `
-            <details class="bg-slate-900 p-2.5 rounded border border-slate-800 text-xs text-slate-200 mt-2">
-              <summary class="cursor-pointer font-bold text-sky-400">View Staged Diff</summary>
-              <pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">${msg.diff}</pre>
-            </details>
-          `;
+          reviewDiff = '<details class="bg-slate-900 p-2.5 rounded border border-slate-800 text-xs text-slate-200 mt-2">' +
+            '<summary class="cursor-pointer font-bold text-sky-400">View Staged Diff</summary>' +
+            '<pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">' + escapeHtml(msg.diff) + '</pre></details>';
         }
 
-        aiMsgDiv.innerHTML = `
-          <div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">
-            <span>🤖 Local AI Agent</span>
-            <span class="text-[10px] text-slate-400 font-normal">${modFiles.length > 0 ? `Modified: ${modFiles.join(', ')}` : 'Advisory Response'}</span>
-          </div>
-          <div class="text-slate-200 whitespace-pre-wrap mt-2">${(msg.ai_response \vert{}\vert{} '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>${reviewDiff}
-        `;
+        const modText = modFiles.length > 0 ? ('Modified: ' + modFiles.join(', ')) : 'Advisory Response';
+        aiMsgDiv.innerHTML = '<div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">' +
+          '<span>🤖 Local AI Agent</span>' +
+          '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml(modText) + '</span>' +
+          '</div><div class="text-slate-200 whitespace-pre-wrap mt-2">' + escapeHtml(msg.ai_response || '') + '</div>' + reviewDiff;
+        
         chatWindow.appendChild(aiMsgDiv);
       });
 
@@ -638,13 +638,14 @@
       const select = document.getElementById('studioBranchSelect');
       if (!currentWorkspaceDir) return;
       try {
-        const res = await fetch(`/api/workspace/branches?repo_dir_name=${encodeURIComponent(currentWorkspaceDir)}`);
+        const res = await fetch('/api/workspace/branches?repo_dir_name=' + encodeURIComponent(currentWorkspaceDir));
         const data = await res.json();
         currentBranch = data.current || "main";
 
-        select.innerHTML = data.branches.map(b => `
-          <option value="${b}" ${b === currentBranch ? 'selected' : ''}>${b}</option>
-        `).join('') + '<option value="__NEW_BRANCH__">+ New Branch...</option>';
+        select.innerHTML = data.branches.map(b => {
+          const sel = (b === currentBranch) ? 'selected' : '';
+          return '<option value="' + b + '" ' + sel + '>' + b + '</option>';
+        }).join('') + '<option value="__NEW_BRANCH__">+ New Branch...</option>';
       } catch(e) {}
     }
 
@@ -713,7 +714,7 @@
         });
         const data = await res.json();
         if (res.ok) {
-          alert(`Pull Result:\n\n${data.message}`);
+          alert('Pull Result:\n\n' + data.message);
           await loadWorkspaceFiles();
           await refreshWorkspaceStatus();
         } else {
@@ -728,7 +729,7 @@
       const container = document.getElementById('filesCheckboxList');
       container.innerHTML = '<p class="text-slate-500">Scanning files...</p>';
       try {
-        const res = await fetch(`/api/workspace/files?repo_dir_name=${encodeURIComponent(currentWorkspaceDir)}`);
+        const res = await fetch('/api/workspace/files?repo_dir_name=' + encodeURIComponent(currentWorkspaceDir));
         const files = await res.json();
 
         if (!files || files.length === 0) {
@@ -737,12 +738,11 @@
           return;
         }
 
-        container.innerHTML = files.map(f => `
-          <label class="flex items-center gap-2 hover:bg-slate-900 p-1 rounded cursor-pointer select-none">
-            <input type="checkbox" value="${f}" onchange="updateSelectedFilesCount()" class="rounded bg-slate-900 border-slate-700 text-sky-600 focus:ring-0">
-            <span class="truncate" title="${f}">${f}</span>
-          </label>
-        `).join('');
+        container.innerHTML = files.map(f => {
+          return '<label class="flex items-center gap-2 hover:bg-slate-900 p-1 rounded cursor-pointer select-none">' +
+                 '<input type="checkbox" value="' + f + '" onchange="updateSelectedFilesCount()" class="rounded bg-slate-900 border-slate-700 text-sky-600 focus:ring-0">' +
+                 '<span class="truncate" title="' + f + '">' + f + '</span></label>';
+        }).join('');
         updateSelectedFilesCount();
       } catch(e) {
         container.innerHTML = '<p class="text-rose-400">Error loading files.</p>';
@@ -756,9 +756,9 @@
       if (count === 0) {
         summary.textContent = '0 files selected (General Question / New Script mode)';
       } else if (count === 1) {
-        summary.textContent = `1 file selected: ${checked[0].value}`;
+        summary.textContent = '1 file selected: ' + checked[0].value;
       } else {
-        summary.textContent = `${count} files selected for context`;
+        summary.textContent = count + ' files selected for context';
       }
     }
 
@@ -777,7 +777,7 @@
         if (res.ok) {
           await loadWorkspaceFiles();
           await refreshWorkspaceStatus();
-          alert(`Created file: ${data.file_path}`);
+          alert('Created file: ' + data.file_path);
         } else {
           alert('Error: ' + data.message);
         }
@@ -787,7 +787,7 @@
     }
 
     async function autoFillCommitMessage(cardId, modFilesJson) {
-      const input = document.getElementById(`commit-msg-${cardId}`);
+      const input = document.getElementById('commit-msg-' + cardId);
       const modFiles = modFilesJson ? JSON.parse(decodeURIComponent(modFilesJson)) : [];
       if (input) input.value = "⏳ AI analyzing diff content...";
 
@@ -827,24 +827,21 @@
 
       const userMsgDiv = document.createElement('div');
       userMsgDiv.className = 'bg-slate-800 p-4 rounded-lg border border-slate-700 text-xs text-slate-100 space-y-1';
-      userMsgDiv.innerHTML = `
-        <div class="font-bold text-sky-300 flex items-center justify-between">
-          <span>You</span>
-          <span class="text-[10px] text-slate-400 font-normal">${selectedFiles.length > 0 ? selectedFiles.join(', ') : 'No files selected'}</span>
-        </div>
-        <p class="whitespace-pre-wrap font-mono mt-1">${instruction}</p>
-      `;
+      userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between">' +
+        '<span>You</span>' +
+        '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml(selectedFiles.length > 0 ? selectedFiles.join(', ') : 'No files selected') + '</span>' +
+        '</div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(instruction) + '</p>';
       chatWindow.appendChild(userMsgDiv);
 
       promptInput.value = '';
       sendBtn.disabled = true;
       sendBtn.textContent = '⏳ Thinking...';
 
-      const cardId = `action-card-${Date.now()}`;
+      const cardId = 'action-card-' + Date.now();
       const aiMsgDiv = document.createElement('div');
       aiMsgDiv.id = cardId;
       aiMsgDiv.className = 'bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-emerald-300 space-y-3 font-mono';
-      aiMsgDiv.innerHTML = `<span class="animate-pulse">🤖 Analyzing context & generating file changes...</span>`;
+      aiMsgDiv.innerHTML = '<span class="animate-pulse">🤖 Analyzing context & generating file changes...</span>';
       chatWindow.appendChild(aiMsgDiv);
       chatWindow.scrollTop = chatWindow.scrollHeight;
 
@@ -866,59 +863,42 @@
 
           let commitReviewBox = '';
           if (modFiles.length > 0) {
-            commitReviewBox = `
-              <div class="bg-slate-900 p-3 rounded-lg border border-slate-700 space-y-2 mt-3 text-slate-200">
-                <div class="flex justify-between items-center text-xs">
-                  <span class="font-bold text-sky-300">📝 Staged Changes (${modFiles.length} file${modFiles.length > 1 ? 's' : ''})</span>
-                  <span class="text-[10px] bg-slate-800 px-2 py-0.5 rounded font-mono text-amber-300">Target: ${currentBranch}</span>
-                </div>
-                
-                <details class="bg-slate-950 p-2 rounded border border-slate-800 text-xs">
-                  <summary class="cursor-pointer font-bold text-sky-400">View Git Diff</summary>
-                  <pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">${data.git_status.diff || 'No diff available'}</pre>
-                </details>
-
-                <div>
-                  <div class="flex items-center justify-between mb-1">
-                    <label class="text-[11px] text-slate-400">AI Generated Commit Message:</label>
-                    <button onclick="autoFillCommitMessage('${cardId}', '${modFilesJson}')" 
-                            class="text-[10px] text-amber-300 hover:text-amber-200 bg-slate-950 border border-slate-700 px-2 py-0.5 rounded flex items-center gap-1 transition">
-                      ✨ Regenerate
-                    </button>
-                  </div>
-                  <input type="text" id="commit-msg-${cardId}" value="${data.message.proposed_commit_msg.replace(/"/g, '&quot;')}" 
-                         class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-sky-500 focus:outline-none">
-                </div>
-
-                <div class="flex justify-end gap-2 pt-1">
-                  <button onclick="discardProposedChanges('${cardId}', '${modFilesJson}')" 
-                          class="bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1 rounded text-xs text-rose-300 transition">
-                    ✕ Discard
-                  </button>
-                  <button onclick="commitProposedChanges('${cardId}', '${modFilesJson}', '${encodeURIComponent(data.message.summary)}')" 
-                          class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1 rounded text-xs transition flex items-center gap-1">
-                    ✓ Commit & Append CHANGELOG
-                  </button>
-                </div>
-              </div>
-            `;
+            commitReviewBox = '<div class="bg-slate-900 p-3 rounded-lg border border-slate-700 space-y-2 mt-3 text-slate-200">' +
+              '<div class="flex justify-between items-center text-xs">' +
+              '<span class="font-bold text-sky-300">📝 Staged Changes (' + modFiles.length + ' files)</span>' +
+              '<span class="text-[10px] bg-slate-800 px-2 py-0.5 rounded font-mono text-amber-300">Target: ' + currentBranch + '</span>' +
+              '</div>' +
+              '<details class="bg-slate-950 p-2 rounded border border-slate-800 text-xs">' +
+              '<summary class="cursor-pointer font-bold text-sky-400">View Git Diff</summary>' +
+              '<pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">' + escapeHtml(data.git_status.diff || 'No diff available') + '</pre>' +
+              '</details>' +
+              '<div>' +
+              '<div class="flex items-center justify-between mb-1">' +
+              '<label class="text-[11px] text-slate-400">AI Generated Commit Message:</label>' +
+              '<button onclick="autoFillCommitMessage(\'' + cardId + '\', \'' + modFilesJson + '\')" class="text-[10px] text-amber-300 hover:text-amber-200 bg-slate-950 border border-slate-700 px-2 py-0.5 rounded flex items-center gap-1 transition">✨ Regenerate</button>' +
+              '</div>' +
+              '<input type="text" id="commit-msg-' + cardId + '" value="' + escapeHtml(data.message.proposed_commit_msg) + '" class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-sky-500 focus:outline-none">' +
+              '</div>' +
+              '<div class="flex justify-end gap-2 pt-1">' +
+              '<button onclick="discardProposedChanges(\'' + cardId + '\', \'' + modFilesJson + '\')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1 rounded text-xs text-rose-300 transition">✕ Discard</button>' +
+              '<button onclick="commitProposedChanges(\'' + cardId + '\', \'' + modFilesJson + '\', \'' + encodeURIComponent(data.message.summary || instruction) + '\')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1 rounded text-xs transition flex items-center gap-1">✓ Commit & Append CHANGELOG</button>' +
+              '</div></div>';
           }
 
-          aiMsgDiv.innerHTML = `
-            <div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">
-              <span>🤖 Local AI Agent</span>
-              <span class="text-[10px] text-slate-400 font-normal">${modFiles.length > 0 ? 'Changes Staged on Disk' : 'Advisory Response'}</span>
-            </div>
-            <div class="text-slate-200 whitespace-pre-wrap mt-2">${data.message.ai_response.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>${commitReviewBox}
-          `;
+          const modText = modFiles.length > 0 ? 'Changes Staged on Disk' : 'Advisory Response';
+          aiMsgDiv.innerHTML = '<div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">' +
+            '<span>🤖 Local AI Agent</span>' +
+            '<span class="text-[10px] text-slate-400 font-normal">' + modText + '</span>' +
+            '</div><div class="text-slate-200 whitespace-pre-wrap mt-2">' + escapeHtml(data.message.ai_response || '') + '</div>' + commitReviewBox;
+
           await loadWorkspaceFiles();
           await refreshWorkspaceStatus();
           await loadWorkspaceHistoryAndRender();
         } else {
-          aiMsgDiv.innerHTML = `<span class="text-rose-400">❌ Error: ${data.message}</span>`;
+          aiMsgDiv.innerHTML = '<span class="text-rose-400">❌ Error: ' + escapeHtml(data.message) + '</span>';
         }
       } catch(e) {
-        aiMsgDiv.innerHTML = `<span class="text-rose-400">❌ Communication Error: ${e.message}</span>`;
+        aiMsgDiv.innerHTML = '<span class="text-rose-400">❌ Communication Error: ' + escapeHtml(e.message) + '</span>';
       }
 
       sendBtn.disabled = false;
@@ -927,7 +907,7 @@
     }
 
     async function commitProposedChanges(cardId, modFilesJson, summaryEnc) {
-      const commitInput = document.getElementById(`commit-msg-${cardId}`);
+      const commitInput = document.getElementById('commit-msg-' + cardId);
       const commitMsg = commitInput ? commitInput.value.trim() : "AI Update";
       const modFiles = JSON.parse(decodeURIComponent(modFilesJson));
       const summary = decodeURIComponent(summaryEnc);
@@ -946,14 +926,13 @@
         });
         const data = await res.json();
         if (res.ok) {
-          card.querySelector('.bg-slate-900').innerHTML = `
-            <div class="flex justify-between items-center text-xs">
-              <span class="text-emerald-400 font-bold">✓ Committed to '${data.branch}' & Updated CHANGELOG.md</span>
-              <button onclick="pushCurrentBranch()" class="bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded text-xs font-semibold transition flex items-center gap-1">
-                🚀 Push to GitHub
-              </button>
-            </div>
-          `;
+          const targetCard = card.querySelector('.bg-slate-900');
+          if (targetCard) {
+            targetCard.innerHTML = '<div class="flex justify-between items-center text-xs">' +
+              '<span class="text-emerald-400 font-bold">✓ Committed to \'' + data.branch + '\' & Updated CHANGELOG.md</span>' +
+              '<button onclick="pushCurrentBranch()" class="bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded text-xs font-semibold transition flex items-center gap-1">🚀 Push to GitHub</button>' +
+              '</div>';
+          }
           loadSidebarWorkspaces();
           await refreshWorkspaceStatus();
         } else {
@@ -980,7 +959,10 @@
         });
         const data = await res.json();
         if (res.ok) {
-          card.querySelector('.bg-slate-900').innerHTML = `<span class="text-rose-400 font-bold">✕ Changes discarded.</span>`;
+          const targetCard = card.querySelector('.bg-slate-900');
+          if (targetCard) {
+            targetCard.innerHTML = '<span class="text-rose-400 font-bold">✕ Changes discarded.</span>';
+          }
           await loadWorkspaceFiles();
           await refreshWorkspaceStatus();
         } else {
@@ -992,7 +974,6 @@
     }
 
     async function showPendingDiffModal() {
-      const cardId = `pending-modal-${Date.now()}`;
       const promptMsg = prompt("Enter commit message for currently pending changes:");
       if (!promptMsg) return;
 
@@ -1009,7 +990,7 @@
         });
         const data = await res.json();
         if (res.ok) {
-          alert(`Committed successfully to branch '${data.branch}'!`);
+          alert("Committed successfully to branch '" + data.branch + "'!");
           loadSidebarWorkspaces();
           await refreshWorkspaceStatus();
           await loadWorkspaceHistoryAndRender();
@@ -1041,12 +1022,12 @@
 
     async function pushCurrentBranch() {
       if (!currentWorkspaceDir) return alert('Select an active project first.');
-      if (!confirm(`Push committed changes on branch '${currentBranch}' to GitHub origin/${currentBranch}?`)) return;
+      if (!confirm("Push committed changes on branch '" + currentBranch + "' to GitHub origin/" + currentBranch + "?")) return;
       
       const chatWindow = document.getElementById('chatHistoryWindow');
       const pushDiv = document.createElement('div');
       pushDiv.className = 'bg-slate-950 p-4 rounded border border-slate-800 text-xs font-mono text-slate-300';
-      pushDiv.innerHTML = `<span class="animate-pulse">🚀 Pushing commits to GitHub origin/${currentBranch}...</span>`;
+      pushDiv.innerHTML = '<span class="animate-pulse">🚀 Pushing commits to GitHub origin/' + currentBranch + '...</span>';
       chatWindow.appendChild(pushDiv);
       chatWindow.scrollTop = chatWindow.scrollHeight;
 
@@ -1058,13 +1039,13 @@
         });
         const data = await res.json();
         if (res.ok) {
-          pushDiv.innerHTML = `<div class="font-bold text-emerald-400">✓ Push Successful</div><p class="mt-1">${data.message}</p>`;
+          pushDiv.innerHTML = '<div class="font-bold text-emerald-400">✓ Push Successful</div><p class="mt-1">' + escapeHtml(data.message) + '</p>';
           await refreshWorkspaceStatus();
         } else {
-          pushDiv.innerHTML = `<div class="font-bold text-rose-400">❌ Push Failed</div><p class="mt-1">${data.message}</p>`;
+          pushDiv.innerHTML = '<div class="font-bold text-rose-400">❌ Push Failed</div><p class="mt-1">' + escapeHtml(data.message) + '</p>';
         }
       } catch(e) {
-        pushDiv.innerHTML = `<span class="text-rose-400">Push Error: ${e.message}</span>`;
+        pushDiv.innerHTML = '<span class="text-rose-400">Push Error: ' + escapeHtml(e.message) + '</span>';
       }
       chatWindow.scrollTop = chatWindow.scrollHeight;
     }
@@ -1074,7 +1055,7 @@
       const chatWindow = document.getElementById('chatHistoryWindow');
       const valDiv = document.createElement('div');
       valDiv.className = 'bg-slate-950 p-4 rounded border border-slate-800 text-xs font-mono text-slate-300';
-      valDiv.innerHTML = `<span class="animate-pulse">🧪 Running Python & Shell script syntax validation...</span>`;
+      valDiv.innerHTML = '<span class="animate-pulse">🧪 Running Python & Shell script syntax validation...</span>';
       chatWindow.appendChild(valDiv);
       chatWindow.scrollTop = chatWindow.scrollHeight;
 
@@ -1085,14 +1066,13 @@
           body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
         });
         const data = await res.json();
-        valDiv.innerHTML = `
-          <div class="font-bold ${data.passed ? 'text-emerald-400' : 'text-rose-400'} border-b border-slate-800 pb-1">
-            ${data.passed ? '✓ Syntax Checks Passed' : '❌ Syntax Errors Detected'}
-          </div>
-          <pre class="mt-2 text-[11px] whitespace-pre-wrap">${data.logs}</pre>
-        `;
+        const headerClass = data.passed ? 'text-emerald-400' : 'text-rose-400';
+        const headerText = data.passed ? '✓ Syntax Checks Passed' : '❌ Syntax Errors Detected';
+
+        valDiv.innerHTML = '<div class="font-bold ' + headerClass + ' border-b border-slate-800 pb-1">' + headerText + '</div>' +
+          '<pre class="mt-2 text-[11px] whitespace-pre-wrap">' + escapeHtml(data.logs) + '</pre>';
       } catch(e) {
-        valDiv.innerHTML = `<span class="text-rose-400">Validator Error: ${e.message}</span>`;
+        valDiv.innerHTML = '<span class="text-rose-400">Validator Error: ' + escapeHtml(e.message) + '</span>';
       }
       chatWindow.scrollTop = chatWindow.scrollHeight;
     }
@@ -1113,7 +1093,7 @@
       container.innerHTML = '<p class="text-xs text-slate-500">Loading timeline events from .lmstudio_history.json...</p>';
 
       try {
-        const res = await fetch(`/api/workspace/timeline?repo_dir_name=${encodeURIComponent(currentWorkspaceDir)}`);
+        const res = await fetch('/api/workspace/timeline?repo_dir_name=' + encodeURIComponent(currentWorkspaceDir));
         const data = await res.json();
         const events = data.events || [];
 
@@ -1122,51 +1102,41 @@
           return;
         }
 
-        container.innerHTML = events.map((evt, idx) => {
-          const isCommit = evt.type === 'commit';
+        container.innerHTML = events.map(evt => {
+          const isCommit = (evt.type === 'commit');
           const dotColor = isCommit ? 'bg-emerald-500 ring-emerald-950' : 'bg-sky-500 ring-sky-950';
           const typeBadge = isCommit 
-            ? `<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-mono text-[10px]">GIT COMMIT</span>`
-            : `<span class="bg-sky-950 text-sky-300 border border-sky-800 px-2 py-0.5 rounded font-mono text-[10px]">AI CODE EDIT</span>`;
+            ? '<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-mono text-[10px]">GIT COMMIT</span>'
+            : '<span class="bg-sky-950 text-sky-300 border border-sky-800 px-2 py-0.5 rounded font-mono text-[10px]">AI CODE EDIT</span>';
 
           const timeStr = evt.timestamp ? new Date(evt.timestamp).toLocaleString() : 'Recent';
           const modFiles = evt.modified_files || [];
-          const filesBadge = modFiles.length > 0 ? `<div class="text-[11px] text-slate-400 mt-1">Files: ${modFiles.map(f => `<code class="bg-slate-900 px-1 py-0.5 rounded text-sky-300">${f}</code>`).join(' ')}</div>` : '';
+          const filesBadge = modFiles.length > 0 ? ('<div class="text-[11px] text-slate-400 mt-1">Files: ' + modFiles.map(f => '<code class="bg-slate-900 px-1 py-0.5 rounded text-sky-300">' + escapeHtml(f) + '</code>').join(' ') + '</div>') : '';
 
           let diffBox = '';
           if (evt.diff && evt.diff.length > 10) {
-            diffBox = `
-              <details class="mt-2.5 bg-slate-900 p-2.5 rounded border border-slate-800 text-xs">
-                <summary class="cursor-pointer font-bold text-sky-400">View Staged Diff</summary>
-                <pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre font-mono">${evt.diff}</pre>
-              </details>
-            `;
+            diffBox = '<details class="mt-2.5 bg-slate-900 p-2.5 rounded border border-slate-800 text-xs">' +
+              '<summary class="cursor-pointer font-bold text-sky-400">View Staged Diff</summary>' +
+              '<pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre font-mono">' + escapeHtml(evt.diff) + '</pre>' +
+              '</details>';
           }
 
-          return `
-            <div class="relative pl-8 space-y-1 text-xs">
-              <div class="absolute left-2 top-1 w-3 h-3 ${dotColor} rounded-full ring-4"></div>
-              
-              <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2">
-                <div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800/80 pb-2">
-                  <div class="flex items-center gap-2">
-                    ${typeBadge}
-                    <span class="font-bold text-slate-200 text-sm">${evt.commit_msg || evt.instruction || 'Task'}</span>
-                  </div>
-                  <span class="text-[11px] text-slate-500 font-mono">${timeStr}</span>
-                </div>
+          const titleText = evt.commit_msg || evt.instruction || 'Task';
+          const summaryText = evt.summary || evt.instruction;
 
-                <p class="text-slate-300 text-xs leading-relaxed mt-1">
-                  <strong>Summary:</strong> ${evt.summary || evt.instruction}
-                </p>
-
-                ${filesBadge}${diffBox}
-              </div>
-            </div>
-          `;
+          return '<div class="relative pl-8 space-y-1 text-xs">' +
+            '<div class="absolute left-2 top-1 w-3 h-3 ' + dotColor + ' rounded-full ring-4"></div>' +
+            '<div class="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2">' +
+            '<div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800/80 pb-2">' +
+            '<div class="flex items-center gap-2">' + typeBadge + '<span class="font-bold text-slate-200 text-sm">' + escapeHtml(titleText) + '</span></div>' +
+            '<span class="text-[11px] text-slate-500 font-mono">' + timeStr + '</span>' +
+            '</div>' +
+            '<p class="text-slate-300 text-xs leading-relaxed mt-1"><strong>Summary:</strong> ' + escapeHtml(summaryText) + '</p>' +
+            filesBadge + diffBox +
+            '</div></div>';
         }).join('');
       } catch(e) {
-        container.innerHTML = `<p class="text-xs text-rose-400">Error loading timeline: ${e.message}</p>`;
+        container.innerHTML = '<p class="text-xs text-rose-400">Error loading timeline: ' + escapeHtml(e.message) + '</p>';
       }
     }
 
@@ -1202,26 +1172,22 @@
           return;
         }
 
-        container.innerHTML = accounts.map(a => `
-          <div class="bg-slate-950 p-3 rounded border border-slate-700 flex justify-between items-center text-xs">
-            <div class="flex items-center gap-2.5 overflow-hidden">
-              <img src="${a.avatar_url || 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png'}" class="w-7 h-7 rounded-full border border-slate-700">
-              <div class="truncate">
-                <div class="font-bold text-slate-200 truncate">${a.label}</div>
-                <div class="text-[11px] text-slate-400">@${a.username} • <span class="font-mono text-[10px] text-slate-500">${a.masked_token}</span></div>
-              </div>
-            </div>
-            <button onclick="removeAccount('${a.username}')" class="text-rose-400 hover:text-rose-300 px-2 py-1 bg-slate-900 rounded border border-slate-800 text-[11px] shrink-0" title="Remove Account">
-              ✕
-            </button>
-          </div>
-        `).join('');
+        container.innerHTML = accounts.map(a => {
+          return '<div class="bg-slate-950 p-3 rounded border border-slate-700 flex justify-between items-center text-xs">' +
+            '<div class="flex items-center gap-2.5 overflow-hidden">' +
+            '<img src="' + (a.avatar_url || 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png') + '" class="w-7 h-7 rounded-full border border-slate-700">' +
+            '<div class="truncate">' +
+            '<div class="font-bold text-slate-200 truncate">' + escapeHtml(a.label) + '</div>' +
+            '<div class="text-[11px] text-slate-400">@' + escapeHtml(a.username) + ' • <span class="font-mono text-[10px] text-slate-500">' + a.masked_token + '</span></div>' +
+            '</div></div>' +
+            '<button onclick="removeAccount(\'' + a.username + '\')" class="text-rose-400 hover:text-rose-300 px-2 py-1 bg-slate-900 rounded border border-slate-800 text-[11px] shrink-0" title="Remove Account">✕</button>' +
+            '</div>';
+        }).join('');
 
-        dropdown.innerHTML = '<option value="">-- Choose Account --</option>' + accounts.map(a => `
-          <option value="${a.username}">${a.label} (@${a.username})</option>
-        `).join('');
+        dropdown.innerHTML = '<option value="">-- Choose Account --</option>' + accounts.map(a => {
+          return '<option value="' + a.username + '">' + escapeHtml(a.label) + ' (@' + a.username + ')</option>';
+        }).join('');
       } catch(e) {
-        console.error("Load Accounts Error:", e);
         container.innerHTML = '<p class="text-xs text-rose-400">Error loading accounts.</p>';
       }
     }
@@ -1240,7 +1206,7 @@
         });
         const data = await res.json();
         if (res.ok) {
-          alert(`Account @${data.username} registered successfully!`);
+          alert('Account @' + data.username + ' registered successfully!');
           document.getElementById('newAccountLabel').value = '';
           document.getElementById('newAccountToken').value = '';
           toggleAddAccountForm();
@@ -1254,7 +1220,7 @@
     }
 
     async function removeAccount(username) {
-      if (!confirm(`Are you sure you want to remove account @${username}?`)) return;
+      if (!confirm("Are you sure you want to remove account @" + username + "?")) return;
       try {
         const res = await fetch('/api/github/accounts/remove', {
           method: 'POST',
@@ -1282,12 +1248,13 @@
 
       repoDropdown.innerHTML = '<option value="">Loading repositories...</option>';
       try {
-        const res = await fetch(`/api/github/repos?account_username=${encodeURIComponent(username)}`);
+        const res = await fetch('/api/github/repos?account_username=' + encodeURIComponent(username));
         const repos = await res.json();
         if (Array.isArray(repos) && repos.length > 0) {
-          repoDropdown.innerHTML = repos.map(r => `
-            <option value="${r.full_name}">${r.is_private ? '🔒 ' : ''}${r.full_name}</option>
-          `).join('');
+          repoDropdown.innerHTML = repos.map(r => {
+            const priv = r.is_private ? '🔒 ' : '';
+            return '<option value="' + r.full_name + '">' + priv + r.full_name + '</option>';
+          }).join('');
           fetchBranchesForCloneRepo();
         } else {
           repoDropdown.innerHTML = '<option value="">No repositories found</option>';
@@ -1304,9 +1271,9 @@
       if (!repoFullName || !username) return;
 
       try {
-        const res = await fetch(`/api/github/branches?account_username=${encodeURIComponent(username)}&repo_full_name=${encodeURIComponent(repoFullName)}`);
+        const res = await fetch('/api/github/branches?account_username=' + encodeURIComponent(username) + '&repo_full_name=' + encodeURIComponent(repoFullName));
         const branches = await res.json();
-        branchSelect.innerHTML = branches.map(b => `<option value="${b}">${b}</option>`).join('');
+        branchSelect.innerHTML = branches.map(b => '<option value="' + b + '">' + b + '</option>').join('');
       } catch(e) {}
     }
 
@@ -1356,11 +1323,11 @@
       const header = document.getElementById('catalogHeader');
       const sortLabel = document.getElementById('sortSelect').selectedOptions[0].text;
       
-      header.textContent = q === "" ? `All Available Models (${sortLabel})` : `Search Results for "${q}" (${sortLabel})`;
+      header.textContent = (q === "") ? ('All Available Models (' + sortLabel + ')') : ('Search Results for "' + q + '" (' + sortLabel + ')');
       container.innerHTML = '<p class="text-slate-400">Loading catalog from Hugging Face...</p>';
       
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort_by=${encodeURIComponent(sortBy)}&verified_only=${verifiedOnly}`);
+        const res = await fetch('/api/search?q=' + encodeURIComponent(q) + '&sort_by=' + encodeURIComponent(sortBy) + '&verified_only=' + verifiedOnly);
         let models = await res.json();
         container.innerHTML = '';
         
@@ -1378,36 +1345,27 @@
           card.className = 'bg-slate-950 p-4 rounded border border-slate-700 space-y-3';
           
           const verifiedBadge = m.is_verified 
-            ? `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer">🛡️ ${m.maker}</button>`
-            : `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition cursor-pointer">${m.maker}</button>`;
+            ? '<button onclick="searchAuthor(\'' + m.maker + '\')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer">🛡️ ' + m.maker + '</button>'
+            : '<button onclick="searchAuthor(\'' + m.maker + '\')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition cursor-pointer">' + m.maker + '</button>';
 
-          const trustBadge = `<span class="text-[10px] bg-slate-800 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono">⭐ ${m.trust_score}/100</span>`;
+          const trustBadge = '<span class="text-[10px] bg-slate-800 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono">⭐ ' + m.trust_score + '/100</span>';
 
-          card.innerHTML = `
-            <div class="flex justify-between items-start">
-              <div class="overflow-hidden pr-2">
-                <div class="flex items-center gap-1.5">
-                  ${verifiedBadge}${trustBadge}
-                </div>
-                <h3 class="font-bold text-slate-100 text-base mt-1.5 truncate" title="${m.model_name}">${m.model_name}</h3>
-                <div class="text-[11px] text-slate-400 mt-0.5">
-                  Author: <button onclick="searchAuthor('${m.maker}')" class="font-semibold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer">${m.maker}</button> • Updated: ${m.lastModified || 'Recent'}
-                </div>
-              </div>
-              <div class="text-right text-xs text-slate-400 shrink-0">
-                <div>⬇ ${(m.downloads || 0).toLocaleString()}</div>
-                <div>❤ ${(m.likes || 0).toLocaleString()}</div>
-              </div>
-            </div>
-            <button onclick="toggleFiles('${m.id}', this)" class="toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">
-                  Inspect Quantizations & Memory Fit
-            </button>
-            <div class="file-container mt-3 hidden space-y-2"></div>
-          `;
+          card.innerHTML = '<div class="flex justify-between items-start">' +
+            '<div class="overflow-hidden pr-2">' +
+            '<div class="flex items-center gap-1.5">' + verifiedBadge + ' ' + trustBadge + '</div>' +
+            '<h3 class="font-bold text-slate-100 text-base mt-1.5 truncate" title="' + escapeHtml(m.model_name) + '">' + escapeHtml(m.model_name) + '</h3>' +
+            '<div class="text-[11px] text-slate-400 mt-0.5">Author: <button onclick="searchAuthor(\'' + m.maker + '\')" class="font-semibold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer">' + m.maker + '</button> • Updated: ' + (m.lastModified || 'Recent') + '</div>' +
+            '</div>' +
+            '<div class="text-right text-xs text-slate-400 shrink-0">' +
+            '<div>⬇ ' + (m.downloads || 0).toLocaleString() + '</div>' +
+            '<div>❤ ' + (m.likes || 0).toLocaleString() + '</div>' +
+            '</div></div>' +
+            '<button onclick="toggleFiles(\'' + m.id + '\', this)" class="toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">Inspect Quantizations & Memory Fit</button>' +
+            '<div class="file-container mt-3 hidden space-y-2"></div>';
+
           container.appendChild(card);
         });
       } catch(err) {
-        console.error("Search Models Error:", err);
         container.innerHTML = '<p class="text-rose-400">Error retrieving models from Hugging Face.</p>';
       }
     }
@@ -1428,7 +1386,7 @@
       btn.className = 'toggle-btn w-full text-xs bg-slate-700 hover:bg-slate-600 border border-slate-500 text-sky-300 px-3 py-1.5 rounded transition';
       fileContainer.innerHTML = '<span class="text-xs text-slate-500">Fetching file metadata & calculating VRAM footprint...</span>';
       
-      const res = await fetch(`/api/model_files?repo_id=${encodeURIComponent(repoId)}`);
+      const res = await fetch('/api/model_files?repo_id=' + encodeURIComponent(repoId));
       const data = await res.json();
       fileContainer.innerHTML = '';
 
@@ -1456,51 +1414,37 @@
         const isDownloading = f.is_downloading || (activeTasksMap[f.group_name] && activeTasksMap[f.group_name].status === 'downloading');
 
         let btnHtml = '';
-        const btnId = `btn-${btoa(f.group_name).replace(/=/g, '')}`;
+        const btnId = 'btn-' + btoa(f.group_name).replace(/=/g, '');
         const filesPayload = encodeURIComponent(JSON.stringify(f.paths));
 
         if (isDownloaded) {
-          btnHtml = `
-            <button id="${btnId}" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">
-              ✓ Installed
-            </button>`;
+          btnHtml = '<button id="' + btnId + '" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">✓ Installed</button>';
         } else if (isDownloading) {
-          btnHtml = `
-            <button id="${btnId}" disabled class="bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1">
-              ⏳ Downloading...
-            </button>`;
+          btnHtml = '<button id="' + btnId + '" disabled class="bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1">⏳ Downloading...</button>';
         } else {
-          btnHtml = `
-            <button id="${btnId}" onclick="triggerDownload('${repoId}', '${f.group_name}', '${filesPayload}', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition">
-              Download
-            </button>`;
+          btnHtml = '<button id="' + btnId + '" onclick="triggerDownload(\'' + repoId + '\', \'' + f.group_name + '\', \'' + filesPayload + '\', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition">Download</button>';
         }
 
-        const shardBadge = f.is_sharded ? `<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded ml-1 font-mono">${f.shard_count} Shards</span>` : '';
+        const shardBadge = f.is_sharded ? ('<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded ml-1 font-mono">' + f.shard_count + ' Shards</span>') : '';
 
         const row = document.createElement('div');
         row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
-        row.innerHTML = `
-          <div class="space-y-1 overflow-hidden pr-2">
-            <div class="font-medium text-sky-200 truncate flex items-center" title="${f.display_name}">
-              <span class="truncate">${f.group_name}</span>
-              ${shardBadge}
-            </div>
-            <div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">
-              <span>Weight: <strong class="text-slate-200">${f.weight}</strong></span>
-              <span>•</span>
-              <span>Variant: <strong class="text-slate-200">${f.variant}</strong></span>
-              <span>•</span>
-              <span>Size: <strong class="text-emerald-400">${f.size_gb}</strong></span>
-              <span>(${f.est_vram} Req)</span>
-              ${fitBadge}
-            </div>
-            <div class="text-[11px] text-slate-400 italic bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/80">
-              ℹ ${f.description}
-            </div>
-          </div>
-          ${btnHtml}
-        `;
+        row.innerHTML = '<div class="space-y-1 overflow-hidden pr-2">' +
+          '<div class="font-medium text-sky-200 truncate flex items-center" title="' + escapeHtml(f.display_name) + '">' +
+          '<span class="truncate">' + escapeHtml(f.group_name) + '</span> ' + shardBadge +
+          '</div>' +
+          '<div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">' +
+          '<span>Weight: <strong class="text-slate-200">' + f.weight + '</strong></span>' +
+          '<span>•</span>' +
+          '<span>Variant: <strong class="text-slate-200">' + f.variant + '</strong></span>' +
+          '<span>•</span>' +
+          '<span>Size: <strong class="text-emerald-400">' + f.size_gb + '</strong></span>' +
+          '<span>(' + f.est_vram + ' Req)</span>' +
+          fitBadge +
+          '</div>' +
+          '<div class="text-[11px] text-slate-400 italic bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/80">ℹ ' + escapeHtml(f.description) + '</div>' +
+          '</div>' + btnHtml;
+
         table.appendChild(row);
       });
       fileContainer.appendChild(table);
@@ -1553,7 +1497,7 @@
     }
 
     async function deleteModel(filename) {
-      if (!confirm(`Are you sure you want to delete ${filename} to free up space?`)) return;
+      if (!confirm("Are you sure you want to delete " + filename + " to free up space?")) return;
       try {
         const res = await fetch('/api/delete', {
           method: 'POST',
@@ -1585,17 +1529,14 @@
           const isDone = info.status === 'completed';
           const barColor = isDone ? 'bg-emerald-500' : 'bg-sky-500';
 
-          return `
-            <div class="bg-slate-950 p-3 rounded border border-slate-700 space-y-2">
-              <div class="flex justify-between items-center text-xs">
-                <div class="font-medium truncate pr-2">${file}</div>
-                <div class="text-sky-300 font-mono shrink-0">${info.progress_str || info.status}</div>
-              </div>
-              <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                <div class="${barColor} h-1.5 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
-              </div>
-            </div>
-          `;
+          return '<div class="bg-slate-950 p-3 rounded border border-slate-700 space-y-2">' +
+            '<div class="flex justify-between items-center text-xs">' +
+            '<div class="font-medium truncate pr-2">' + escapeHtml(file) + '</div>' +
+            '<div class="text-sky-300 font-mono shrink-0">' + (info.progress_str || info.status) + '</div>' +
+            '</div>' +
+            '<div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">' +
+            '<div class="' + barColor + ' h-1.5 rounded-full transition-all duration-300" style="width: ' + pct + '%"></div>' +
+            '</div></div>';
         }).join('');
       } catch(e) {}
     }
@@ -1634,44 +1575,33 @@
           
           let actionBtn = '';
           if (isLoaded) {
-            actionBtn = `
-              <div class="flex items-center gap-1.5">
-                <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">
-                  ⚡ Loaded
-                </span>
-                <button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">
-                  ⏹
-                </button>
-              </div>`;
+            actionBtn = '<div class="flex items-center gap-1.5">' +
+              '<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">⚡ Loaded</span>' +
+              '<button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">⏹</button>' +
+              '</div>';
           } else {
-            actionBtn = `
-              <button onclick="loadModelIntoGPU('${m.path}', this)" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1">
-                🚀 Load to GPU
-              </button>`;
+            actionBtn = '<button onclick="loadModelIntoGPU(\'' + m.path + '\', this)" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1">🚀 Load to GPU</button>';
           }
 
-          return `
-            <div class="flex justify-between items-center bg-slate-950 p-3 rounded border ${isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700'} text-xs gap-3">
-              <div class="truncate pr-2">
-                <div class="font-medium text-slate-200 truncate" title="${m.filename}">${m.filename}</div>
-                <div class="text-slate-400 text-[10px] mt-0.5">Weight: ${m.weight} | Variant: ${m.variant}</div>
-              </div>
-              <div class="flex items-center gap-2 shrink-0">
-                <span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">${m.size_gb}</span>
-                ${actionBtn}
-                <button onclick="deleteModel('${m.filename}')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">
-                  🗑️
-                </button>
-              </div>
-            </div>
-          `;
+          const borderClass = isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700';
+
+          return '<div class="flex justify-between items-center bg-slate-950 p-3 rounded border ' + borderClass + ' text-xs gap-3">' +
+            '<div class="truncate pr-2">' +
+            '<div class="font-medium text-slate-200 truncate" title="' + escapeHtml(m.filename) + '">' + escapeHtml(m.filename) + '</div>' +
+            '<div class="text-slate-400 text-[10px] mt-0.5">Weight: ' + m.weight + ' | Variant: ' + m.variant + '</div>' +
+            '</div>' +
+            '<div class="flex items-center gap-2 shrink-0">' +
+            '<span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">' + m.size_gb + '</span>' +
+            actionBtn +
+            '<button onclick="deleteModel(\'' + m.filename + '\')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">🗑️</button>' +
+            '</div></div>';
         }).join('');
       } catch(e) {
-        list.innerHTML = `<span class="text-rose-400">Error loading local models: ${e.message}</span>`;
+        list.innerHTML = '<span class="text-rose-400">Error loading local models: ' + escapeHtml(e.message) + '</span>';
       }
     }
 
-    // Startup & Periodic Refresh
+    // Startup Initialization & Schedulers
     initHardwareInfo();
     fetchLocalModels();
     switchView('studio');
