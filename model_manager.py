@@ -1,6 +1,6 @@
 """
 LM Studio Server Entrypoint Router
-Dispatches API requests to modular core submodules.
+Dispatches API requests to modular core submodules with robust model key resolution.
 """
 
 import os
@@ -211,24 +211,83 @@ def api_load_model(req: LoadRequest):
     fname = os.path.basename(req.model_path)
     parent_dir = os.path.basename(os.path.dirname(req.model_path))
 
-    try: subprocess.run([lms, "import", "--yes", "--symbolic-link", req.model_path], env=LMS_ENV, capture_output=True, timeout=5)
-    except Exception: pass
-    try: subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, timeout=5)
-    except Exception: pass
+    # 1. Non-interactive import to ensure it is indexed
+    try:
+        subprocess.run([lms, "import", "--yes", "--symbolic-link", req.model_path], env=LMS_ENV, capture_output=True, timeout=8)
+    except Exception:
+        pass
 
+    # 2. Unload running models
+    try:
+        subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+    # 3. Dynamic Model Key Resolution via `lms ls`
+    candidates = []
+    try:
+        ls_res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=5)
+        if ls_res.returncode == 0:
+            f_clean = re.sub(r'[^a-zA-Z0-9]', '', fname.replace('.gguf', '')).lower()
+            p_clean = re.sub(r'[^a-zA-Z0-9]', '', parent_dir).lower()
+            
+            for line in ls_res.stdout.split("\n"):
+                l_str = line.strip()
+                if not l_str or l_str.startswith("---") or "LLM" in l_str or "EMBEDDING" in l_str or "SIZE" in l_str:
+                    continue
+                parts = l_str.split()
+                if parts:
+                    key = parts[0]
+                    k_clean = re.sub(r'[^a-zA-Z0-9]', '', key).lower()
+                    if k_clean in f_clean or f_clean in k_clean or k_clean in p_clean:
+                        candidates.append(key)
+    except Exception:
+        pass
+
+    # Secondary candidates
     clean_base = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname)
-    candidates = [clean_base, fname, parent_dir, req.model_path]
+    if parent_dir and "_" in parent_dir:
+        candidates.append(parent_dir.replace("_", "/"))
+    candidates.extend([parent_dir, clean_base, fname, req.model_path])
+    
+    # Deduplicate candidates while preserving order
+    seen = set()
+    dedup_candidates = []
+    for c in candidates:
+        if c and c not in seen:
+            seen.add(c)
+            dedup_candidates.append(c)
 
     last_error = ""
-    for target in candidates:
+    for target in dedup_candidates:
         try:
-            cmd = [lms, "load", target, f"--gpu={req.gpu_offload}", f"--context-length={req.context_length}", f"--ttl={req.ttl}", "--yes"]
-            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=15)
-            if res.returncode == 0: return {"status": "success", "loaded_target": target, "output": res.stdout}
-            else: last_error = (res.stderr or res.stdout or "").strip()
-        except Exception as err: last_error = str(err)
+            cmd = [
+                lms, "load", target,
+                f"--gpu={req.gpu_offload}",
+                f"--context-length={req.context_length}",
+                f"--ttl={req.ttl}",
+                "--yes"
+            ]
+            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=20)
+            if res.returncode == 0:
+                return {
+                    "status": "success",
+                    "loaded_target": target,
+                    "output": res.stdout or "Model loaded successfully into VRAM."
+                }
+            else:
+                last_error = (res.stderr or res.stdout or "").strip()
+        except Exception as err:
+            last_error = str(err)
 
-    return JSONResponse(status_code=400, content={"status": "error", "message": last_error or "Unable to match model"})
+    return JSONResponse(
+        status_code=400,
+        content={
+            "status": "error",
+            "message": last_error or f"Could not find or load model '{fname}' in LM Studio library.",
+            "attempted_candidates": dedup_candidates
+        }
+    )
 
 @app.post("/api/unload_model")
 def api_unload_model():

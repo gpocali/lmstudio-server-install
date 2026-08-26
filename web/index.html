@@ -517,9 +517,11 @@
           `;
           await loadWorkspaceFiles();
         } else {
-          aiMsgDiv.innerHTML = `<span class="text-rose-400">❌ Error: ${data.message}</span>`;
+          console.error("Agent Execution Failed:", data);
+          aiMsgDiv.innerHTML = `<span class="text-rose-400">❌ Error: ${data.message || JSON.stringify(data)}</span>`;
         }
       } catch(e) {
+        console.error("Agent Communication Error:", e);
         aiMsgDiv.innerHTML = `<span class="text-rose-400">❌ Communication Error: ${e.message}</span>`;
       }
 
@@ -551,6 +553,7 @@
           <pre class="mt-2 text-[11px] whitespace-pre-wrap">${data.logs}</pre>
         `;
       } catch(e) {
+        console.error("Validator Error:", e);
         valDiv.innerHTML = `<span class="text-rose-400">Validator Error: ${e.message}</span>`;
       }
       chatWindow.scrollTop = chatWindow.scrollHeight;
@@ -577,9 +580,11 @@
         if (res.ok) {
           pushDiv.innerHTML = `<div class="font-bold text-emerald-400">✓ Push Successful</div><p class="mt-1">${data.message}</p>`;
         } else {
+          console.error("Git Push Failed:", data);
           pushDiv.innerHTML = `<div class="font-bold text-rose-400">❌ Push Failed</div><p class="mt-1">${data.message}</p>`;
         }
       } catch(e) {
+        console.error("Push Communication Error:", e);
         pushDiv.innerHTML = `<span class="text-rose-400">Push Error: ${e.message}</span>`;
       }
       chatWindow.scrollTop = chatWindow.scrollHeight;
@@ -636,6 +641,7 @@
           <option value="${a.username}">${a.label} (@${a.username})</option>
         `).join('');
       } catch(e) {
+        console.error("Load Accounts Error:", e);
         container.innerHTML = '<p class="text-xs text-rose-400">Error loading accounts.</p>';
       }
     }
@@ -660,9 +666,11 @@
           toggleAddAccountForm();
           loadAccounts();
         } else {
+          console.error("Add Account Failed:", data);
           alert('Failed to add account: ' + data.message);
         }
       } catch(e) {
+        console.error("Add Account Communication Error:", e);
         alert('Communication Error: ' + e.message);
       }
     }
@@ -679,9 +687,11 @@
         if (res.ok) {
           loadAccounts();
         } else {
+          console.error("Remove Account Error:", data);
           alert('Error: ' + data.message);
         }
       } catch(e) {
+        console.error("Remove Account Communication Error:", e);
         alert('Communication Error: ' + e.message);
       }
     }
@@ -707,6 +717,7 @@
           repoDropdown.innerHTML = '<option value="">No repositories found</option>';
         }
       } catch(e) {
+        console.error("Load Repos Error:", e);
         repoDropdown.innerHTML = '<option value="">Error loading repos</option>';
       }
     }
@@ -721,7 +732,9 @@
         const res = await fetch(`/api/github/branches?account_username=${encodeURIComponent(username)}&repo_full_name=${encodeURIComponent(repoFullName)}`);
         const branches = await res.json();
         branchSelect.innerHTML = branches.map(b => `<option value="${b}">${b}</option>`).join('');
-      } catch(e) {}
+      } catch(e) {
+        console.error("Fetch Branches Error:", e);
+      }
     }
 
     async function submitCloneProject() {
@@ -742,9 +755,11 @@
           switchView('studio');
           selectStudioProject(data.dir_name, data.display_name, data.branch);
         } else {
+          console.error("Clone Failed:", data);
           alert('Clone failed: ' + data.message);
         }
       } catch(e) {
+        console.error("Clone Communication Error:", e);
         alert('Communication Error: ' + e.message);
       }
     }
@@ -822,6 +837,7 @@
           container.appendChild(card);
         });
       } catch(err) {
+        console.error("Search Models Error:", err);
         container.innerHTML = '<p class="text-rose-400">Error retrieving models from Hugging Face.</p>';
       }
     }
@@ -947,9 +963,13 @@
         });
         const data = await res.json();
         if (!res.ok || data.status !== 'success') {
+          console.error("Load Model Failure Payload:", data);
           alert('Load Failure Output from LMS:\n\n' + (data.message || JSON.stringify(data)));
+        } else {
+          console.log("Model Loaded Successfully:", data);
         }
       } catch(e) {
+        console.error("Load Model Communication Error:", e);
         alert('Communication Error: ' + e.message);
       }
       await initHardwareInfo();
@@ -960,7 +980,9 @@
       if (btn) btn.textContent = '⏳ Unloading...';
       try {
         await fetch('/api/unload_model', {method: 'POST'});
-      } catch(e) {}
+      } catch(e) {
+        console.error("Unload Model Error:", e);
+      }
       if (btn) btn.textContent = '⏹ Unload All';
       await initHardwareInfo();
       await fetchLocalModels();
@@ -968,46 +990,52 @@
 
     async function deleteModel(filename) {
       if (!confirm(`Are you sure you want to delete ${filename} to free up space?`)) return;
-      const res = await fetch('/api/delete', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({filename: filename})
-      });
-      const data = await res.json();
-      localModelSet.delete(filename);
-      if (data.storage) renderStorageMetrics(data.storage);
-      fetchLocalModels();
+      try {
+        const res = await fetch('/api/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({filename: filename})
+        });
+        const data = await res.json();
+        localModelSet.delete(filename);
+        if (data.storage) renderStorageMetrics(data.storage);
+        fetchLocalModels();
+      } catch(e) {
+        console.error("Delete Model Error:", e);
+      }
     }
 
     async function updateTasks() {
-      const res = await fetch('/api/tasks');
-      const data = await res.json();
-      activeTasksMap = data;
-      const list = document.getElementById('tasksList');
-      if (!list) return;
-      
-      if (Object.keys(data).length === 0) {
-        list.innerHTML = '<span class="text-slate-500">No active downloads</span>';
-        return;
-      }
+      try {
+        const res = await fetch('/api/tasks');
+        const data = await res.json();
+        activeTasksMap = data;
+        const list = document.getElementById('tasksList');
+        if (!list) return;
+        
+        if (Object.keys(data).length === 0) {
+          list.innerHTML = '<span class="text-slate-500">No active downloads</span>';
+          return;
+        }
 
-      list.innerHTML = Object.entries(data).map(([file, info]) => {
-        const pct = info.percent || 0;
-        const isDone = info.status === 'completed';
-        const barColor = isDone ? 'bg-emerald-500' : 'bg-sky-500';
+        list.innerHTML = Object.entries(data).map(([file, info]) => {
+          const pct = info.percent || 0;
+          const isDone = info.status === 'completed';
+          const barColor = isDone ? 'bg-emerald-500' : 'bg-sky-500';
 
-        return `
-          <div class="bg-slate-950 p-3 rounded border border-slate-700 space-y-2">
-            <div class="flex justify-between items-center text-xs">
-              <div class="font-medium truncate pr-2">${file}</div>
-              <div class="text-sky-300 font-mono shrink-0">${info.progress_str || info.status}</div>
+          return `
+            <div class="bg-slate-950 p-3 rounded border border-slate-700 space-y-2">
+              <div class="flex justify-between items-center text-xs">
+                <div class="font-medium truncate pr-2">${file}</div>
+                <div class="text-sky-300 font-mono shrink-0">${info.progress_str || info.status}</div>
+              </div>
+              <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                <div class="${barColor} h-1.5 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
+              </div>
             </div>
-            <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-              <div class="${barColor} h-1.5 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
-            </div>
-          </div>
-        `;
-      }).join('');
+          `;
+        }).join('');
+      } catch(e) {}
     }
 
     async function fetchLocalModels() {
@@ -1077,6 +1105,7 @@
           `;
         }).join('');
       } catch(e) {
+        console.error("Fetch Local Models Error:", e);
         list.innerHTML = `<span class="text-rose-400">Error loading local models: ${e.message}</span>`;
       }
     }
