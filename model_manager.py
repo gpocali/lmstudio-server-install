@@ -5,6 +5,7 @@ import ctypes
 import shutil
 import subprocess
 import threading
+import concurrent.futures
 import requests
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -23,7 +24,6 @@ class DownloadRequest(BaseModel):
 
 def get_system_hardware_info():
     """Detects System RAM and Dedicated GPU VRAM."""
-    # 1. System RAM Detection
     sys_ram_total_gb = 0.0
     sys_ram_avail_gb = 0.0
     try:
@@ -38,7 +38,6 @@ def get_system_hardware_info():
     except Exception:
         pass
 
-    # 2. GPU Detection
     gpu_found = False
     gpu_name = "NVIDIA Dedicated GPU"
     gpu_vram_total_gb = 0.0
@@ -177,6 +176,17 @@ def parse_model_metadata(filename: str, repo_id: str):
 
     return weight, variant
 
+def fetch_single_file_size(repo_id: str, filename: str):
+    """Probe exact file size using HTTP HEAD directly against the resolve endpoint."""
+    url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+    try:
+        r = requests.head(url, headers={"Accept-Encoding": "identity"}, allow_redirects=True, timeout=5)
+        if r.status_code == 200:
+            return int(r.headers.get("Content-Length", 0))
+    except Exception:
+        pass
+    return 0
+
 def run_download_job(repo_id: str, filename: str):
     DOWNLOAD_JOBS[filename] = {"status": "downloading", "progress": "In Progress"}
     url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
@@ -256,59 +266,68 @@ def search_hf(q: str = "", sort_by: str = "downloads"):
 @app.get("/api/model_files")
 def get_model_files(repo_id: str):
     """
-    Fetches exact file sizes via the Hugging Face Tree API.
-    Falls back to the standard API if tree inspection fails.
+    Retrieves GGUF files with exact byte sizes using recursive tree parsing 
+    and parallel HEAD request fallback.
     """
-    files_data = []
-    
-    # Primary Method: Hugging Face Tree API (contains exact file sizes & LFS details)
-    tree_url = f"https://huggingface.co/api/models/{repo_id}/tree/main"
+    raw_files = {}
+
+    # Step 1: Query recursive tree endpoint
+    tree_url = f"https://huggingface.co/api/models/{repo_id}/tree/main?recursive=true"
     try:
-        resp = requests.get(tree_url, timeout=10)
+        resp = requests.get(tree_url, timeout=8)
         if resp.status_code == 200:
-            tree_items = resp.json()
-            if isinstance(tree_items, list):
-                for item in tree_items:
-                    fname = item.get("path", "")
-                    if fname.endswith(".gguf"):
-                        size_bytes = item.get("size", 0)
-                        # Check LFS size if top-level size is missing
-                        if not size_bytes and "lfs" in item and isinstance(item["lfs"], dict):
-                            size_bytes = item["lfs"].get("size", 0)
-                        files_data.append({"rfilename": fname, "size": size_bytes})
+            tree_data = resp.json()
+            if isinstance(tree_data, list):
+                for item in tree_data:
+                    path = item.get("path", "")
+                    if path.endswith(".gguf"):
+                        size = item.get("size", 0)
+                        if not size and "lfs" in item and isinstance(item["lfs"], dict):
+                            size = item["lfs"].get("size", 0)
+                        raw_files[path] = size
     except Exception:
         pass
 
-    # Fallback Method: Standard models endpoint if tree returned nothing
-    if not files_data:
+    # Step 2: Fallback to standard model metadata if tree returned nothing
+    if not raw_files:
         try:
             url = f"https://huggingface.co/api/models/{repo_id}"
-            res = requests.get(url, timeout=10).json()
+            res = requests.get(url, timeout=8).json()
             siblings = res.get("siblings", []) if isinstance(res, dict) else []
             for s in siblings:
                 fname = s.get("rfilename", "")
                 if fname.endswith(".gguf"):
-                    files_data.append({"rfilename": fname, "size": s.get("size", 0)})
+                    raw_files[fname] = s.get("size", 0)
         except Exception:
             pass
+
+    # Step 3: Run parallel HEAD probes for any file missing exact size
+    missing_sizes = [f for f, size in raw_files.items() if not size or size == 0]
+    if missing_sizes:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            future_to_file = {executor.submit(fetch_single_file_size, repo_id, f): f for f in missing_sizes}
+            for future in concurrent.futures.as_completed(future_to_file):
+                f_name = future_to_file[future]
+                try:
+                    probed_size = future.result()
+                    if probed_size > 0:
+                        raw_files[f_name] = probed_size
+                except Exception:
+                    pass
 
     hw = get_system_hardware_info()
     vram_total = hw["gpu"]["total_vram_gb"]
     ram_total = hw["system_ram"]["total_gb"]
 
     parsed_files = []
-    for item in files_data:
-        fname = item.get("rfilename", "")
+    for fname, size_bytes in raw_files.items():
         weight, variant = parse_model_metadata(fname, repo_id)
         
-        size_bytes = item.get("size", 0)
-        size_gb = round(size_bytes / (1024**3), 2) if size_bytes else None
+        size_gb = round(size_bytes / (1024**3), 2) if size_bytes > 0 else 0.0
+        est_mem_req = round(size_gb * 1.2, 2) if size_gb > 0 else 0.0
 
-        # Memory estimation: model file size + 20% overhead for context/KV cache
-        est_mem_req = round(size_gb * 1.2, 2) if size_gb else None
-        
         fit_status = "unknown"
-        if est_mem_req:
+        if size_gb > 0:
             if vram_total > 0:
                 if est_mem_req <= vram_total:
                     fit_status = "fits_gpu"
@@ -322,17 +341,21 @@ def get_model_files(repo_id: str):
                 else:
                     fit_status = "exceeds"
 
+        size_label = f"{size_gb} GB" if size_gb > 0 else "Pending..."
+        est_vram_label = f"~{est_mem_req} GB" if est_mem_req > 0 else "N/A"
+
         parsed_files.append({
             "filename": fname,
             "weight": weight,
             "variant": variant,
-            "size_gb": f"{size_gb} GB" if size_gb else "Unknown",
-            "est_vram": f"~{est_mem_req} GB" if est_mem_req else "N/A",
+            "size_gb": size_label,
+            "raw_size_gb": size_gb,
+            "est_vram": est_vram_label,
             "fit_status": fit_status
         })
 
     # Sort files by size ascending
-    parsed_files.sort(key=lambda x: float(x["size_gb"].replace(" GB", "")) if "GB" in x["size_gb"] else 999)
+    parsed_files.sort(key=lambda x: x["raw_size_gb"] if x["raw_size_gb"] > 0 else 999)
 
     return {
         "repo_id": repo_id,
@@ -557,7 +580,7 @@ def get_ui():
           const data = await res.json();
           fileContainer.innerHTML = '';
 
-          if (data.files.length === 0) {
+          if (!data.files || data.files.length === 0) {
             fileContainer.innerHTML = '<span class="text-xs text-slate-500">No .gguf files found in repository.</span>';
             return;
           }
