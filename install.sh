@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Ensure script is executed with root/sudo privileges
 if [ "$EUID" -ne 0 ]; then
-  echo "[-] Please run this script with sudo: sudo ./install.sh"
+  echo "[-] Please run this script with sudo: wget -qO- ... | sudo bash"
   exit 1
 fi
 
@@ -36,7 +36,7 @@ else
   usermod -d "$APP_DIR" -s /bin/bash "$SERVICE_USER"
 fi
 
-# Ensure correct base permissions regardless of useradd defaults
+# Force world-traversable permissions (755) to override Ubuntu's 750 home directory default
 mkdir -p "$APP_DIR" "$MODELS_DIR" "${APP_DIR}/.cache" "${APP_DIR}/.lmstudio"
 chmod 755 "$APP_DIR"
 chmod -R u+rwX,go+rX "$APP_DIR"
@@ -65,10 +65,11 @@ if [ -z "$LMS_BIN" ] || [ ! -x "$LMS_BIN" ]; then
   exit 1
 fi
 
+chmod +x "$LMS_BIN"
 ln -sf "$LMS_BIN" /usr/local/bin/lms
 echo "[✓] LMS CLI symlinked to /usr/local/bin/lms"
 
-# 5. LM Link Setup (Interactive if needed)
+# 5. LM Link Setup (Interactive via /dev/tty if stdin is piped)
 echo ""
 echo "--- [ LM Link & Account Authentication ] ---"
 if ! sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" link status >/dev/null 2>&1; then
@@ -79,25 +80,24 @@ fi
 sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" link enable || true
 
 CURRENT_HOST=$(hostname)
-read -rp "[?] Enter node name for LM Link [default: $CURRENT_HOST]: " INPUT_DEVICE_NAME
+INPUT_DEVICE_NAME=""
+if [ -t 0 ]; then
+  read -rp "[?] Enter node name for LM Link [default: $CURRENT_HOST]: " INPUT_DEVICE_NAME
+elif [ -e /dev/tty ]; then
+  read -rp "[?] Enter node name for LM Link [default: $CURRENT_HOST]: " INPUT_DEVICE_NAME < /dev/tty || true
+fi
+
 DEVICE_NAME="${INPUT_DEVICE_NAME:-$CURRENT_HOST}"
 sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" link set-device-name "$DEVICE_NAME" || true
 
-# 6. Install model_manager.py
+# 6. Fetch model_manager.py
 echo ""
 echo "--- [ Installing Web Model Manager ] ---"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+echo "[+] Downloading latest model_manager.py from GitHub..."
+curl -fsSL "${REPO_RAW_URL}/model_manager.py" -o "${APP_DIR}/model_manager.py"
 
-if [ -f "${SCRIPT_DIR}/model_manager.py" ]; then
-  echo "[+] Copying local model_manager.py to ${APP_DIR}/model_manager.py..."
-  cp "${SCRIPT_DIR}/model_manager.py" "${APP_DIR}/model_manager.py"
-else
-  echo "[+] Fetching model_manager.py from GitHub repository..."
-  curl -fsSL "${REPO_RAW_URL}/model_manager.py" -o "${APP_DIR}/model_manager.py"
-fi
-
-chown "${SERVICE_USER}:${SERVICE_GROUP}" "${APP_DIR}/model_manager.py"
 chmod 755 "${APP_DIR}/model_manager.py"
+chown "${SERVICE_USER}:${SERVICE_GROUP}" "${APP_DIR}/model_manager.py"
 
 # 7. Create Systemd Services
 echo ""
@@ -154,7 +154,12 @@ systemctl restart lmstudio.service modelmanager.service
 # 8. Optional Open WebUI Container Deployment
 echo ""
 echo "--- [ Open WebUI Integration ] ---"
-read -rp "[?] Deploy/Update Open WebUI container with Web Search? (y/n) [default: y]: " INSTALL_WEBUI
+INSTALL_WEBUI="y"
+if [ -t 0 ]; then
+  read -rp "[?] Deploy/Update Open WebUI container with Web Search? (y/n) [default: y]: " INSTALL_WEBUI
+elif [ -e /dev/tty ]; then
+  read -rp "[?] Deploy/Update Open WebUI container with Web Search? (y/n) [default: y]: " INSTALL_WEBUI < /dev/tty || true
+fi
 INSTALL_WEBUI="${INSTALL_WEBUI:-y}"
 
 if [[ "$INSTALL_WEBUI" =~ ^[Yy]$ ]]; then
@@ -176,6 +181,7 @@ if [[ "$INSTALL_WEBUI" =~ ^[Yy]$ ]]; then
   chown -R 1000:1000 "$WEBUI_DATA_DIR"
 
   if docker ps -a --format '{{.Names}}' | grep -Eq "^open-webui$"; then
+    echo "[*] Refreshing Open WebUI container..."
     docker rm -f open-webui >/dev/null
   fi
 
@@ -193,6 +199,11 @@ if [[ "$INSTALL_WEBUI" =~ ^[Yy]$ ]]; then
     --restart always \
     ghcr.io/open-webui/open-webui:main
 fi
+
+# Ensure final permissions are synchronized
+chmod 755 "$APP_DIR"
+chmod -R u+rwX,go+rX "$APP_DIR"
+chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$APP_DIR"
 
 SERVER_IP=$(hostname -I | awk '{print $1}')
 echo ""

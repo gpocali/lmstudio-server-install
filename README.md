@@ -1,107 +1,101 @@
 # LM Studio Headless Server & Remote Model Manager
 
-An automated deployment script and standalone web manager for running [LM Studio](https://lmstudio.ai/) headlessly on Ubuntu Server 24.04 LTS. 
+An automated deployment script and standalone web manager for running [LM Studio](https://lmstudio.ai/) headlessly on Ubuntu Server 24.04 LTS (and compatible versions). 
 
-This repository allows you to host local LLMs on a dedicated server mount (`/storage`), control the instance remotely across your LAN, search and download Hugging Face GGUF models via a web interface, and optionally deploy Open WebUI with integrated web search.
+This setup runs LM Studio on a dedicated mount (`/storage`), allows remote access and management across your LAN, provides a browser-based Hugging Face GGUF search and downloader, and optionally deploys Open WebUI with live web search.
+
+---
+
+## Quickstart (One-Liner Installation)
+
+You do not need to clone the repository manually. Run this command directly on your Ubuntu server:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/gpocali/lmstudio-server-install/main/install.sh | sudo bash
+
+```
 
 ---
 
 ## Features
 
-- **Dedicated Service User:** Runs under an isolated, unprivileged system account (`lmstudio`) rather than a personal user profile.
-- **Dedicated Storage Mount:** Isolates application caches, runtimes, and downloaded GGUF weights to `/storage/lmstudio`.
-- **Systemd Background Services:** Automatically starts `lmstudio.service` and `modelmanager.service` at boot with auto-restart on failure.
-- **Standalone Web Model Manager:** Web UI on port `8080` to search Hugging Face GGUF repositories, inspect available quantizations (`Q4_K_M`, `Q8_0`, etc.), and execute asynchronous background downloads directly to the server.
-- **Native LM Link Support:** Pairs with the LM Studio desktop client across your network using end-to-end encrypted mesh networking.
-- **Optional Open WebUI Integration:** Automated containerized chat interface on port `3000` with DuckDuckGo web search and URL scraping pre-configured.
-- **Idempotent / Upgrade Safe:** Run the script repeatedly to update LM Studio CLI binaries, refresh dependencies, or reconfigure network parameters without losing data.
+* **Dedicated Service User:** Runs under an isolated system account (`lmstudio`) rather than a physical user profile.
+* **Dedicated Storage Mount:** Isolates application binaries, cache, and downloaded GGUF weights to `/storage/lmstudio`.
+* **Systemd Background Daemons:** Automatically starts `lmstudio.service` and `modelmanager.service` at boot with automatic recovery.
+* **Standalone Web Model Manager:** Web UI on port `8080` to search Hugging Face GGUF repositories, view quantizations (`Q4_K_M`, `Q8_0`, etc.), and execute asynchronous background downloads.
+* **Native LM Link Integration:** Pairs with the LM Studio desktop client across your network via encrypted mesh networking.
+* **Optional Open WebUI Stack:** Docker-based web chat interface on port `3000` with DuckDuckGo search and URL scraping pre-configured.
+* **Idempotent / Upgrade Safe:** Re-run the command at any time to pull updates, refresh dependencies, or reconfigure network parameters.
 
 ---
 
 ## Port Allocation
 
 | Service | Port | Endpoint / Description |
-| :--- | :--- | :--- |
-| **LM Studio API** | `1234` | `http://<SERVER_IP>:1234/v1` (OpenAI-compatible endpoint) |
-| **Model Manager UI** | `8080` | `http://<SERVER_IP>:8080` (Hugging Face model browser & downloader) |
+| --- | --- | --- |
+| **LM Studio API** | `1234` | `http://<SERVER_IP>:1234/v1` (OpenAI-compatible REST API) |
+| **Model Manager UI** | `8080` | `http://<SERVER_IP>:8080` (Hugging Face GGUF browser & downloader) |
 | **Open WebUI (Optional)** | `3000` | `http://<SERVER_IP>:3000` (Multi-user web chat + RAG search) |
 
 ---
 
 ## Prerequisites
 
-- **Operating System:** Ubuntu Server 22.04 LTS, 24.04 LTS or 26.04 LTS
-- **Mount Point:** A mounted storage drive available at `/storage` (or edit `BASE_STORAGE` in `install.sh`)
-- **Privileges:** `sudo` / root administrative access
+* **OS:** Ubuntu Server 22.04 LTS / 24.04 LTS / 26.04 LTS
+* **Mount Point:** A mounted storage drive at `/storage` (or modify `BASE_STORAGE` in `install.sh`)
+* **Privileges:** `sudo` / root administrative access
 
 ---
 
-## Installation
+## Interactive Installation Prompts
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/gpocali/lmstudio-server-install.git
-cd lmstudio-server-install
+When running the installer, you will be prompted for:
 
-```
-
-### 2. Make the Installer Executable & Run
-
-```bash
-chmod +x install.sh
-sudo ./install.sh
-
-```
-
-### 3. Interactive Prompts
-
-During installation, the script will guide you through:
-
-1. **LM Link Authentication:** Prompts for authentication if the machine has not yet been linked to an LM Studio account.
-2. **Device Display Name:** Sets the name for this node as it appears in the LM Studio desktop client.
-3. **Open WebUI Installation:** Asks whether to deploy the Dockerized Open WebUI container (`y/n`).
+1. **LM Link Authentication:** Provides a browser URL to pair the server with your LM Studio account if not already authenticated.
+2. **Device Display Name:** Sets the name for this node in the LM Studio desktop client (defaults to hostname).
+3. **Open WebUI Deployment:** Asks whether to deploy the Dockerized Open WebUI container (`y/n`).
 
 ---
 
-## Usage
+## Usage & Management
 
-### 1. Remote Model Management (Web UI)
+### 1. Web Model Manager
 
-Open a browser to **`http://<SERVER_IP>:8080`**:
+Navigate to **`http://<SERVER_IP>:8080`** in any browser:
 
-1. Type a search query (e.g., `Llama-3.1`, `Qwen2.5-Coder`, `bartowski`).
-2. Click **View Quantizations** to expand the list of `.gguf` variants.
-3. Click **Download** to stream the file directly into `/storage/lmstudio/models` in the background.
+1. Search for a model name or organization (e.g., `Meta-Llama-3.1-8B`, `Qwen2.5-Coder`, `bartowski`).
+2. Click **View Quantizations** to expand the list of available `.gguf` files.
+3. Click **Download** to stream the model to `/storage/lmstudio/models` in the background.
 
 ### 2. Service Management
 
-Both services are managed via `systemctl`:
+Both components run as systemd units:
 
 ```bash
-# Check LM Studio daemon status
+# LM Studio Core Daemon
 sudo systemctl status lmstudio.service
-
-# Check Model Manager web service status
-sudo systemctl status modelmanager.service
-
-# View live application logs
+sudo systemctl restart lmstudio.service
 journalctl -u lmstudio.service -f
+
+# Model Manager Web UI
+sudo systemctl status modelmanager.service
+sudo systemctl restart modelmanager.service
 journalctl -u modelmanager.service -f
 
 ```
 
-### 3. CLI Management (`lms`)
+### 3. Command Line Interface (`lms`)
 
-The `lms` command-line utility is available globally from any terminal session:
+The `lms` command is symlinked globally to `/usr/local/bin/lms`:
 
 ```bash
 # View active server state and loaded models
 lms status
 
-# Load a specific model into VRAM
+# Load a downloaded model into memory
 lms load
 
-# Unload active models
+# Unload all active models from memory
 lms unload --all
 
 ```
