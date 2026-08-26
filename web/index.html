@@ -41,7 +41,7 @@
   <!-- ==================== VIEW 1: PROJECT STUDIO (IDE & CHAT) ==================== -->
   <main id="viewStudio" class="flex-1 flex overflow-hidden">
     
-    <!-- Left Sidebar: Gemini-Style Workspace & Project List -->
+    <!-- Left Sidebar: Workspace & Project List -->
     <aside class="w-80 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0">
       <div class="p-4 border-b border-slate-800 flex justify-between items-center">
         <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Active Workspaces</h2>
@@ -314,6 +314,8 @@
       }
     }
 
+    // ---------------- Hardware & Stats ----------------
+
     async function initHardwareInfo() {
       try {
         const res = await fetch('/api/system_info');
@@ -328,9 +330,7 @@
         }
 
         if (data.storage) {
-          document.getElementById('storageStat').innerHTML = `${data.storage.used_gb} / ${data.storage.total_gb} GB`;
-          const sub = document.getElementById('diskSubStat');
-          if (sub) sub.innerHTML = `Storage: <span class="text-amber-300">${data.storage.used_gb} GB</span> / ${data.storage.total_gb} GB (${data.storage.percent_used}%)`;
+          renderStorageMetrics(data.storage);
         }
 
         const agentBadge = document.getElementById('agentModelBadge');
@@ -339,6 +339,19 @@
         }
       } catch(e) {}
     }
+
+    function renderStorageMetrics(storage) {
+      const mainStat = document.getElementById('storageStat');
+      const subStat = document.getElementById('diskSubStat');
+      if (mainStat && storage) {
+        mainStat.innerHTML = `${storage.used_gb} / ${storage.total_gb} GB`;
+      }
+      if (subStat && storage) {
+        subStat.innerHTML = `Storage: <span class="text-amber-300">${storage.used_gb} GB</span> / ${storage.total_gb} GB (${storage.percent_used}%)`;
+      }
+    }
+
+    // ---------------- Studio Left Sidebar & Workspaces ----------------
 
     async function loadSidebarWorkspaces() {
       const container = document.getElementById('sidebarProjectList');
@@ -442,6 +455,8 @@
         alert('Communication Error: ' + e.message);
       }
     }
+
+    // ---------------- Studio Chat & Multi-File Execution ----------------
 
     async function executeStudioTask() {
       const promptInput = document.getElementById('studioPromptInput');
@@ -569,6 +584,8 @@
       }
       chatWindow.scrollTop = chatWindow.scrollHeight;
     }
+
+    // ---------------- View 2: GitHub Accounts & Clone Management ----------------
 
     function togglePatGuide() {
       const el = document.getElementById('patGuideContent');
@@ -731,6 +748,8 @@
         alert('Communication Error: ' + e.message);
       }
     }
+
+    // ---------------- View 3: Model Manager Logic ----------------
 
     function quickSearch(tag) {
       document.getElementById('searchInput').value = tag;
@@ -928,7 +947,7 @@
         });
         const data = await res.json();
         if (!res.ok || data.status !== 'success') {
-          alert('Load Failure Output from LMS:\\n\\n' + (data.message || JSON.stringify(data)));
+          alert('Load Failure Output from LMS:\n\n' + (data.message || JSON.stringify(data)));
         }
       } catch(e) {
         alert('Communication Error: ' + e.message);
@@ -992,73 +1011,83 @@
     }
 
     async function fetchLocalModels() {
-      const res = await fetch('/api/local_models');
-      const data = await res.json();
       const list = document.getElementById('localList');
       if (!list) return;
-      localModelSet.clear();
-      loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
 
-      if (data.storage) renderStorageMetrics(data.storage);
+      try {
+        const res = await fetch('/api/local_models');
+        const data = await res.json();
+        localModelSet.clear();
+        loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
 
-      if (!data.files || data.files.length === 0) {
-        list.innerHTML = '<span class="text-slate-500">No GGUF models on disk</span>';
-        return;
-      }
-
-      data.files.forEach(m => localModelSet.add(m.filename));
-
-      list.innerHTML = data.files.map(m => {
-        const fLower = m.filename.toLowerCase().replace('.gguf', '');
-        const pLower = m.path.toLowerCase();
-        
-        const isLoaded = loadedModelsList.some(loaded => {
-          if (!loaded || loaded.length < 3) return false;
-          const cleanSlug = loaded.replace(/[^a-z0-9]/g, '');
-          const cleanF = fLower.replace(/[^a-z0-9]/g, '');
-          return cleanF.includes(cleanSlug) || cleanSlug.includes(cleanF) || pLower.includes(loaded);
-        });
-        
-        let actionBtn = '';
-        if (isLoaded) {
-          actionBtn = `
-            <div class="flex items-center gap-1.5">
-              <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">
-                ⚡ Loaded
-              </span>
-              <button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">
-                ⏹
-              </button>
-            </div>`;
-        } else {
-          actionBtn = `
-            <button onclick="loadModelIntoGPU('${m.path}', this)" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1">
-              🚀 Load to GPU
-            </button>`;
+        if (data.storage) {
+          renderStorageMetrics(data.storage);
         }
 
-        return `
-          <div class="flex justify-between items-center bg-slate-950 p-3 rounded border ${isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700'} text-xs gap-3">
-            <div class="truncate pr-2">
-              <div class="font-medium text-slate-200 truncate" title="${m.filename}">${m.filename}</div>
-              <div class="text-slate-400 text-[10px] mt-0.5">Weight: ${m.weight} | Variant: ${m.variant}</div>
+        if (!data.files || data.files.length === 0) {
+          list.innerHTML = '<span class="text-slate-500">No GGUF models on disk (/storage/lmstudio/models)</span>';
+          return;
+        }
+
+        data.files.forEach(m => localModelSet.add(m.filename));
+
+        list.innerHTML = data.files.map(m => {
+          const fLower = m.filename.toLowerCase().replace('.gguf', '');
+          const pLower = m.path.toLowerCase();
+          
+          const isLoaded = loadedModelsList.some(loaded => {
+            if (!loaded || loaded.length < 3) return false;
+            const cleanSlug = loaded.replace(/[^a-z0-9]/g, '');
+            const cleanF = fLower.replace(/[^a-z0-9]/g, '');
+            return cleanF.includes(cleanSlug) || cleanSlug.includes(cleanF) || pLower.includes(loaded);
+          });
+          
+          let actionBtn = '';
+          if (isLoaded) {
+            actionBtn = `
+              <div class="flex items-center gap-1.5">
+                <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">
+                  ⚡ Loaded
+                </span>
+                <button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">
+                  ⏹
+                </button>
+              </div>`;
+          } else {
+            actionBtn = `
+              <button onclick="loadModelIntoGPU('${m.path}', this)" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1">
+                🚀 Load to GPU
+              </button>`;
+          }
+
+          return `
+            <div class="flex justify-between items-center bg-slate-950 p-3 rounded border ${isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700'} text-xs gap-3">
+              <div class="truncate pr-2">
+                <div class="font-medium text-slate-200 truncate" title="${m.filename}">${m.filename}</div>
+                <div class="text-slate-400 text-[10px] mt-0.5">Weight: ${m.weight} | Variant: ${m.variant}</div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">${m.size_gb}</span>
+                ${actionBtn}
+                <button onclick="deleteModel('${m.filename}')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">
+                  🗑️
+                </button>
+              </div>
             </div>
-            <div class="flex items-center gap-2 shrink-0">
-              <span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">${m.size_gb}</span>
-              ${actionBtn}
-              <button onclick="deleteModel('${m.filename}')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">
-                🗑️
-              </button>
-            </div>
-          </div>
-        `;
-      }).join('');
+          `;
+        }).join('');
+      } catch(e) {
+        list.innerHTML = `<span class="text-rose-400">Error loading local models: ${e.message}</span>`;
+      }
     }
 
+    // Startup & Periodic Refresh
     initHardwareInfo();
+    fetchLocalModels();
     switchView('studio');
     setInterval(updateTasks, 1000);
     setInterval(initHardwareInfo, 5000);
+    setInterval(fetchLocalModels, 4000);
   </script>
 </body>
 </html>

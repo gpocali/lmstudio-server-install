@@ -4,12 +4,12 @@ Dispatches API requests to modular core submodules.
 """
 
 import os
+import re
 import glob
 import requests
 import subprocess
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 
@@ -173,7 +173,7 @@ def api_model_files(repo_id: str):
 
     local_files = set()
     if os.path.exists(MODELS_PATH):
-        for root, _, filenames in os.walk(MODELS_PATH):
+        for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
             for f in filenames:
                 if f.endswith(".gguf"): local_files.add(f)
 
@@ -249,7 +249,7 @@ def api_delete_model(req: DeleteRequest):
     deleted = False
     if os.path.exists(MODELS_PATH):
         prefix = req.filename.replace(".gguf", "")
-        for root, _, filenames in os.walk(MODELS_PATH):
+        for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
             for f in filenames:
                 if f == req.filename or (prefix in f and f.endswith(".gguf")):
                     try:
@@ -270,13 +270,22 @@ def api_get_tasks():
 def api_local_models():
     files = []
     if os.path.exists(MODELS_PATH):
-        for root, _, filenames in os.walk(MODELS_PATH):
+        for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
             for f in filenames:
                 if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
                     path = os.path.join(root, f)
-                    size_gb = round(os.path.getsize(path) / (1024**3), 2)
+                    try:
+                        size_gb = round(os.path.getsize(path) / (1024**3), 2)
+                    except Exception:
+                        size_gb = 0.0
                     weight, variant = parse_model_metadata(f, root)
-                    files.append({"filename": f, "weight": weight, "variant": variant, "size_gb": f"{size_gb} GB", "path": path})
+                    files.append({
+                        "filename": f,
+                        "weight": weight,
+                        "variant": variant,
+                        "size_gb": f"{size_gb} GB",
+                        "path": path
+                    })
     return {"files": files, "storage": get_storage_usage(), "loaded_models": get_loaded_models()}
 
 # ---------------- GitHub Multi-Account Endpoints ----------------
