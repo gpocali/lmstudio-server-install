@@ -18,14 +18,13 @@ DOWNLOAD_JOBS = {}
 STORAGE_PATH = "/storage/lmstudio"
 MODELS_PATH = os.path.join(STORAGE_PATH, "models")
 
-class DownloadRequest(BaseModel):
-    repo_id: str
-    filename: str
+# List of vetted, reputable quantizers and official AI research organizations
+VERIFIED_CREATORS = {
+    "bartowski", "unsloth", "TheBloke", "MaziyarPanahi", "mradermacher",
+    "QuantFactory", "meta-llama", "Qwen", "mistralai", "google",
+    "deepseek-ai", "microsoft", "nomic-ai", "cohere", "NousResearch"
+}
 
-class DeleteRequest(BaseModel):
-    filename: str
-
-# Comprehensive dictionary explaining GGUF quantizations
 QUANT_DESCRIPTIONS = {
     "Q4_K_M": "Recommended standard. Medium 4-bit quantization with optimal balance between low memory and high quality.",
     "Q4_K_S": "Small 4-bit quantization. Uses slightly less memory than Q4_K_M with minor quality trade-off.",
@@ -47,8 +46,42 @@ QUANT_DESCRIPTIONS = {
     "BF16": "Bfloat16 unquantized format. Native training precision with full dynamic range."
 }
 
+class DownloadRequest(BaseModel):
+    repo_id: str
+    filename: str
+
+class DeleteRequest(BaseModel):
+    filename: str
+
+def calculate_trust_score(downloads: int, likes: int, is_verified: bool) -> int:
+    """Calculates a normalized 0-100 Community Trust Score."""
+    score = 0
+    if is_verified:
+        score += 35
+    
+    # Downloads weight (up to 40 pts)
+    if downloads >= 100000:
+        score += 40
+    elif downloads >= 10000:
+        score += 30
+    elif downloads >= 1000:
+        score += 20
+    elif downloads >= 100:
+        score += 10
+
+    # Likes weight (up to 25 pts)
+    if likes >= 500:
+        score += 25
+    elif likes >= 100:
+        score += 18
+    elif likes >= 20:
+        score += 10
+    elif likes >= 5:
+        score += 5
+
+    return min(score, 100)
+
 def get_quant_description(variant: str):
-    """Returns a friendly description for a given quantization string."""
     v_upper = variant.upper().replace("-", "_")
     for key, desc in QUANT_DESCRIPTIONS.items():
         if key == v_upper:
@@ -208,7 +241,6 @@ def fetch_single_file_size(repo_id: str, filename: str):
     return 0
 
 def run_download_job(repo_id: str, filename: str):
-    """Streams file download with live byte and percentage calculation."""
     DOWNLOAD_JOBS[filename] = {
         "status": "downloading",
         "downloaded_bytes": 0,
@@ -229,7 +261,7 @@ def run_download_job(repo_id: str, filename: str):
             DOWNLOAD_JOBS[filename]["total_bytes"] = total_size
 
             with open(dest_file, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=4 * 1024 * 1024):  # 4MB chunks
+                for chunk in r.iter_content(chunk_size=4 * 1024 * 1024):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
@@ -260,7 +292,7 @@ def get_sys_info():
     return get_system_hardware_info()
 
 @app.get("/api/search")
-def search_hf(q: str = "", sort_by: str = "downloads"):
+def search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool = False):
     hf_sort = "downloads"
     if sort_by == "likes":
         hf_sort = "likes"
@@ -271,7 +303,7 @@ def search_hf(q: str = "", sort_by: str = "downloads"):
         "filter": "gguf",
         "sort": hf_sort,
         "direction": "-1",
-        "limit": 50
+        "limit": 60
     }
     
     clean_q = q.strip() if q else ""
@@ -299,17 +331,29 @@ def search_hf(q: str = "", sort_by: str = "downloads"):
                 maker = "Community"
                 model_name = repo_id
 
+            is_verified = maker in VERIFIED_CREATORS
+            if verified_only and not is_verified:
+                continue
+
+            dl_count = m.get("downloads", 0) or 0
+            like_count = m.get("likes", 0) or 0
+            trust_score = calculate_trust_score(dl_count, like_count, is_verified)
+
             results.append({
                 "id": repo_id,
                 "maker": maker,
                 "model_name": model_name,
-                "downloads": m.get("downloads", 0) or 0,
-                "likes": m.get("likes", 0) or 0,
-                "lastModified": (m.get("lastModified") or "")[:10]
+                "downloads": dl_count,
+                "likes": like_count,
+                "lastModified": (m.get("lastModified") or "")[:10],
+                "is_verified": is_verified,
+                "trust_score": trust_score
             })
 
     if sort_by == "alphabetical":
         results.sort(key=lambda x: x["model_name"].lower())
+    elif sort_by == "trust":
+        results.sort(key=lambda x: x["trust_score"], reverse=True)
 
     return results
 
@@ -513,34 +557,45 @@ def get_ui():
         <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
           <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
             <h2 id="catalogHeader" class="text-lg font-semibold">Available Models (Top GGUFs on Hugging Face)</h2>
-            <div class="flex flex-wrap gap-1.5 text-xs">
-              <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">🔥 All Top</button>
+            <div class="flex flex-wrap gap-1.5 text-xs items-center">
+              <span class="text-slate-400 mr-1">Filter by Creator:</span>
+              <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">🔥 All</button>
+              <button onclick="quickSearch('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ bartowski</button>
+              <button onclick="quickSearch('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ unsloth</button>
+              <button onclick="quickSearch('TheBloke')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ TheBloke</button>
+              <button onclick="quickSearch('Qwen')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen</button>
               <button onclick="quickSearch('Llama-3')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Llama 3</button>
-              <button onclick="quickSearch('Qwen2.5')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen 2.5</button>
               <button onclick="quickSearch('Mistral')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Mistral</button>
-              <button onclick="quickSearch('DeepSeek')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">DeepSeek</button>
-              <button onclick="quickSearch('Coder')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Coding</button>
-              <button onclick="quickSearch('bartowski')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">bartowski</button>
             </div>
           </div>
           
-          <div class="flex flex-col md:flex-row gap-3">
+          <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
             <input id="searchInput" type="text" placeholder="Search by model or creator (leave empty to view all)..." 
                    onkeydown="if(event.key === 'Enter') searchModels()"
                    class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500 text-sm">
             
-            <div class="flex items-center gap-2">
-              <label for="sortSelect" class="text-xs text-slate-400 shrink-0">Sort By:</label>
-              <select id="sortSelect" onchange="searchModels()" class="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500">
-                <option value="downloads">Most Downloads</option>
-                <option value="likes">Most Likes / Stars</option>
-                <option value="lastModified">Recent Release Date</option>
-                <option value="alphabetical">Alphabetical by Name (A-Z)</option>
-              </select>
-            </div>
+            <div class="flex flex-wrap items-center gap-3">
+              <!-- Reputable Checkbox -->
+              <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none bg-slate-950 px-3 py-2 rounded border border-slate-700 hover:border-slate-600">
+                <input type="checkbox" id="verifiedOnly" onchange="searchModels()" class="rounded bg-slate-900 border-slate-700 text-sky-600 focus:ring-0">
+                <span>🛡️ Verified Creators Only</span>
+              </label>
 
-            <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm transition">Search</button>
-            <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition" title="Reset Search">Reset</button>
+              <!-- Sort Selector -->
+              <div class="flex items-center gap-2">
+                <label for="sortSelect" class="text-xs text-slate-400 shrink-0">Sort By:</label>
+                <select id="sortSelect" onchange="searchModels()" class="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500">
+                  <option value="downloads">Most Downloads</option>
+                  <option value="trust">⭐ Trust Score (Reputation)</option>
+                  <option value="likes">Most Likes / Stars</option>
+                  <option value="lastModified">Recent Release Date</option>
+                  <option value="alphabetical">Alphabetical by Name (A-Z)</option>
+                </select>
+              </div>
+
+              <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm transition">Search</button>
+              <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition" title="Reset Search">Reset</button>
+            </div>
           </div>
           
           <div id="searchResults" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
@@ -612,25 +667,27 @@ def get_ui():
         async function searchModels() {
           const q = document.getElementById('searchInput').value.trim();
           const sortBy = document.getElementById('sortSelect').value;
+          const verifiedOnly = document.getElementById('verifiedOnly').checked;
           const container = document.getElementById('searchResults');
           const header = document.getElementById('catalogHeader');
           const sortLabel = document.getElementById('sortSelect').selectedOptions[0].text;
           
+          const suffix = verifiedOnly ? ' [Verified Only]' : '';
           if (q === "") {
-            header.textContent = `All Available Models (${sortLabel})`;
+            header.textContent = `All Available Models (${sortLabel})${suffix}`;
           } else {
-            header.textContent = `Search Results for "${q}" (${sortLabel})`;
+            header.textContent = `Search Results for "${q}" (${sortLabel})${suffix}`;
           }
 
           container.innerHTML = '<p class="text-slate-400">Loading catalog from Hugging Face...</p>';
           
           try {
-            const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort_by=${encodeURIComponent(sortBy)}`);
+            const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort_by=${encodeURIComponent(sortBy)}&verified_only=${verifiedOnly}`);
             let models = await res.json();
             container.innerHTML = '';
             
             if (!models || models.length === 0) {
-              container.innerHTML = '<p class="text-slate-400">No GGUF models found.</p>';
+              container.innerHTML = '<p class="text-slate-400">No GGUF models found matching your criteria.</p>';
               return;
             }
 
@@ -641,12 +698,22 @@ def get_ui():
             models.forEach(m => {
               const card = document.createElement('div');
               card.className = 'bg-slate-950 p-4 rounded border border-slate-700 space-y-3';
+              
+              const verifiedBadge = m.is_verified 
+                ? '<span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">🛡️ Verified Creator</span>'
+                : `<span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800">${m.maker}</span>`;
+
+              const trustBadge = `<span class="text-[10px] bg-slate-800 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono" title="Community Trust Score">⭐ ${m.trust_score}/100</span>`;
+
               card.innerHTML = `
                 <div class="flex justify-between items-start">
                   <div class="overflow-hidden pr-2">
-                    <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800">${m.maker}</span>
-                    <h3 class="font-bold text-slate-100 text-base mt-1 truncate" title="${m.model_name}">${m.model_name}</h3>
-                    <div class="text-[11px] text-slate-400 mt-0.5">Updated: ${m.lastModified || 'Recent'}</div>
+                    <div class="flex items-center gap-1.5">
+                      ${verifiedBadge}
+                      ${trustBadge}
+                    </div>
+                    <h3 class="font-bold text-slate-100 text-base mt-1.5 truncate" title="${m.model_name}">${m.model_name}</h3>
+                    <div class="text-[11px] text-slate-400 mt-0.5">Author: <strong class="text-slate-300">${m.maker}</strong> • Updated: ${m.lastModified || 'Recent'}</div>
                   </div>
                   <div class="text-right text-xs text-slate-400 shrink-0">
                     <div>⬇ ${(m.downloads || 0).toLocaleString()}</div>
