@@ -22,8 +22,25 @@ class DownloadRequest(BaseModel):
     repo_id: str
     filename: str
 
+class DeleteRequest(BaseModel):
+    filename: str
+
+def get_storage_usage():
+    """Calculates disk space for the models storage partition."""
+    target_path = MODELS_PATH if os.path.exists(MODELS_PATH) else STORAGE_PATH
+    try:
+        total, used, free = shutil.disk_usage(target_path)
+        return {
+            "total_gb": round(total / (1024**3), 2),
+            "used_gb": round(used / (1024**3), 2),
+            "free_gb": round(free / (1024**3), 2),
+            "percent_used": round((used / total) * 100, 1)
+        }
+    except Exception:
+        return {"total_gb": 0.0, "used_gb": 0.0, "free_gb": 0.0, "percent_used": 0.0}
+
 def get_system_hardware_info():
-    """Detects System RAM and Dedicated GPU VRAM."""
+    """Detects System RAM, Dedicated GPU VRAM, and Storage Disk Usage."""
     sys_ram_total_gb = 0.0
     sys_ram_avail_gb = 0.0
     try:
@@ -129,7 +146,8 @@ def get_system_hardware_info():
             "gpu_name": gpu_name,
             "total_vram_gb": gpu_vram_total_gb,
             "free_vram_gb": gpu_vram_free_gb
-        }
+        },
+        "storage": get_storage_usage()
     }
 
 def parse_model_metadata(filename: str, repo_id: str):
@@ -277,7 +295,6 @@ def get_model_files(repo_id: str):
     vram_total = hw["gpu"]["total_vram_gb"]
     ram_total = hw["system_ram"]["total_gb"]
 
-    # Gather local file list for instant downloaded check
     local_files_on_disk = set()
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH):
@@ -307,7 +324,6 @@ def get_model_files(repo_id: str):
                 else:
                     fit_status = "exceeds"
 
-        # Determine download state
         is_downloaded = fname in local_files_on_disk
         is_downloading = fname in DOWNLOAD_JOBS and DOWNLOAD_JOBS[fname].get("status") == "downloading"
 
@@ -339,6 +355,29 @@ def start_download(req: DownloadRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(run_download_job, req.repo_id, req.filename)
     return {"status": "started", "file": req.filename}
 
+@app.post("/api/delete")
+def delete_local_model(req: DeleteRequest):
+    """Deletes a model file from disk and clears any related download job."""
+    deleted = False
+    if os.path.exists(MODELS_PATH):
+        for root, _, filenames in os.walk(MODELS_PATH):
+            if req.filename in filenames:
+                file_path = os.path.join(root, req.filename)
+                try:
+                    os.remove(file_path)
+                    deleted = True
+                    # Clean up empty directories
+                    if not os.listdir(root):
+                        os.rmdir(root)
+                except Exception as e:
+                    return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+    # Clear task tracker entry if present
+    if req.filename in DOWNLOAD_JOBS:
+        del DOWNLOAD_JOBS[req.filename]
+
+    return {"status": "deleted" if deleted else "not_found", "filename": req.filename, "storage": get_storage_usage()}
+
 @app.get("/api/tasks")
 def get_tasks():
     return DOWNLOAD_JOBS
@@ -360,7 +399,7 @@ def get_local_models():
                         "size_gb": f"{size_gb} GB",
                         "path": path
                     })
-    return files
+    return {"files": files, "storage": get_storage_usage()}
 
 @app.get("/", response_class=HTMLResponse)
 def get_ui():
@@ -393,6 +432,12 @@ def get_ui():
             <div id="ramCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
               <span class="text-slate-400">System RAM:</span>
               <span id="ramStat" class="font-semibold text-sky-300">Probing memory...</span>
+            </div>
+
+            <!-- Storage Partition Usage Badge -->
+            <div id="storageCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
+              <span class="text-slate-400">Disk Storage:</span>
+              <span id="storageStat" class="font-semibold text-amber-400">Checking disk...</span>
             </div>
             
             <button onclick="initHardwareInfo(); fetchLocalModels();" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded text-xs text-slate-200 transition">
@@ -448,7 +493,10 @@ def get_ui():
           </section>
 
           <section class="bg-slate-800 p-6 rounded-lg">
-            <h2 class="text-lg font-semibold mb-4">Downloaded Models on Disk (/storage)</h2>
+            <div class="flex justify-between items-center mb-4">
+              <h2 class="text-lg font-semibold">Downloaded Models on Disk</h2>
+              <span id="diskSubStat" class="text-xs text-slate-400">-- / -- GB</span>
+            </div>
             <div id="localList" class="space-y-2 text-sm text-slate-300">Scanning...</div>
           </section>
         </div>
@@ -476,10 +524,21 @@ def get_ui():
               document.getElementById('ramStat').innerHTML = 
                 `${data.system_ram.available_gb} GB Avail / ${data.system_ram.total_gb} GB Total`;
             }
+
+            if (data.storage) {
+              renderStorageMetrics(data.storage);
+            }
           } catch(e) {
             document.getElementById('vramStat').textContent = 'Error probing VRAM';
             document.getElementById('ramStat').textContent = 'Error probing RAM';
           }
+        }
+
+        function renderStorageMetrics(storage) {
+          document.getElementById('storageStat').innerHTML = 
+            `${storage.used_gb} GB Used / ${storage.total_gb} GB (${storage.free_gb} GB Free)`;
+          document.getElementById('diskSubStat').innerHTML = 
+            `Storage: <span class="text-amber-300">${storage.used_gb} GB</span> / ${storage.total_gb} GB (${storage.percent_used}%)`;
         }
 
         function quickSearch(tag) {
@@ -531,7 +590,7 @@ def get_ui():
                     <div>❤ ${(m.likes || 0).toLocaleString()}</div>
                   </div>
                 </div>
-                <button onclick="fetchFiles('${m.id}', this)" class="w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">
+                <button onclick="toggleFiles('${m.id}', this)" class="toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">
                   Inspect Quantizations & Memory Fit
                 </button>
                 <div class="file-container mt-3 hidden space-y-2"></div>
@@ -543,10 +602,21 @@ def get_ui():
           }
         }
 
-        async function fetchFiles(repoId, btn) {
+        async function toggleFiles(repoId, btn) {
           const parent = btn.parentElement;
           const fileContainer = parent.querySelector('.file-container');
+          
+          // Minimize / Toggle behavior
+          if (!fileContainer.classList.contains('hidden')) {
+            fileContainer.classList.add('hidden');
+            btn.textContent = 'Inspect Quantizations & Memory Fit';
+            btn.className = 'toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition';
+            return;
+          }
+
           fileContainer.classList.remove('hidden');
+          btn.textContent = '▲ Minimize Quantizations';
+          btn.className = 'toggle-btn w-full text-xs bg-slate-700 hover:bg-slate-600 border border-slate-500 text-sky-300 px-3 py-1.5 rounded transition';
           fileContainer.innerHTML = '<span class="text-xs text-slate-500">Fetching file metadata & calculating VRAM footprint...</span>';
           
           const res = await fetch(`/api/model_files?repo_id=${encodeURIComponent(repoId)}`);
@@ -573,7 +643,6 @@ def get_ui():
               fitBadge = '<span class="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-medium">Exceeds Memory</span>';
             }
 
-            // Check current status
             const isDownloaded = f.is_downloaded || localModelSet.has(f.filename);
             const isDownloading = f.is_downloading || (activeTasksMap[f.filename] && activeTasksMap[f.filename].status === 'downloading');
 
@@ -620,7 +689,6 @@ def get_ui():
         }
 
         async function triggerDownload(repoId, filename, btn) {
-          // Immediately disable button and switch to Downloading state
           btn.disabled = true;
           btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
           btn.innerHTML = "⏳ Downloading...";
@@ -631,6 +699,39 @@ def get_ui():
             body: JSON.stringify({repo_id: repoId, filename: filename})
           });
           updateTasks();
+        }
+
+        async function deleteModel(filename) {
+          if (!confirm(`Are you sure you want to delete ${filename} to free up space?`)) return;
+
+          try {
+            const res = await fetch('/api/delete', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({filename: filename})
+            });
+            const data = await res.json();
+            
+            // Remove from local memory set
+            localModelSet.delete(filename);
+
+            // Re-enable download button in catalog if present
+            const btnId = `btn-${btoa(filename).replace(/=/g, '')}`;
+            const targetBtn = document.getElementById(btnId);
+            if (targetBtn) {
+              targetBtn.disabled = false;
+              targetBtn.className = "bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1 rounded text-xs shrink-0 transition";
+              targetBtn.textContent = "Download";
+            }
+
+            if (data.storage) {
+              renderStorageMetrics(data.storage);
+            }
+
+            fetchLocalModels();
+          } catch(e) {
+            alert('Failed to delete model file.');
+          }
         }
 
         async function updateTasks() {
@@ -678,20 +779,29 @@ def get_ui():
           const list = document.getElementById('localList');
           localModelSet.clear();
 
-          if (data.length === 0) {
+          if (data.storage) {
+            renderStorageMetrics(data.storage);
+          }
+
+          if (!data.files || data.files.length === 0) {
             list.innerHTML = '<span class="text-slate-500">No GGUF models on disk</span>';
             return;
           }
 
-          data.forEach(m => localModelSet.add(m.filename));
+          data.files.forEach(m => localModelSet.add(m.filename));
 
-          list.innerHTML = data.map(m => `
-            <div class="flex justify-between items-center bg-slate-950 p-2 rounded border border-slate-700 text-xs">
+          list.innerHTML = data.files.map(m => `
+            <div class="flex justify-between items-center bg-slate-950 p-2.5 rounded border border-slate-700 text-xs gap-3">
               <div class="truncate pr-2">
-                <div class="font-medium text-slate-200 truncate">${m.filename}</div>
+                <div class="font-medium text-slate-200 truncate" title="${m.filename}">${m.filename}</div>
                 <div class="text-slate-400 text-[10px]">Weight: ${m.weight} | Variant: ${m.variant}</div>
               </div>
-              <span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono shrink-0">${m.size_gb}</span>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">${m.size_gb}</span>
+                <button onclick="deleteModel('${m.filename}')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">
+                  🗑️ Delete
+                </button>
+              </div>
             </div>
           `).join('');
         }
@@ -702,7 +812,7 @@ def get_ui():
           searchModels();
         });
         setInterval(updateTasks, 2500);
-        setInterval(fetchLocalModels, 5000);
+        setInterval(fetchLocalModels, 6000);
       </script>
     </body>
     </html>
