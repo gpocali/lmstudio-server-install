@@ -1,6 +1,6 @@
 """
 LM Studio Remote Model & Multi-Account Code Studio Manager
-Manages HuggingFace GGUF models, multiple GitHub accounts, and local AI agent workspaces.
+Provides Model Management, GitHub PAT Account Vault, and a Full Left-Pane IDE Chat Studio.
 """
 
 import os
@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 import uvicorn
 
-app = FastAPI(title="LM Studio Headless Model & Code Studio")
+app = FastAPI(title="LM Studio Code & Model Studio")
 
 DOWNLOAD_JOBS = {}
 STORAGE_PATH = "/storage/lmstudio"
@@ -36,7 +36,6 @@ LMS_ENV = {
     "PATH": f"/usr/local/bin:{STORAGE_PATH}/.cache/lm-studio/bin:{STORAGE_PATH}/.lmstudio/bin:/usr/sbin:/usr/bin:/bin"
 }
 
-# Configure Git safe directory globally for all subdirectories under workspaces
 subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], capture_output=True)
 
 VERIFIED_CREATORS = {
@@ -91,9 +90,14 @@ class GithubBranchSwitchRequest(BaseModel):
     repo_dir_name: str
     branch: str
 
+class CreateFileRequest(BaseModel):
+    repo_dir_name: str
+    file_path: str
+    initial_content: str = ""
+
 class AgentTaskRequest(BaseModel):
     repo_dir_name: str
-    target_file: str
+    target_files: list[str] = []
     instruction: str
     model_identifier: str = ""
 
@@ -532,7 +536,6 @@ def get_local_models():
 @app.get("/api/github/accounts")
 def list_accounts():
     data = load_accounts_data()
-    # Mask tokens for safe client display
     safe_accounts = []
     for a in data.get("accounts", []):
         t = a.get("token", "")
@@ -552,7 +555,6 @@ def add_account(req: AddAccountRequest):
         return JSONResponse(status_code=400, content={"status": "error", "message": "Token cannot be empty"})
 
     try:
-        # Validate token with GitHub API
         r = requests.get("https://api.github.com/user", headers={"Authorization": f"Bearer {token}"}, timeout=6)
         if r.status_code != 200:
             return JSONResponse(status_code=401, content={"status": "error", "message": "Invalid GitHub Token. Please verify permissions."})
@@ -563,7 +565,6 @@ def add_account(req: AddAccountRequest):
         label = req.label.strip() or username
 
         data = load_accounts_data()
-        # Remove if already exists to update
         data["accounts"] = [a for a in data.get("accounts", []) if a.get("username", "").lower() != username.lower()]
         data["accounts"].append({
             "username": username,
@@ -620,11 +621,10 @@ def list_branches_for_repo(account_username: str, repo_full_name: str):
     except Exception: pass
     return ["main", "dev", "master"]
 
-# ----------------- Workspaces Management -----------------
+# ----------------- Workspaces & File Tree -----------------
 
 @app.get("/api/workspaces/active")
 def get_active_workspaces():
-    """Lists all locally cloned projects on the disk."""
     workspaces = []
     if os.path.exists(WORKSPACES_ROOT):
         for d in os.listdir(WORKSPACES_ROOT):
@@ -632,8 +632,6 @@ def get_active_workspaces():
             if os.path.isdir(w_path) and os.path.exists(os.path.join(w_path, ".git")):
                 branch_res = subprocess.run(["git", "-C", w_path, "branch", "--show-current"], capture_output=True, text=True)
                 branch = branch_res.stdout.strip() or "main"
-                
-                # Extract owner/repo from folder slug (format: user_repo)
                 display_name = d.replace("_", "/", 1) if "_" in d else d
                 workspaces.append({
                     "dir_name": d,
@@ -649,7 +647,6 @@ def clone_or_open_project(req: GithubCloneRequest):
     if not token:
         return JSONResponse(status_code=401, content={"status": "error", "message": f"Authentication required for @{req.account_username}"})
 
-    # Folder pattern: user_repo
     dir_name = req.repo_full_name.replace("/", "_")
     dest_path = os.path.join(WORKSPACES_ROOT, dir_name)
     auth_url = f"https://oauth2:{token}@github.com/{req.repo_full_name}.git"
@@ -666,12 +663,11 @@ def clone_or_open_project(req: GithubCloneRequest):
                 subprocess.run(["git", "clone", auth_url, dest_path], capture_output=True, text=True, timeout=30)
                 subprocess.run(["git", "-C", dest_path, "checkout", "-B", req.branch], capture_output=True, timeout=10)
 
-        # Set user configuration inside the specific repository
         subprocess.run(["git", "-C", dest_path, "config", "user.name", req.account_username], capture_output=True)
         subprocess.run(["git", "-C", dest_path, "config", "user.email", f"{req.account_username}@users.noreply.github.com"], capture_output=True)
         os.chmod(dest_path, 0o777)
 
-        return {"status": "success", "dir_name": dir_name, "branch": req.branch, "path": dest_path}
+        return {"status": "success", "dir_name": dir_name, "branch": req.branch, "path": dest_path, "display_name": req.repo_full_name}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
@@ -706,34 +702,62 @@ def get_workspace_files(repo_dir_name: str):
     file_list.sort()
     return file_list
 
+@app.post("/api/workspace/create_file")
+def create_workspace_file(req: CreateFileRequest):
+    workspace_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
+    if not os.path.exists(workspace_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+
+    target_file = os.path.join(workspace_path, req.file_path.strip().lstrip("/"))
+    os.makedirs(os.path.dirname(target_file), exist_ok=True)
+
+    try:
+        with open(target_file, "w", encoding="utf-8") as f:
+            f.write(req.initial_content)
+        
+        subprocess.run(["git", "-C", workspace_path, "add", req.file_path], capture_output=True)
+        subprocess.run(["git", "-C", workspace_path, "commit", "-m", f"Create new file: {req.file_path}"], capture_output=True)
+        return {"status": "success", "file_path": req.file_path}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+# ----------------- Multi-File AI Agent Execution -----------------
+
 @app.post("/api/agent/execute")
 def execute_agent_task(req: AgentTaskRequest):
     workspace_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
-    file_path = os.path.join(workspace_path, req.target_file)
+    if not os.path.exists(workspace_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
 
-    if not os.path.exists(file_path):
-        return JSONResponse(status_code=404, content={"status": "error", "message": f"File {req.target_file} not found in workspace"})
+    # Read selected context files
+    context_blocks = []
+    for rel_file in req.target_files:
+        full_p = os.path.join(workspace_path, rel_file)
+        if os.path.exists(full_p):
+            try:
+                with open(full_p, "r", encoding="utf-8") as f:
+                    content = f.read()
+                context_blocks.append(f"### File: {rel_file}\n```\n{content}\n```")
+            except Exception: pass
 
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            original_code = f.read()
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": f"Could not read target file: {str(e)}"})
+    context_str = "\n\n".join(context_blocks) if context_blocks else "No existing files selected as context."
 
     system_prompt = (
-        "You are an expert AI software engineer. "
-        "Your task is to edit source code files precisely according to instruction.\n"
-        "RULES:\n"
-        "1. Return ONLY the complete, updated source code for the requested file enclosed in a single markdown code block.\n"
-        "2. Do NOT truncate or abbreviate code with placeholders like '// ... existing code ...'. Always output the full file.\n"
-        "3. Maintain all existing imports, formatting, and functionality unless explicitly instructed to modify them."
+        "You are an expert AI software architect and full-stack engineer.\n"
+        "Your task is to analyze instructions and output complete updated or newly created source code files.\n\n"
+        "OUTPUT FORMAT REQUIREMENTS:\n"
+        "For EACH file you create or modify, format your response strictly as:\n"
+        "### File: <relative_path_to_file>\n"
+        "```\n"
+        "<complete file contents without any truncation, placeholders, or omission comments>\n"
+        "```\n\n"
+        "You may output explanations and reasoning before or after file blocks."
     )
 
     user_prompt = (
-        f"File: {req.target_file}\n\n"
-        f"Current File Content:\n```\n{original_code}\n```\n\n"
+        f"Active Workspace Context Files:\n\n{context_str}\n\n"
         f"Task Instruction:\n{req.instruction}\n\n"
-        f"Provide the complete updated {req.target_file} file:"
+        "Please provide the complete implementation for all required files:"
     )
 
     model_id = req.model_identifier or get_active_model_for_agent()
@@ -749,1075 +773,26 @@ def execute_agent_task(req: AgentTaskRequest):
             "max_tokens": 16384
         }
         
-        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=120)
+        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=150)
         if resp.status_code != 200:
             return JSONResponse(status_code=500, content={"status": "error", "message": f"LM Studio API Error: {resp.text}"})
 
         ai_response = resp.json()["choices"][0]["message"]["content"]
         
-        # Extract code cleanly from markdown fences
-        code_match = re.search(r'```(?:[a-zA-Z0-9_\-]+)?\n([\s\S]*?)\n```', ai_response)
-        updated_code = code_match.group(1) if code_match else ai_response.strip()
-
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(updated_code)
-
-        subprocess.run(["git", "-C", workspace_path, "add", req.target_file], capture_output=True)
-        commit_msg = f"AI Update: {req.instruction[:70]}"
-        subprocess.run(["git", "-C", workspace_path, "commit", "-m", commit_msg], capture_output=True)
-
-        diff_res = subprocess.run(["git", "-C", workspace_path, "diff", "HEAD~1", "HEAD"], capture_output=True, text=True)
-        diff_text = diff_res.stdout or "File modified and committed."
-
-        return {
-            "status": "success",
-            "commit_message": commit_msg,
-            "diff": diff_text[:4000]
-        }
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": f"Execution error: {str(e)}"})
-
-@app.post("/api/workspace/validate")
-def validate_workspace(req: WorkspaceActionRequest):
-    workspace_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
-    if not os.path.exists(workspace_path):
-        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
-
-    logs = []
-    has_error = False
-
-    py_files = glob.glob(f"{workspace_path}/**/*.py", recursive=True)
-    for pf in py_files:
-        res = subprocess.run(["python3", "-m", "py_compile", pf], capture_output=True, text=True)
-        rel = os.path.relpath(pf, workspace_path)
-        if res.returncode != 0:
-            has_error = True
-            logs.append(f"❌ Python Syntax Error in {rel}:\n{res.stderr}")
-        else:
-            logs.append(f"✓ Python Compilation OK: {rel}")
-
-    sh_files = glob.glob(f"{workspace_path}/**/*.sh", recursive=True)
-    for sf in sh_files:
-        res = subprocess.run(["bash", "-n", sf], capture_output=True, text=True)
-        rel = os.path.relpath(sf, workspace_path)
-        if res.returncode != 0:
-            has_error = True
-            logs.append(f"❌ Shell Script Syntax Error in {rel}:\n{res.stderr}")
-        else:
-            logs.append(f"✓ Bash Syntax OK: {rel}")
-
-    return {
-        "status": "error" if has_error else "success",
-        "passed": not has_error,
-        "logs": "\n".join(logs) if logs else "No Python or Shell scripts found to validate."
-    }
-
-@app.post("/api/workspace/push")
-def push_to_github(req: WorkspaceActionRequest):
-    workspace_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
-    if not os.path.exists(workspace_path):
-        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
-
-    try:
-        res = subprocess.run(["git", "-C", workspace_path, "push", "origin", req.branch], capture_output=True, text=True, timeout=25)
-        if res.returncode == 0:
-            return {"status": "success", "message": f"Successfully pushed commits to branch '{req.branch}' on GitHub!"}
-        else:
-            return JSONResponse(status_code=500, content={"status": "error", "message": res.stderr or res.stdout})
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
-
-# ----------------- Frontend HTML -----------------
-
-@app.get("/", response_class=HTMLResponse)
-def get_ui():
-    return """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>LM Studio Remote Model & Multi-Account Code Studio</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8 font-sans">
-  <div class="max-w-7xl mx-auto space-y-6">
-    
-    <!-- Top Bar & Hardware Specs -->
-    <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-slate-700 pb-5 gap-4">
-      <div>
-        <h1 class="text-2xl font-bold text-sky-400">LM Studio Code & Model Studio</h1>
-        <p class="text-xs text-slate-400">Storage Target: /storage/lmstudio</p>
-      </div>
-      
-      <div class="flex flex-wrap items-center gap-3 text-xs">
-        <div class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
-          <span class="text-slate-400">Dedicated VRAM:</span>
-          <span id="vramStat" class="font-semibold text-emerald-400">Probing NVML...</span>
-        </div>
+        # Parse all file blocks: ### File: <path>\n```...\n```
+        file_pattern = re.compile(r'###\s*File:\s*([^\n\r]+)[\r\n]+```(?:[a-zA-Z0-9_\-]+)?[\r\n]+([\s\S]*?)[\r\n]+```', re.MULTILINE)
+        matches = file_pattern.findall(ai_response)
         
-        <div class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
-          <span class="text-slate-400">System RAM:</span>
-          <span id="ramStat" class="font-semibold text-sky-300">Probing memory...</span>
-        </div>
-
-        <div class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
-          <span class="text-slate-400">Disk Storage:</span>
-          <span id="storageStat" class="font-semibold text-amber-400">Checking disk...</span>
-        </div>
-      </div>
-    </header>
-
-    <!-- Navigation Tabs -->
-    <div class="flex border-b border-slate-700 gap-2">
-      <button onclick="switchTab('models')" id="tabBtnModels" class="px-5 py-2.5 text-sm font-semibold border-b-2 border-sky-400 text-sky-400 transition flex items-center gap-2">
-        📦 Model Manager
-      </button>
-      <button onclick="switchTab('workspaces')" id="tabBtnWorkspaces" class="px-5 py-2.5 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition flex items-center gap-2">
-        🤖 GitHub Multi-Account & AI Studio
-      </button>
-    </div>
-
-    <!-- ==================== TAB 1: MODEL MANAGER ==================== -->
-    <div id="tabModels" class="space-y-6">
-      <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
-          <h2 id="catalogHeader" class="text-lg font-semibold">Available Models (Top GGUFs on Hugging Face)</h2>
-          <div class="flex flex-wrap gap-1.5 text-xs items-center">
-            <span class="text-slate-400 mr-1">Filter:</span>
-            <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">🔥 All</button>
-            <button onclick="searchAuthor('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ bartowski</button>
-            <button onclick="searchAuthor('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ unsloth</button>
-            <button onclick="searchAuthor('TheBloke')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ TheBloke</button>
-            <button onclick="searchAuthor('Qwen')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen</button>
-            <button onclick="quickSearch('Llama-3')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Llama 3</button>
-          </div>
-        </div>
-        
-        <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
-          <input id="searchInput" type="text" placeholder="Search models or creators..." 
-                 onkeydown="if(event.key === 'Enter') searchModels()"
-                 class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500 text-sm">
-          
-          <div class="flex flex-wrap items-center gap-3">
-            <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none bg-slate-950 px-3 py-2 rounded border border-slate-700">
-              <input type="checkbox" id="verifiedOnly" onchange="searchModels()" class="rounded bg-slate-900 border-slate-700 text-sky-600 focus:ring-0">
-              <span>🛡️ Verified Creators Only</span>
-            </label>
-
-            <div class="flex items-center gap-2">
-              <label for="sortSelect" class="text-xs text-slate-400 shrink-0">Sort:</label>
-              <select id="sortSelect" onchange="searchModels()" class="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
-                <option value="downloads">Most Downloads</option>
-                <option value="trust">⭐ Trust Score</option>
-                <option value="likes">Most Likes</option>
-                <option value="lastModified">Recent Release</option>
-                <option value="alphabetical">Alphabetical (A-Z)</option>
-              </select>
-            </div>
-
-            <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm transition">Search</button>
-            <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition">Reset</button>
-          </div>
-        </div>
-        
-        <div id="searchResults" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          <p class="text-slate-400">Loading models...</p>
-        </div>
-      </section>
-
-      <!-- Active Tasks & Local Models -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <section class="bg-slate-800 p-6 rounded-lg">
-          <h2 class="text-lg font-semibold mb-4">Download Tasks</h2>
-          <div id="tasksList" class="space-y-3 text-sm text-slate-300">No active downloads</div>
-        </section>
-
-        <section class="bg-slate-800 p-6 rounded-lg space-y-4">
-          <div class="flex justify-between items-center">
-            <div>
-              <h2 class="text-lg font-semibold">Installed Models on Server</h2>
-              <span id="diskSubStat" class="text-xs text-slate-400">-- / -- GB</span>
-            </div>
-            <button onclick="unloadActiveModel(this)" class="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-xs px-3 py-1.5 rounded transition">
-              ⏹ Unload All
-            </button>
-          </div>
-          <div id="localList" class="space-y-2 text-sm text-slate-300">Scanning...</div>
-        </section>
-      </div>
-    </div>
-
-    <!-- ==================== TAB 2: GITHUB & AGENT STUDIO ==================== -->
-    <div id="tabWorkspaces" class="hidden space-y-6">
-      
-      <!-- Section 1: Instructions & PAT Setup Guide -->
-      <section class="bg-slate-800 p-5 rounded-lg border border-slate-700 space-y-3">
-        <div class="flex justify-between items-center cursor-pointer" onclick="togglePatGuide()">
-          <div class="flex items-center gap-2">
-            <span class="text-lg">📖</span>
-            <h2 class="text-sm font-bold text-sky-300 uppercase tracking-wide">How to Generate a GitHub Personal Access Token (PAT)</h2>
-          </div>
-          <button id="toggleGuideBtn" class="text-xs text-slate-400 hover:text-slate-200">Show Instructions ▼</button>
-        </div>
-        
-        <div id="patGuideContent" class="hidden text-xs text-slate-300 space-y-2 border-t border-slate-700 pt-3">
-          <ol class="list-decimal list-inside space-y-1.5 text-slate-300">
-            <li>Log into the GitHub account you wish to connect.</li>
-            <li>Click your <strong>Profile Photo (top-right)</strong> ➔ <strong>Settings</strong>.</li>
-            <li>In the left sidebar, scroll to the bottom and click <strong>Developer settings</strong>.</li>
-            <li>Click <strong>Personal access tokens</strong> ➔ <strong>Tokens (classic)</strong>.</li>
-            <li>Click <strong>Generate new token</strong> ➔ <strong>Generate new token (classic)</strong>.</li>
-            <li>Set a descriptive Note (e.g. <code class="bg-slate-900 px-1 py-0.5 rounded text-sky-300">LM Studio Code Studio</code>) and select Expiration.</li>
-            <li>Check the <strong><code class="text-emerald-400 font-semibold">repo</code></strong> scope (Full control of private repositories).</li>
-            <li>Click <strong>Generate token</strong> at the bottom and copy the token (<code class="text-amber-300">ghp_...</code>) below.</li>
-          </ol>
-        </div>
-      </section>
-
-      <!-- Section 2: Connected Accounts Management -->
-      <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-700 pb-3">
-          <div>
-            <h2 class="text-base font-semibold text-slate-100">Registered GitHub Accounts</h2>
-            <p class="text-xs text-slate-400">Add or manage multiple personal or organizational accounts.</p>
-          </div>
-          <button onclick="toggleAddAccountForm()" class="bg-sky-600 hover:bg-sky-500 text-xs px-3.5 py-1.5 rounded font-medium transition">
-            + Register New Account
-          </button>
-        </div>
-
-        <!-- Add Account Collapsible Form -->
-        <div id="addAccountForm" class="hidden bg-slate-950 p-4 rounded border border-slate-700 space-y-3">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs text-slate-400 mb-1">Account Label / Alias:</label>
-              <input id="newAccountLabel" type="text" placeholder="e.g. Personal or Work / Client" 
-                     class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs focus:border-sky-500 focus:outline-none">
-            </div>
-            <div>
-              <label class="block text-xs text-slate-400 mb-1">GitHub Personal Access Token (PAT):</label>
-              <input id="newAccountToken" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" 
-                     class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs focus:border-sky-500 focus:outline-none font-mono">
-            </div>
-          </div>
-          <div class="flex justify-end gap-2">
-            <button onclick="toggleAddAccountForm()" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded">Cancel</button>
-            <button onclick="submitAddAccount()" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-4 py-1.5 rounded font-medium">Verify & Save Account</button>
-          </div>
-        </div>
-
-        <!-- Registered Accounts Grid -->
-        <div id="accountsList" class="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <p class="text-xs text-slate-500">Loading accounts...</p>
-        </div>
-      </section>
-
-      <!-- Section 3: Project & Workspace Selector -->
-      <section class="bg-slate-800 p-6 rounded-lg shadow space-y-6">
-        <div class="border-b border-slate-700 pb-3">
-          <h2 class="text-base font-semibold text-slate-100">Project & Workspace Selector</h2>
-          <p class="text-xs text-slate-400">Select an account, then open an active local project or clone a new repository.</p>
-        </div>
-
-        <!-- Step 1: Select Active Account -->
-        <div>
-          <label class="block text-xs font-semibold text-sky-400 uppercase tracking-wide mb-1">1. Select GitHub Account:</label>
-          <select id="accountDropdown" onchange="onAccountSelected()" class="w-full md:w-1/2 bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200">
-            <option value="">-- Select an account --</option>
-          </select>
-        </div>
-
-        <!-- Step 2: Choose Project (Active or New) -->
-        <div id="projectSelectionBlock" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
-          
-          <!-- Option A: Active Local Edits -->
-          <div class="bg-slate-950 p-4 rounded-lg border border-slate-700 space-y-3">
-            <div class="flex justify-between items-center">
-              <h3 class="text-sm font-semibold text-slate-200">⚡ Active Local Projects</h3>
-              <span class="text-[11px] text-slate-400">Already on disk</span>
-            </div>
-            <div id="activeProjectsList" class="space-y-2 max-h-56 overflow-y-auto pr-1 text-xs">
-              <p class="text-slate-500">Scanning local workspaces...</p>
-            </div>
-          </div>
-
-          <!-- Option B: Clone New / Switch Repository -->
-          <div class="bg-slate-950 p-4 rounded-lg border border-slate-700 space-y-3">
-            <h3 class="text-sm font-semibold text-slate-200">📥 Clone from Account</h3>
-            
-            <div class="space-y-2 text-xs">
-              <div>
-                <label class="block text-slate-400 mb-1">Select Remote Repository:</label>
-                <select id="repoSelect" onchange="fetchBranchesForSelectedRepo()" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
-                  <option value="">Loading repositories...</option>
-                </select>
-              </div>
-
-              <div>
-                <label class="block text-slate-400 mb-1">Branch:</label>
-                <select id="branchSelect" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
-                  <option value="main">main</option>
-                  <option value="dev">dev</option>
-                </select>
-              </div>
-
-              <button onclick="cloneOrOpenWorkspace()" class="w-full bg-sky-600 hover:bg-sky-500 py-2 rounded text-xs font-semibold transition mt-2">
-                📂 Open / Clone Project Workspace
-              </button>
-            </div>
-          </div>
-
-        </div>
-      </section>
-
-      <!-- Section 4: Live AI Code Studio Panel -->
-      <section id="agentStudioPanel" class="bg-slate-800 p-6 rounded-lg shadow space-y-6 hidden">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-700 pb-4">
-          <div>
-            <h2 class="text-lg font-semibold text-emerald-400 flex items-center gap-2">
-              <span>🤖 Active Workspace:</span>
-              <span id="activeProjectLabel" class="text-slate-100 font-mono">None</span>
-            </h2>
-            <p class="text-xs text-slate-400">Account: <strong id="activeAccountLabel" class="text-amber-300 font-mono">--</strong> • Branch: <strong id="activeBranchLabel" class="text-sky-300 font-mono">main</strong></p>
-          </div>
-          
-          <div class="flex items-center gap-2">
-            <button onclick="runSyntaxValidation()" class="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-xs px-3.5 py-2 rounded font-medium transition">
-              🧪 Validate Syntax
-            </button>
-            <button onclick="pushChangesToGitHub()" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-4 py-2 rounded font-medium transition flex items-center gap-1">
-              🚀 Push to GitHub
-            </button>
-          </div>
-        </div>
-
-        <!-- Task Configuration -->
-        <div class="space-y-4">
-          <div>
-            <label class="block text-xs text-slate-400 mb-1">Target File to Edit:</label>
-            <select id="targetFileSelect" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 font-mono">
-              <option value="">-- Select File --</option>
-            </select>
-          </div>
-
-          <div>
-            <label class="block text-xs text-slate-400 mb-1">Instruction for Local AI Agent:</label>
-            <textarea id="agentInstructionInput" rows="4" 
-                      placeholder="e.g. Add an endpoint to fetch active branches and handle errors gracefully with try/except..."
-                      class="w-full bg-slate-950 border border-slate-700 rounded p-3 text-sm focus:border-sky-500 focus:outline-none font-mono"></textarea>
-          </div>
-
-          <div class="flex justify-between items-center">
-            <span class="text-xs text-slate-400">Connected Model: <strong id="agentModelBadge" class="text-sky-300 font-mono">Scanning...</strong></span>
-            <button id="executeAgentBtn" onclick="executeAgentPlan()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2.5 rounded font-semibold text-sm transition flex items-center gap-2">
-              ⚡ Execute AI Code Plan
-            </button>
-          </div>
-        </div>
-
-        <!-- Output & Diff Terminal Window -->
-        <div class="space-y-2">
-          <label class="block text-xs text-slate-400">Live Agent Execution & Git Commit Output:</label>
-          <pre id="agentConsoleOutput" class="bg-slate-950 p-4 rounded-lg border border-slate-700 text-xs text-emerald-400 font-mono overflow-x-auto max-h-96 whitespace-pre-wrap">Ready for instructions.</pre>
-        </div>
-      </section>
-
-    </div>
-  </div>
-
-  <script>
-    let localModelSet = new Set();
-    let activeTasksMap = {};
-    let loadedModelsList = [];
-    let currentAccountUser = "";
-    let currentWorkspaceDir = "";
-    let currentBranch = "main";
-
-    function switchTab(tab) {
-      if (tab === 'models') {
-        document.getElementById('tabModels').classList.remove('hidden');
-        document.getElementById('tabWorkspaces').classList.add('hidden');
-        document.getElementById('tabBtnModels').className = 'px-5 py-2.5 text-sm font-semibold border-b-2 border-sky-400 text-sky-400 transition flex items-center gap-2';
-        document.getElementById('tabBtnWorkspaces').className = 'px-5 py-2.5 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition flex items-center gap-2';
-      } else {
-        document.getElementById('tabModels').classList.add('hidden');
-        document.getElementById('tabWorkspaces').classList.remove('hidden');
-        document.getElementById('tabBtnModels').className = 'px-5 py-2.5 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition flex items-center gap-2';
-        document.getElementById('tabBtnWorkspaces').className = 'px-5 py-2.5 text-sm font-semibold border-b-2 border-sky-400 text-sky-400 transition flex items-center gap-2';
-        loadAccounts();
-        loadActiveWorkspaces();
-      }
-    }
-
-    function togglePatGuide() {
-      const el = document.getElementById('patGuideContent');
-      const btn = document.getElementById('toggleGuideBtn');
-      if (el.classList.contains('hidden')) {
-        el.classList.remove('hidden');
-        btn.textContent = 'Hide Instructions ▲';
-      } else {
-        el.classList.add('hidden');
-        btn.textContent = 'Show Instructions ▼';
-      }
-    }
-
-    function toggleAddAccountForm() {
-      const el = document.getElementById('addAccountForm');
-      el.classList.toggle('hidden');
-    }
-
-    async function initHardwareInfo() {
-      try {
-        const res = await fetch('/api/system_info');
-        const data = await res.json();
-        loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
-        
-        if (data.gpu && data.gpu.has_gpu) {
-          const freeStr = data.gpu.free_vram_gb > 0 ? `${data.gpu.free_vram_gb} GB Free / ` : '';
-          document.getElementById('vramStat').innerHTML = 
-            `${freeStr}${data.gpu.total_vram_gb} GB <span class="text-slate-400 font-normal">(${data.gpu.gpu_name})</span>`;
-        } else {
-          document.getElementById('vramStat').innerHTML = `<span class="text-slate-400 font-normal">No Dedicated GPU Detected</span>`;
-        }
-
-        if (data.system_ram) {
-          document.getElementById('ramStat').innerHTML = `${data.system_ram.available_gb} GB Avail / ${data.system_ram.total_gb} GB Total`;
-        }
-
-        if (data.storage) renderStorageMetrics(data.storage);
-
-        const agentBadge = document.getElementById('agentModelBadge');
-        if (agentBadge) {
-          agentBadge.textContent = loadedModelsList.length > 0 ? loadedModelsList[0] : "Default (Auto-Load)";
-        }
-      } catch(e) {
-        document.getElementById('vramStat').textContent = 'Error probing VRAM';
-      }
-    }
-
-    function renderStorageMetrics(storage) {
-      document.getElementById('storageStat').innerHTML = `${storage.used_gb} GB Used / ${storage.total_gb} GB (${storage.free_gb} GB Free)`;
-      document.getElementById('diskSubStat').innerHTML = `Storage: <span class="text-amber-300">${storage.used_gb} GB</span> / ${storage.total_gb} GB (${storage.percent_used}%)`;
-    }
-
-    function quickSearch(tag) {
-      document.getElementById('searchInput').value = tag;
-      searchModels();
-    }
-
-    function searchAuthor(author) {
-      document.getElementById('searchInput').value = author;
-      document.getElementById('verifiedOnly').checked = false;
-      searchModels();
-    }
-
-    async function searchModels() {
-      const q = document.getElementById('searchInput').value.trim();
-      const sortBy = document.getElementById('sortSelect').value;
-      const verifiedOnly = document.getElementById('verifiedOnly').checked;
-      const container = document.getElementById('searchResults');
-      const header = document.getElementById('catalogHeader');
-      const sortLabel = document.getElementById('sortSelect').selectedOptions[0].text;
-      
-      header.textContent = q === "" ? `All Available Models (${sortLabel})` : `Search Results for "${q}" (${sortLabel})`;
-      container.innerHTML = '<p class="text-slate-400">Loading catalog from Hugging Face...</p>';
-      
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort_by=${encodeURIComponent(sortBy)}&verified_only=${verifiedOnly}`);
-        let models = await res.json();
-        container.innerHTML = '';
-        
-        if (!models || models.length === 0) {
-          container.innerHTML = '<p class="text-slate-400">No GGUF models found.</p>';
-          return;
-        }
-
-        if (sortBy === 'alphabetical') {
-          models.sort((a, b) => (a.model_name || '').localeCompare(b.model_name || '', undefined, { sensitivity: 'base' }));
-        }
-
-        models.forEach(m => {
-          const card = document.createElement('div');
-          card.className = 'bg-slate-950 p-4 rounded border border-slate-700 space-y-3';
-          
-          const verifiedBadge = m.is_verified 
-            ? `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer">🛡️ ${m.maker}</button>`
-            : `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition cursor-pointer">${m.maker}</button>`;
-
-          const trustBadge = `<span class="text-[10px] bg-slate-800 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono">⭐ ${m.trust_score}/100</span>`;
-
-          card.innerHTML = `
-            <div class="flex justify-between items-start">
-              <div class="overflow-hidden pr-2">
-                <div class="flex items-center gap-1.5">
-                  ${verifiedBadge}
-                  ${trustBadge}
-                </div>
-                <h3 class="font-bold text-slate-100 text-base mt-1.5 truncate" title="${m.model_name}">${m.model_name}</h3>
-                <div class="text-[11px] text-slate-400 mt-0.5">
-                  Author: <button onclick="searchAuthor('${m.maker}')" class="font-semibold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer">${m.maker}</button> • Updated: ${m.lastModified || 'Recent'}
-                </div>
-              </div>
-              <div class="text-right text-xs text-slate-400 shrink-0">
-                <div>⬇ ${(m.downloads || 0).toLocaleString()}</div>
-                <div>❤ ${(m.likes || 0).toLocaleString()}</div>
-              </div>
-            </div>
-            <button onclick="toggleFiles('${m.id}', this)" class="toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">
-                  Inspect Quantizations & Memory Fit
-            </button>
-            <div class="file-container mt-3 hidden space-y-2"></div>
-          `;
-          container.appendChild(card);
-        });
-      } catch(err) {
-        container.innerHTML = '<p class="text-rose-400">Error retrieving models from Hugging Face.</p>';
-      }
-    }
-
-    async function toggleFiles(repoId, btn) {
-      const parent = btn.parentElement;
-      const fileContainer = parent.querySelector('.file-container');
-      
-      if (!fileContainer.classList.contains('hidden')) {
-        fileContainer.classList.add('hidden');
-        btn.textContent = 'Inspect Quantizations & Memory Fit';
-        btn.className = 'toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition';
-        return;
-      }
-
-      fileContainer.classList.remove('hidden');
-      btn.textContent = '▲ Minimize Quantizations';
-      btn.className = 'toggle-btn w-full text-xs bg-slate-700 hover:bg-slate-600 border border-slate-500 text-sky-300 px-3 py-1.5 rounded transition';
-      fileContainer.innerHTML = '<span class="text-xs text-slate-500">Fetching file metadata & calculating VRAM footprint...</span>';
-      
-      const res = await fetch(`/api/model_files?repo_id=${encodeURIComponent(repoId)}`);
-      const data = await res.json();
-      fileContainer.innerHTML = '';
-
-      if (!data.files || data.files.length === 0) {
-        fileContainer.innerHTML = '<span class="text-xs text-slate-500">No .gguf files found in repository.</span>';
-        return;
-      }
-
-      const table = document.createElement('div');
-      table.className = 'space-y-2';
-
-      data.files.forEach(f => {
-        let fitBadge = '';
-        if (f.fit_status === 'fits_gpu') {
-          fitBadge = '<span class="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded font-medium">Fits GPU VRAM</span>';
-        } else if (f.fit_status === 'split_gpu_ram') {
-          fitBadge = '<span class="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-1.5 py-0.5 rounded font-medium">Split GPU + RAM</span>';
-        } else if (f.fit_status === 'fits_ram') {
-          fitBadge = '<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded font-medium">Fits System RAM</span>';
-        } else if (f.fit_status === 'exceeds') {
-          fitBadge = '<span class="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-medium">Exceeds Memory</span>';
-        }
-
-        const isDownloaded = f.is_downloaded || localModelSet.has(f.group_name);
-        const isDownloading = f.is_downloading || (activeTasksMap[f.group_name] && activeTasksMap[f.group_name].status === 'downloading');
-
-        let btnHtml = '';
-        const btnId = `btn-${btoa(f.group_name).replace(/=/g, '')}`;
-        const filesPayload = encodeURIComponent(JSON.stringify(f.paths));
-
-        if (isDownloaded) {
-          btnHtml = `
-            <button id="${btnId}" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">
-              ✓ Installed
-            </button>`;
-        } else if (isDownloading) {
-          btnHtml = `
-            <button id="${btnId}" disabled class="bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1">
-              ⏳ Downloading...
-            </button>`;
-        } else {
-          btnHtml = `
-            <button id="${btnId}" onclick="triggerDownload('${repoId}', '${f.group_name}', '${filesPayload}', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition">
-              Download
-            </button>`;
-        }
-
-        const shardBadge = f.is_sharded ? `<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded ml-1 font-mono">${f.shard_count} Shards</span>` : '';
-
-        const row = document.createElement('div');
-        row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
-        row.innerHTML = `
-          <div class="space-y-1 overflow-hidden pr-2">
-            <div class="font-medium text-sky-200 truncate flex items-center" title="${f.display_name}">
-              <span class="truncate">${f.group_name}</span>
-              ${shardBadge}
-            </div>
-            <div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">
-              <span>Weight: <strong class="text-slate-200">${f.weight}</strong></span>
-              <span>•</span>
-              <span>Variant: <strong class="text-slate-200">${f.variant}</strong></span>
-              <span>•</span>
-              <span>Size: <strong class="text-emerald-400">${f.size_gb}</strong></span>
-              <span>(${f.est_vram} Req)</span>
-              ${fitBadge}
-            </div>
-            <div class="text-[11px] text-slate-400 italic bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/80">
-              ℹ ${f.description}
-            </div>
-          </div>
-          ${btnHtml}
-        `;
-        table.appendChild(row);
-      });
-      fileContainer.appendChild(table);
-    }
-
-    async function triggerDownload(repoId, groupName, filesPayloadEncoded, btn) {
-      btn.disabled = true;
-      btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
-      btn.innerHTML = "⏳ Downloading...";
-
-      const filePaths = JSON.parse(decodeURIComponent(filesPayloadEncoded));
-      await fetch('/api/download', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({repo_id: repoId, group_name: groupName, files: filePaths})
-      });
-      updateTasks();
-    }
-
-    async function loadModelIntoGPU(modelPath, btn) {
-      btn.disabled = true;
-      btn.textContent = '⏳ Loading (32k ctx)...';
-      btn.className = 'bg-sky-950 text-sky-300 border border-sky-800 px-2.5 py-1 rounded text-xs animate-pulse';
-
-      try {
-        const res = await fetch('/api/load_model', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({model_path: modelPath, gpu_offload: 'max', context_length: 32768, ttl: 3600})
-        });
-        const data = await res.json();
-        if (!res.ok || data.status !== 'success') {
-          alert('Load Failure Output from LMS:\\n\\n' + (data.message || JSON.stringify(data)));
-        }
-      } catch(e) {
-        alert('Communication Error: ' + e.message);
-      }
-      await initHardwareInfo();
-      await fetchLocalModels();
-    }
-
-    async function unloadActiveModel(btn) {
-      if (btn) btn.textContent = '⏳ Unloading...';
-      try {
-        await fetch('/api/unload_model', {method: 'POST'});
-      } catch(e) {}
-      if (btn) btn.textContent = '⏹ Unload All';
-      await initHardwareInfo();
-      await fetchLocalModels();
-    }
-
-    async function deleteModel(filename) {
-      if (!confirm(`Are you sure you want to delete ${filename} to free up space?`)) return;
-      const res = await fetch('/api/delete', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({filename: filename})
-      });
-      const data = await res.json();
-      localModelSet.delete(filename);
-      if (data.storage) renderStorageMetrics(data.storage);
-      fetchLocalModels();
-    }
-
-    async function updateTasks() {
-      const res = await fetch('/api/tasks');
-      const data = await res.json();
-      activeTasksMap = data;
-      const list = document.getElementById('tasksList');
-      
-      if (Object.keys(data).length === 0) {
-        list.innerHTML = '<span class="text-slate-500">No active downloads</span>';
-        return;
-      }
-
-      list.innerHTML = Object.entries(data).map(([file, info]) => {
-        const pct = info.percent || 0;
-        const isDone = info.status === 'completed';
-        const barColor = isDone ? 'bg-emerald-500' : 'bg-sky-500';
-
-        return `
-          <div class="bg-slate-950 p-3 rounded border border-slate-700 space-y-2">
-            <div class="flex justify-between items-center text-xs">
-              <div class="font-medium truncate pr-2">${file}</div>
-              <div class="text-sky-300 font-mono shrink-0">${info.progress_str || info.status}</div>
-            </div>
-            <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-              <div class="${barColor} h-1.5 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
-    async function fetchLocalModels() {
-      const res = await fetch('/api/local_models');
-      const data = await res.json();
-      const list = document.getElementById('localList');
-      localModelSet.clear();
-      loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
-
-      if (data.storage) renderStorageMetrics(data.storage);
-
-      if (!data.files || data.files.length === 0) {
-        list.innerHTML = '<span class="text-slate-500">No GGUF models on disk</span>';
-        return;
-      }
-
-      data.files.forEach(m => localModelSet.add(m.filename));
-
-      list.innerHTML = data.files.map(m => {
-        const fLower = m.filename.toLowerCase().replace('.gguf', '');
-        const pLower = m.path.toLowerCase();
-        
-        const isLoaded = loadedModelsList.some(loaded => {
-          if (!loaded || loaded.length < 3) return false;
-          const cleanSlug = loaded.replace(/[^a-z0-9]/g, '');
-          const cleanF = fLower.replace(/[^a-z0-9]/g, '');
-          return cleanF.includes(cleanSlug) || cleanSlug.includes(cleanF) || pLower.includes(loaded);
-        });
-        
-        let actionBtn = '';
-        if (isLoaded) {
-          actionBtn = `
-            <div class="flex items-center gap-1.5">
-              <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">
-                ⚡ Loaded
-              </span>
-              <button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">
-                ⏹
-              </button>
-            </div>`;
-        } else {
-          actionBtn = `
-            <button onclick="loadModelIntoGPU('${m.path}', this)" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1">
-              🚀 Load to GPU
-            </button>`;
-        }
-
-        return `
-          <div class="flex justify-between items-center bg-slate-950 p-3 rounded border ${isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700'} text-xs gap-3">
-            <div class="truncate pr-2">
-              <div class="font-medium text-slate-200 truncate" title="${m.filename}">${m.filename}</div>
-              <div class="text-slate-400 text-[10px] mt-0.5">Weight: ${m.weight} | Variant: ${m.variant}</div>
-            </div>
-            <div class="flex items-center gap-2 shrink-0">
-              <span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">${m.size_gb}</span>
-              ${actionBtn}
-              <button onclick="deleteModel('${m.filename}')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">
-                🗑️
-              </button>
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
-    // ---------------- Multi-Account & Workspace Frontend Logic ----------------
-
-    async function loadAccounts() {
-      const container = document.getElementById('accountsList');
-      const dropdown = document.getElementById('accountDropdown');
-      
-      try {
-        const res = await fetch('/api/github/accounts');
-        const accounts = await res.json();
-        
-        if (!accounts || accounts.length === 0) {
-          container.innerHTML = '<p class="text-xs text-slate-500 col-span-3">No GitHub accounts registered yet. Click "+ Register New Account" above.</p>';
-          dropdown.innerHTML = '<option value="">-- No accounts available --</option>';
-          document.getElementById('projectSelectionBlock').classList.add('hidden');
-          return;
-        }
-
-        container.innerHTML = accounts.map(a => `
-          <div class="bg-slate-950 p-3 rounded border border-slate-700 flex justify-between items-center text-xs">
-            <div class="flex items-center gap-2.5 overflow-hidden">
-              <img src="${a.avatar_url || 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png'}" class="w-7 h-7 rounded-full border border-slate-700">
-              <div class="truncate">
-                <div class="font-bold text-slate-200 truncate">${a.label}</div>
-                <div class="text-[11px] text-slate-400">@${a.username} • <span class="font-mono text-[10px] text-slate-500">${a.masked_token}</span></div>
-              </div>
-            </div>
-            <button onclick="removeAccount('${a.username}')" class="text-rose-400 hover:text-rose-300 px-2 py-1 bg-slate-900 rounded border border-slate-800 text-[11px] shrink-0" title="Remove Account">
-              ✕
-            </button>
-          </div>
-        `).join('');
-
-        dropdown.innerHTML = '<option value="">-- Choose Account --</option>' + accounts.map(a => `
-          <option value="${a.username}">${a.label} (@${a.username})</option>
-        `).join('');
-
-        if (currentAccountUser) {
-          dropdown.value = currentAccountUser;
-        }
-      } catch(e) {
-        container.innerHTML = '<p class="text-xs text-rose-400">Error loading accounts.</p>';
-      }
-    }
-
-    async function submitAddAccount() {
-      const label = document.getElementById('newAccountLabel').value.trim();
-      const token = document.getElementById('newAccountToken').value.trim();
-
-      if (!token) return alert('Please enter a valid GitHub token');
-
-      try {
-        const res = await fetch('/api/github/accounts/add', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({token: token, label: label})
-        });
-        const data = await res.json();
-        if (res.ok) {
-          alert(`Account @${data.username} registered successfully!`);
-          document.getElementById('newAccountLabel').value = '';
-          document.getElementById('newAccountToken').value = '';
-          toggleAddAccountForm();
-          loadAccounts();
-        } else {
-          alert('Failed to add account: ' + data.message);
-        }
-      } catch(e) {
-        alert('Communication Error: ' + e.message);
-      }
-    }
-
-    async function removeAccount(username) {
-      if (!confirm(`Are you sure you want to remove account @${username}?`)) return;
-      try {
-        const res = await fetch('/api/github/accounts/remove', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({username: username})
-        });
-        const data = await res.json();
-        if (res.ok) {
-          loadAccounts();
-        } else {
-          alert('Error: ' + data.message);
-        }
-      } catch(e) {
-        alert('Communication Error: ' + e.message);
-      }
-    }
-
-    async function onAccountSelected() {
-      const username = document.getElementById('accountDropdown').value;
-      currentAccountUser = username;
-      const block = document.getElementById('projectSelectionBlock');
-
-      if (!username) {
-        block.classList.add('hidden');
-        return;
-      }
-
-      block.classList.remove('hidden');
-      await loadActiveWorkspaces();
-      await loadRemoteReposForAccount(username);
-    }
-
-    async function loadActiveWorkspaces() {
-      const container = document.getElementById('activeProjectsList');
-      try {
-        const res = await fetch('/api/workspaces/active');
-        const workspaces = await res.json();
-        
-        if (!workspaces || workspaces.length === 0) {
-          container.innerHTML = '<p class="text-slate-500">No active workspaces on disk yet.</p>';
-          return;
-        }
-
-        container.innerHTML = workspaces.map(w => `
-          <div class="flex justify-between items-center bg-slate-900 p-2.5 rounded border border-slate-800">
-            <div class="truncate pr-2">
-              <span class="font-bold text-sky-300">${w.display_name}</span>
-              <span class="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono ml-1.5">${w.branch}</span>
-            </div>
-            <button onclick="openExistingWorkspace('${w.dir_name}', '${w.display_name}', '${w.branch}')" class="bg-emerald-700 hover:bg-emerald-600 px-2.5 py-1 rounded text-xs text-white font-medium shrink-0">
-              Open ➔
-            </button>
-          </div>
-        `).join('');
-      } catch(e) {
-        container.innerHTML = '<p class="text-slate-500">Error loading local workspaces.</p>';
-      }
-    }
-
-    async function loadRemoteReposForAccount(username) {
-      const select = document.getElementById('repoSelect');
-      select.innerHTML = '<option value="">Loading account repositories...</option>';
-      try {
-        const res = await fetch(`/api/github/repos?account_username=${encodeURIComponent(username)}`);
-        const repos = await res.json();
-        if (Array.isArray(repos) && repos.length > 0) {
-          select.innerHTML = repos.map(r => `
-            <option value="${r.full_name}">${r.is_private ? '🔒 ' : ''}${r.full_name}</option>
-          `).join('');
-          fetchBranchesForSelectedRepo();
-        } else {
-          select.innerHTML = '<option value="">No repositories found for account</option>';
-        }
-      } catch(e) {
-        select.innerHTML = '<option value="">Error fetching repos</option>';
-      }
-    }
-
-    async function fetchBranchesForSelectedRepo() {
-      const repoFullName = document.getElementById('repoSelect').value;
-      const branchSelect = document.getElementById('branchSelect');
-      if (!repoFullName || !currentAccountUser) return;
-      try {
-        const res = await fetch(`/api/github/branches?account_username=${encodeURIComponent(currentAccountUser)}&repo_full_name=${encodeURIComponent(repoFullName)}`);
-        const branches = await res.json();
-        branchSelect.innerHTML = branches.map(b => `<option value="${b}">${b}</option>`).join('');
-      } catch(e) {}
-    }
-
-    async function cloneOrOpenWorkspace() {
-      const repoFullName = document.getElementById('repoSelect').value;
-      const branch = document.getElementById('branchSelect').value;
-      const consoleOut = document.getElementById('agentConsoleOutput');
-      if (!repoFullName) return alert('Select a repository first');
-
-      consoleOut.textContent = `[Git] Preparing workspace for ${repoFullName} on branch '${branch}'...\\n`;
-
-      try {
-        const res = await fetch('/api/github/clone', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({account_username: currentAccountUser, repo_full_name: repoFullName, branch: branch})
-        });
-        const data = await res.json();
-        if (res.ok) {
-          openExistingWorkspace(data.dir_name, repoFullName, data.branch);
-          consoleOut.textContent += `[Git] Cloned / active at ${data.path}\\n`;
-        } else {
-          alert('Workspace error: ' + data.message);
-        }
-      } catch(e) {
-        alert('Communication Error: ' + e.message);
-      }
-    }
-
-    async function openExistingWorkspace(dirName, displayName, branch) {
-      currentWorkspaceDir = dirName;
-      currentBranch = branch;
-
-      document.getElementById('activeProjectLabel').textContent = displayName;
-      document.getElementById('activeAccountLabel').textContent = `@${currentAccountUser || 'local'}`;
-      document.getElementById('activeBranchLabel').textContent = branch;
-      document.getElementById('agentStudioPanel').classList.remove('hidden');
-
-      await loadWorkspaceFiles();
-    }
-
-    async function loadWorkspaceFiles() {
-      const select = document.getElementById('targetFileSelect');
-      select.innerHTML = '<option value="">Loading files...</option>';
-      try {
-        const res = await fetch(`/api/workspace/files?repo_dir_name=${encodeURIComponent(currentWorkspaceDir)}`);
-        const files = await res.json();
-        if (Array.isArray(files) && files.length > 0) {
-          select.innerHTML = files.map(f => `<option value="${f}">${f}</option>`).join('');
-        } else {
-          select.innerHTML = '<option value="">No editable files found</option>';
-        }
-      } catch(e) {}
-    }
-
-    async function executeAgentPlan() {
-      const targetFile = document.getElementById('targetFileSelect').value;
-      const instruction = document.getElementById('agentInstructionInput').value.trim();
-      const consoleOut = document.getElementById('agentConsoleOutput');
-      const btn = document.getElementById('executeAgentBtn');
-
-      if (!targetFile) return alert('Please select a target file to edit');
-      if (!instruction) return alert('Please enter an instruction for the AI agent');
-
-      btn.disabled = true;
-      btn.textContent = '⏳ AI Agent Generating & Committing...';
-      consoleOut.textContent = `[Agent] Loading ${targetFile} into local LLM context (32k tokens)...\\n`;
-      consoleOut.textContent += `[Agent] Task: "${instruction}"\\n`;
-
-      try {
-        const res = await fetch('/api/agent/execute', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            repo_dir_name: currentWorkspaceDir,
-            target_file: targetFile,
-            instruction: instruction
-          })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          consoleOut.textContent += `\\n[✓ Success] ${data.commit_message}\\n\\n`;
-          consoleOut.textContent += `--- GIT DIFF ---\\n${data.diff}\\n`;
-        } else {
-          consoleOut.textContent += `\\n[❌ Error] ${data.message}`;
-        }
-      } catch(e) {
-        consoleOut.textContent += `\\n[❌ Communication Error] ${e.message}`;
-      }
-      btn.disabled = false;
-      btn.textContent = '⚡ Execute AI Code Plan';
-    }
-
-    async function runSyntaxValidation() {
-      const consoleOut = document.getElementById('agentConsoleOutput');
-      consoleOut.textContent += `\\n[Validator] Running Python compilation & Bash syntax checks...\\n`;
-      try {
-        const res = await fetch('/api/workspace/validate', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
-        });
-        const data = await res.json();
-        consoleOut.textContent += `\\n${data.logs}\\n`;
-      } catch(e) {
-        consoleOut.textContent += `\\n[Validator Error] ${e.message}\\n`;
-      }
-    }
-
-    async function pushChangesToGitHub() {
-      if (!confirm(`Are you ready to push committed changes to remote branch '${currentBranch}' on GitHub?`)) return;
-      const consoleOut = document.getElementById('agentConsoleOutput');
-      consoleOut.textContent += `\\n[Git] Pushing commits to GitHub origin/${currentBranch}...\\n`;
-      try {
-        const res = await fetch('/api/workspace/push', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
-        });
-        const data = await res.json();
-        if (res.ok) {
-          alert('Push Successful: ' + data.message);
-          consoleOut.textContent += `[✓ Git Push Complete] ${data.message}\\n`;
-        } else {
-          alert('Push Failed: ' + data.message);
-          consoleOut.textContent += `[❌ Git Push Failed] ${data.message}\\n`;
-        }
-      } catch(e) {
-        consoleOut.textContent += `[❌ Error] ${e.message}\\n`;
-      }
-    }
-
-    initHardwareInfo();
-    fetchLocalModels().then(() => { searchModels(); });
-    setInterval(updateTasks, 1000);
-    setInterval(fetchLocalModels, 4000);
-  </script>
-</body>
-</html>"""
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+        modified_files = []
+        if matches:
+            for file_rel_path, file_content in matches:
+                clean_rel = file_rel_path.strip().lstrip("/")
+                dest_file_path = os.path.join(workspace_path, clean_rel)
+                os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
+                with open(dest_file_path, "w", encoding="utf-8") as f:
+                    f.write(file_content)
+                subprocess.run(["git", "-C", workspace_path, "add", clean_rel], capture_output=True)
+                modified_files.append(clean_rel)
+        elif len(req.target_files) == 1:
+            # Fallback if model omitted ### File header on single file task
+            code_match = re.search(r'```(?:[a-zA-Z0-9_\-]+)?\n([\s\S]*?)\n
