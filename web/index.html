@@ -431,7 +431,7 @@
     function renderStorageMetrics(storage) {
       const mainStat = document.getElementById('storageStat');
       const subStat = document.getElementById('diskSubStat');
-      if (mainStat && storage) mainStat.innerHTML = `${storage.used_gb} / ${storage.total_gb} GB`;
+      if (mainStat && storage) mainStat.innerHTML = `${storage.used_gb} /${storage.total_gb} GB`;
       if (subStat && storage) subStat.innerHTML = `Storage: <span class="text-amber-300">${storage.used_gb} GB</span> / ${storage.total_gb} GB (${storage.percent_used}%)`;
     }
 
@@ -458,8 +458,7 @@
               <div class="font-bold truncate">${w.display_name}</div>
               <div class="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400 mt-1">
                 <span class="bg-slate-800 px-1.5 py-0.5 rounded font-mono">${w.branch}</span>
-                ${pendingBadge}
-                ${pushBadge}
+                ${pendingBadge}${pushBadge}
               </div>
             </div>
           `;
@@ -597,7 +596,6 @@
       }
 
       activeThread.messages.forEach(msg => {
-        // User Message
         const userMsgDiv = document.createElement('div');
         userMsgDiv.className = 'bg-slate-800 p-4 rounded-lg border border-slate-700 text-xs text-slate-100 space-y-1';
         userMsgDiv.innerHTML = `
@@ -609,7 +607,6 @@
         `;
         chatWindow.appendChild(userMsgDiv);
 
-        // AI Response Message
         const modFiles = msg.modified_files || [];
         const aiMsgDiv = document.createElement('div');
         aiMsgDiv.className = 'bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-emerald-300 space-y-3 font-mono';
@@ -629,8 +626,7 @@
             <span>🤖 Local AI Agent</span>
             <span class="text-[10px] text-slate-400 font-normal">${modFiles.length > 0 ? `Modified: ${modFiles.join(', ')}` : 'Advisory Response'}</span>
           </div>
-          <div class="text-slate-200 whitespace-pre-wrap mt-2">${(msg.ai_response || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-          ${reviewDiff}
+          <div class="text-slate-200 whitespace-pre-wrap mt-2">${(msg.ai_response \vert{}\vert{} '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>${reviewDiff}
         `;
         chatWindow.appendChild(aiMsgDiv);
       });
@@ -790,6 +786,31 @@
       }
     }
 
+    async function autoFillCommitMessage(cardId, modFilesJson) {
+      const input = document.getElementById(`commit-msg-${cardId}`);
+      const modFiles = modFilesJson ? JSON.parse(decodeURIComponent(modFilesJson)) : [];
+      if (input) input.value = "⏳ AI analyzing diff content...";
+
+      try {
+        const res = await fetch('/api/workspace/generate_commit_msg', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            repo_dir_name: currentWorkspaceDir,
+            target_files: modFiles
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.commit_msg) {
+          if (input) input.value = data.commit_msg;
+        } else {
+          if (input) input.value = "chore: update workspace files";
+        }
+      } catch(e) {
+        if (input) input.value = "chore: update workspace files";
+      }
+    }
+
     // ---------------- Studio Chat Execution & Staging ----------------
 
     async function executeStudioTask() {
@@ -804,7 +825,6 @@
       const checkedBoxes = document.querySelectorAll('#filesCheckboxList input[type="checkbox"]:checked');
       const selectedFiles = Array.from(checkedBoxes).map(cb => cb.value);
 
-      // User Message
       const userMsgDiv = document.createElement('div');
       userMsgDiv.className = 'bg-slate-800 p-4 rounded-lg border border-slate-700 text-xs text-slate-100 space-y-1';
       userMsgDiv.innerHTML = `
@@ -820,7 +840,6 @@
       sendBtn.disabled = true;
       sendBtn.textContent = '⏳ Thinking...';
 
-      // AI Response Bubble
       const cardId = `action-card-${Date.now()}`;
       const aiMsgDiv = document.createElement('div');
       aiMsgDiv.id = cardId;
@@ -860,7 +879,13 @@
                 </details>
 
                 <div>
-                  <label class="block text-[11px] text-slate-400 mb-1">AI Generated Commit Message:</label>
+                  <div class="flex items-center justify-between mb-1">
+                    <label class="text-[11px] text-slate-400">AI Generated Commit Message:</label>
+                    <button onclick="autoFillCommitMessage('${cardId}', '${modFilesJson}')" 
+                            class="text-[10px] text-amber-300 hover:text-amber-200 bg-slate-950 border border-slate-700 px-2 py-0.5 rounded flex items-center gap-1 transition">
+                      ✨ Regenerate
+                    </button>
+                  </div>
                   <input type="text" id="commit-msg-${cardId}" value="${data.message.proposed_commit_msg.replace(/"/g, '&quot;')}" 
                          class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-sky-500 focus:outline-none">
                 </div>
@@ -884,8 +909,7 @@
               <span>🤖 Local AI Agent</span>
               <span class="text-[10px] text-slate-400 font-normal">${modFiles.length > 0 ? 'Changes Staged on Disk' : 'Advisory Response'}</span>
             </div>
-            <div class="text-slate-200 whitespace-pre-wrap mt-2">${data.message.ai_response.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            ${commitReviewBox}
+            <div class="text-slate-200 whitespace-pre-wrap mt-2">${data.message.ai_response.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>${commitReviewBox}
           `;
           await loadWorkspaceFiles();
           await refreshWorkspaceStatus();
@@ -968,6 +992,7 @@
     }
 
     async function showPendingDiffModal() {
+      const cardId = `pending-modal-${Date.now()}`;
       const promptMsg = prompt("Enter commit message for currently pending changes:");
       if (!promptMsg) return;
 
@@ -1135,8 +1160,7 @@
                   <strong>Summary:</strong> ${evt.summary || evt.instruction}
                 </p>
 
-                ${filesBadge}
-                ${diffBox}
+                ${filesBadge}${diffBox}
               </div>
             </div>
           `;
@@ -1197,6 +1221,7 @@
           <option value="${a.username}">${a.label} (@${a.username})</option>
         `).join('');
       } catch(e) {
+        console.error("Load Accounts Error:", e);
         container.innerHTML = '<p class="text-xs text-rose-400">Error loading accounts.</p>';
       }
     }
@@ -1362,8 +1387,7 @@
             <div class="flex justify-between items-start">
               <div class="overflow-hidden pr-2">
                 <div class="flex items-center gap-1.5">
-                  ${verifiedBadge}
-                  ${trustBadge}
+                  ${verifiedBadge}${trustBadge}
                 </div>
                 <h3 class="font-bold text-slate-100 text-base mt-1.5 truncate" title="${m.model_name}">${m.model_name}</h3>
                 <div class="text-[11px] text-slate-400 mt-0.5">
@@ -1509,11 +1533,9 @@
         });
         const data = await res.json();
         if (!res.ok || data.status !== 'success') {
-          console.error("Load Model Failure Payload:", data);
           alert('Load Failure Output from LMS:\n\n' + (data.message || JSON.stringify(data)));
         }
       } catch(e) {
-        console.error("Load Model Communication Error:", e);
         alert('Communication Error: ' + e.message);
       }
       await initHardwareInfo();
@@ -1524,9 +1546,7 @@
       if (btn) btn.textContent = '⏳ Unloading...';
       try {
         await fetch('/api/unload_model', {method: 'POST'});
-      } catch(e) {
-        console.error("Unload Model Error:", e);
-      }
+      } catch(e) {}
       if (btn) btn.textContent = '⏹ Unload All';
       await initHardwareInfo();
       await fetchLocalModels();
@@ -1544,9 +1564,7 @@
         localModelSet.delete(filename);
         if (data.storage) renderStorageMetrics(data.storage);
         fetchLocalModels();
-      } catch(e) {
-        console.error("Delete Model Error:", e);
-      }
+      } catch(e) {}
     }
 
     async function updateTasks() {
@@ -1649,7 +1667,6 @@
           `;
         }).join('');
       } catch(e) {
-        console.error("Fetch Local Models Error:", e);
         list.innerHTML = `<span class="text-rose-400">Error loading local models: ${e.message}</span>`;
       }
     }

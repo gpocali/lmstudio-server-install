@@ -1,6 +1,6 @@
 """
 LM Studio Server Entrypoint Router
-Dispatches API requests with workspace timeline tracking and AI summarization.
+Dispatches API requests with workspace timeline tracking and AI commit summarization.
 """
 
 import os
@@ -43,7 +43,7 @@ from core.github_vault import (
     save_workspace_history,
     append_to_changelog
 )
-from core.agent_engine import process_agent_task
+from core.agent_engine import process_agent_task, generate_commit_msg_from_diff
 
 app = FastAPI(title="LM Studio Modular Code & Model Studio")
 
@@ -102,6 +102,11 @@ class AgentTaskRequest(BaseModel):
     target_files: list[str] = []
     instruction: str
     thread_id: str = ""
+    model_identifier: str = ""
+
+class GenCommitMsgRequest(BaseModel):
+    repo_dir_name: str
+    target_files: list[str] = []
     model_identifier: str = ""
 
 class CommitRequest(BaseModel):
@@ -417,7 +422,6 @@ def api_get_timeline(repo_dir_name: str):
     hist = load_workspace_history(repo_dir_name)
     events = hist.get("timeline_events", [])
     
-    # Also fetch recent git commits for completeness
     w_path = os.path.join(WORKSPACES_ROOT, repo_dir_name)
     git_commits = []
     if os.path.exists(w_path):
@@ -487,6 +491,13 @@ def api_create_branch(req: CreateBranchRequest):
         return JSONResponse(status_code=400, content={"status": "error", "message": res.stderr or res.stdout})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+@app.post("/api/workspace/generate_commit_msg")
+def api_gen_commit_msg(req: GenCommitMsgRequest):
+    res = generate_commit_msg_from_diff(req.repo_dir_name, req.target_files, req.model_identifier)
+    if res.get("status") == "error":
+        return JSONResponse(status_code=500, content=res)
+    return res
 
 @app.post("/api/workspace/pull")
 def api_pull_upstream(req: WorkspaceActionRequest):
@@ -569,10 +580,8 @@ def api_commit(req: CommitRequest):
         b_res = subprocess.run(["git", "-C", w_path, "branch", "--show-current"], capture_output=True, text=True)
         active_branch = b_res.stdout.strip() or "main"
 
-        # 1. Update and stage CHANGELOG.md automatically
         append_to_changelog(w_path, active_branch, req.commit_message, req.target_files, req.instruction_summary)
 
-        # 2. Add files
         if req.target_files:
             for f in req.target_files:
                 subprocess.run(["git", "-C", w_path, "add", f], capture_output=True)
@@ -581,7 +590,6 @@ def api_commit(req: CommitRequest):
 
         res = subprocess.run(["git", "-C", w_path, "commit", "-m", req.commit_message], capture_output=True, text=True)
         if res.returncode == 0 or "nothing to commit" in res.stdout:
-            # Add commit event to timeline
             hist = load_workspace_history(req.repo_dir_name)
             hist.setdefault("timeline_events", []).insert(0, {
                 "id": f"evt-{int(datetime.datetime.utcnow().timestamp()*1000)}",
