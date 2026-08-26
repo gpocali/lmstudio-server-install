@@ -474,483 +474,480 @@ def get_local_models():
 
 @app.get("/", response_class=HTMLResponse)
 def get_ui():
-    return """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <title>LM Studio Remote Model Manager</title>
-      <script src="https://cdn.tailwindcss.com"></script>
-    </head>
-    <body class="bg-slate-900 text-slate-100 min-h-screen p-6 md:p-8">
-      <div class="max-w-7xl mx-auto space-y-8">
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LM Studio Remote Model Manager</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-6 md:p-8">
+  <div class="max-w-7xl mx-auto space-y-8">
+    
+    <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-slate-700 pb-5 gap-4">
+      <div>
+        <h1 class="text-2xl font-bold text-sky-400">LM Studio Model Manager</h1>
+        <p class="text-xs text-slate-400">Storage Target: /storage/lmstudio/models</p>
+      </div>
+      
+      <div class="flex flex-wrap items-center gap-3 text-xs">
+        <div id="gpuCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
+          <span class="text-slate-400">Dedicated VRAM:</span>
+          <span id="vramStat" class="font-semibold text-emerald-400">Probing NVML...</span>
+        </div>
         
-        <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-slate-700 pb-5 gap-4">
-          <div>
-            <h1 class="text-2xl font-bold text-sky-400">LM Studio Model Manager</h1>
-            <p class="text-xs text-slate-400">Storage Target: /storage/lmstudio/models</p>
-          </div>
-          
-          <div class="flex flex-wrap items-center gap-3 text-xs">
-            <div id="gpuCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
-              <span class="text-slate-400">Dedicated VRAM:</span>
-              <span id="vramStat" class="font-semibold text-emerald-400">Probing NVML...</span>
-            </div>
-            
-            <div id="ramCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
-              <span class="text-slate-400">System RAM:</span>
-              <span id="ramStat" class="font-semibold text-sky-300">Probing memory...</span>
-            </div>
+        <div id="ramCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
+          <span class="text-slate-400">System RAM:</span>
+          <span id="ramStat" class="font-semibold text-sky-300">Probing memory...</span>
+        </div>
 
-            <div id="storageCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
-              <span class="text-slate-400">Disk Storage:</span>
-              <span id="storageStat" class="font-semibold text-amber-400">Checking disk...</span>
-            </div>
-            
-            <button onclick="initHardwareInfo(); fetchLocalModels();" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded text-xs text-slate-200 transition">
-              Refresh Stats
-            </button>
-          </div>
-        </header>
+        <div id="storageCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
+          <span class="text-slate-400">Disk Storage:</span>
+          <span id="storageStat" class="font-semibold text-amber-400">Checking disk...</span>
+        </div>
+        
+        <button onclick="initHardwareInfo(); fetchLocalModels();" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded text-xs text-slate-200 transition">
+          Refresh Stats
+        </button>
+      </div>
+    </header>
 
-        <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
-          <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
-            <h2 id="catalogHeader" class="text-lg font-semibold">Available Models (Top GGUFs on Hugging Face)</h2>
-            <div class="flex flex-wrap gap-1.5 text-xs items-center">
-              <span class="text-slate-400 mr-1">Filter:</span>
-              <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">🔥 All</button>
-              <button onclick="searchAuthor('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ bartowski</button>
-              <button onclick="searchAuthor('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ unsloth</button>
-              <button onclick="searchAuthor('TheBloke')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ TheBloke</button>
-              <button onclick="searchAuthor('Qwen')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen</button>
-              <button onclick="quickSearch('Llama-3')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Llama 3</button>
-            </div>
-          </div>
-          
-          <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
-            <input id="searchInput" type="text" placeholder="Search models or creators..." 
-                   onkeydown="if(event.key === 'Enter') searchModels()"
-                   class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500 text-sm">
-            
-            <div class="flex flex-wrap items-center gap-3">
-              <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none bg-slate-950 px-3 py-2 rounded border border-slate-700">
-                <input type="checkbox" id="verifiedOnly" onchange="searchModels()" class="rounded bg-slate-900 border-slate-700 text-sky-600 focus:ring-0">
-                <span>🛡️ Verified Creators Only</span>
-              </label>
-
-              <div class="flex items-center gap-2">
-                <label for="sortSelect" class="text-xs text-slate-400 shrink-0">Sort:</label>
-                <select id="sortSelect" onchange="searchModels()" class="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
-                  <option value="downloads">Most Downloads</option>
-                  <option value="trust">⭐ Trust Score</option>
-                  <option value="likes">Most Likes</option>
-                  <option value="lastModified">Recent Release</option>
-                  <option value="alphabetical">Alphabetical (A-Z)</option>
-                </select>
-              </div>
-
-              <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm transition">Search</button>
-              <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition">Reset</button>
-            </div>
-          </div>
-          
-          <div id="searchResults" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            <p class="text-slate-400">Loading models...</p>
-          </div>
-        </section>
-
-        <!-- Active Jobs & Local Models Grid -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <section class="bg-slate-800 p-6 rounded-lg">
-            <h2 class="text-lg font-semibold mb-4">Download Tasks</h2>
-            <div id="tasksList" class="space-y-3 text-sm text-slate-300">No active downloads</div>
-          </section>
-
-          <section class="bg-slate-800 p-6 rounded-lg space-y-4">
-            <div class="flex justify-between items-center">
-              <div>
-                <h2 class="text-lg font-semibold">Installed Models on Server</h2>
-                <span id="diskSubStat" class="text-xs text-slate-400">-- / -- GB</span>
-              </div>
-              <button onclick="unloadActiveModel(this)" class="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-xs px-3 py-1.5 rounded transition">
-                ⏹ Unload All
-              </button>
-            </div>
-            <div id="localList" class="space-y-2 text-sm text-slate-300">Scanning...</div>
-          </section>
+    <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+        <h2 id="catalogHeader" class="text-lg font-semibold">Available Models (Top GGUFs on Hugging Face)</h2>
+        <div class="flex flex-wrap gap-1.5 text-xs items-center">
+          <span class="text-slate-400 mr-1">Filter:</span>
+          <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">🔥 All</button>
+          <button onclick="searchAuthor('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ bartowski</button>
+          <button onclick="searchAuthor('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ unsloth</button>
+          <button onclick="searchAuthor('TheBloke')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ TheBloke</button>
+          <button onclick="searchAuthor('Qwen')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen</button>
+          <button onclick="quickSearch('Llama-3')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Llama 3</button>
         </div>
       </div>
+      
+      <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
+        <input id="searchInput" type="text" placeholder="Search models or creators..." 
+               onkeydown="if(event.key === 'Enter') searchModels()"
+               class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500 text-sm">
+        
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none bg-slate-950 px-3 py-2 rounded border border-slate-700">
+            <input type="checkbox" id="verifiedOnly" onchange="searchModels()" class="rounded bg-slate-900 border-slate-700 text-sky-600 focus:ring-0">
+            <span>🛡️ Verified Creators Only</span>
+          </label>
 
-      <script>
-        let localModelSet = new Set();
-        let activeTasksMap = {};
-        let loadedModelsList = [];
+          <div class="flex items-center gap-2">
+            <label for="sortSelect" class="text-xs text-slate-400 shrink-0">Sort:</label>
+            <select id="sortSelect" onchange="searchModels()" class="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
+              <option value="downloads">Most Downloads</option>
+              <option value="trust">⭐ Trust Score</option>
+              <option value="likes">Most Likes</option>
+              <option value="lastModified">Recent Release</option>
+              <option value="alphabetical">Alphabetical (A-Z)</option>
+            </select>
+          </div>
 
-        async function initHardwareInfo() {
-          try {
-            const res = await fetch('/api/system_info');
-            const data = await res.json();
-            loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
-            
-            if (data.gpu && data.gpu.has_gpu) {
-              const freeStr = data.gpu.free_vram_gb > 0 ? `${data.gpu.free_vram_gb} GB Free / ` : '';
-              document.getElementById('vramStat').innerHTML = 
-                `${freeStr}${data.gpu.total_vram_gb} GB <span class="text-slate-400 font-normal">(${data.gpu.gpu_name})</span>`;
-            } else {
-              document.getElementById('vramStat').innerHTML = 
-                `<span class="text-slate-400 font-normal">No Dedicated GPU Detected</span>`;
-            }
+          <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm transition">Search</button>
+          <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition">Reset</button>
+        </div>
+      </div>
+      
+      <div id="searchResults" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+        <p class="text-slate-400">Loading models...</p>
+      </div>
+    </section>
 
-            if (data.system_ram) {
-              document.getElementById('ramStat').innerHTML = 
-                `${data.system_ram.available_gb} GB Avail / ${data.system_ram.total_gb} GB Total`;
-            }
+    <!-- Active Jobs & Local Models Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <section class="bg-slate-800 p-6 rounded-lg">
+        <h2 class="text-lg font-semibold mb-4">Download Tasks</h2>
+        <div id="tasksList" class="space-y-3 text-sm text-slate-300">No active downloads</div>
+      </section>
 
-            if (data.storage) {
-              renderStorageMetrics(data.storage);
-            }
-          } catch(e) {
-            document.getElementById('vramStat').textContent = 'Error probing VRAM';
-          }
+      <section class="bg-slate-800 p-6 rounded-lg space-y-4">
+        <div class="flex justify-between items-center">
+          <div>
+            <h2 class="text-lg font-semibold">Installed Models on Server</h2>
+            <span id="diskSubStat" class="text-xs text-slate-400">-- / -- GB</span>
+          </div>
+          <button onclick="unloadActiveModel(this)" class="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-xs px-3 py-1.5 rounded transition">
+            ⏹ Unload All
+          </button>
+        </div>
+        <div id="localList" class="space-y-2 text-sm text-slate-300">Scanning...</div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    let localModelSet = new Set();
+    let activeTasksMap = {};
+    let loadedModelsList = [];
+
+    async function initHardwareInfo() {
+      try {
+        const res = await fetch('/api/system_info');
+        const data = await res.json();
+        loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
+        
+        if (data.gpu && data.gpu.has_gpu) {
+          const freeStr = data.gpu.free_vram_gb > 0 ? `${data.gpu.free_vram_gb} GB Free / ` : '';
+          document.getElementById('vramStat').innerHTML = 
+            `${freeStr}${data.gpu.total_vram_gb} GB <span class="text-slate-400 font-normal">(${data.gpu.gpu_name})</span>`;
+        } else {
+          document.getElementById('vramStat').innerHTML = 
+            `<span class="text-slate-400 font-normal">No Dedicated GPU Detected</span>`;
         }
 
-        function renderStorageMetrics(storage) {
-          document.getElementById('storageStat').innerHTML = 
-            `${storage.used_gb} GB Used / ${storage.total_gb} GB (${storage.free_gb} GB Free)`;
-          document.getElementById('diskSubStat').innerHTML = 
-            `Storage: <span class="text-amber-300">${storage.used_gb} GB</span> / ${storage.total_gb} GB (${storage.percent_used}%)`;
+        if (data.system_ram) {
+          document.getElementById('ramStat').innerHTML = 
+            `${data.system_ram.available_gb} GB Avail / ${data.system_ram.total_gb} GB Total`;
         }
 
-        function quickSearch(tag) {
-          document.getElementById('searchInput').value = tag;
-          searchModels();
+        if (data.storage) {
+          renderStorageMetrics(data.storage);
+        }
+      } catch(e) {
+        document.getElementById('vramStat').textContent = 'Error probing VRAM';
+      }
+    }
+
+    function renderStorageMetrics(storage) {
+      document.getElementById('storageStat').innerHTML = 
+        `${storage.used_gb} GB Used / ${storage.total_gb} GB (${storage.free_gb} GB Free)`;
+      document.getElementById('diskSubStat').innerHTML = 
+        `Storage: <span class="text-amber-300">${storage.used_gb} GB</span> / ${storage.total_gb} GB (${storage.percent_used}%)`;
+    }
+
+    function quickSearch(tag) {
+      document.getElementById('searchInput').value = tag;
+      searchModels();
+    }
+
+    function searchAuthor(author) {
+      document.getElementById('searchInput').value = author;
+      document.getElementById('verifiedOnly').checked = false;
+      searchModels();
+    }
+
+    async function searchModels() {
+      const q = document.getElementById('searchInput').value.trim();
+      const sortBy = document.getElementById('sortSelect').value;
+      const verifiedOnly = document.getElementById('verifiedOnly').checked;
+      const container = document.getElementById('searchResults');
+      const header = document.getElementById('catalogHeader');
+      const sortLabel = document.getElementById('sortSelect').selectedOptions[0].text;
+      
+      header.textContent = q === "" ? `All Available Models (${sortLabel})` : `Search Results for "${q}" (${sortLabel})`;
+      container.innerHTML = '<p class="text-slate-400">Loading catalog from Hugging Face...</p>';
+      
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort_by=${encodeURIComponent(sortBy)}&verified_only=${verifiedOnly}`);
+        let models = await res.json();
+        container.innerHTML = '';
+        
+        if (!models || models.length === 0) {
+          container.innerHTML = '<p class="text-slate-400">No GGUF models found.</p>';
+          return;
         }
 
-        function searchAuthor(author) {
-          document.getElementById('searchInput').value = author;
-          document.getElementById('verifiedOnly').checked = false;
-          searchModels();
+        if (sortBy === 'alphabetical') {
+          models.sort((a, b) => (a.model_name || '').localeCompare(b.model_name || '', undefined, { sensitivity: 'base' }));
         }
 
-        async function searchModels() {
-          const q = document.getElementById('searchInput').value.trim();
-          const sortBy = document.getElementById('sortSelect').value;
-          const verifiedOnly = document.getElementById('verifiedOnly').checked;
-          const container = document.getElementById('searchResults');
-          const header = document.getElementById('catalogHeader');
-          const sortLabel = document.getElementById('sortSelect').selectedOptions[0].text;
+        models.forEach(m => {
+          const card = document.createElement('div');
+          card.className = 'bg-slate-950 p-4 rounded border border-slate-700 space-y-3';
           
-          header.textContent = q === "" ? `All Available Models (${sortLabel})` : `Search Results for "${q}" (${sortLabel})`;
-          container.innerHTML = '<p class="text-slate-400">Loading catalog from Hugging Face...</p>';
-          
-          try {
-            const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort_by=${encodeURIComponent(sortBy)}&verified_only=${verifiedOnly}`);
-            let models = await res.json();
-            container.innerHTML = '';
-            
-            if (!models || models.length === 0) {
-              container.innerHTML = '<p class="text-slate-400">No GGUF models found.</p>';
-              return;
-            }
+          const verifiedBadge = m.is_verified 
+            ? `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer">🛡️ ${m.maker}</button>`
+            : `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition cursor-pointer">${m.maker}</button>`;
 
-            if (sortBy === 'alphabetical') {
-              models.sort((a, b) => (a.model_name || '').localeCompare(b.model_name || '', undefined, { sensitivity: 'base' }));
-            }
+          const trustBadge = `<span class="text-[10px] bg-slate-800 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono">⭐ ${m.trust_score}/100</span>`;
 
-            models.forEach(m => {
-              const card = document.createElement('div');
-              card.className = 'bg-slate-950 p-4 rounded border border-slate-700 space-y-3';
-              
-              const verifiedBadge = m.is_verified 
-                ? `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer">🛡️ ${m.maker}</button>`
-                : `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition cursor-pointer">${m.maker}</button>`;
-
-              const trustBadge = `<span class="text-[10px] bg-slate-800 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono">⭐ ${m.trust_score}/100</span>`;
-
-              card.innerHTML = `
-                <div class="flex justify-between items-start">
-                  <div class="overflow-hidden pr-2">
-                    <div class="flex items-center gap-1.5">
-                      ${verifiedBadge}
-                      ${trustBadge}
-                    </div>
-                    <h3 class="font-bold text-slate-100 text-base mt-1.5 truncate" title="${m.model_name}">${m.model_name}</h3>
-                    <div class="text-[11px] text-slate-400 mt-0.5">
-                      Author: <button onclick="searchAuthor('${m.maker}')" class="font-semibold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer">${m.maker}</button> • Updated: ${m.lastModified || 'Recent'}
-                    </div>
-                  </div>
-                  <div class="text-right text-xs text-slate-400 shrink-0">
-                    <div>⬇ ${(m.downloads || 0).toLocaleString()}</div>
-                    <div>❤ ${(m.likes || 0).toLocaleString()}</div>
-                  </div>
-                </div>
-                <button onclick="toggleFiles('${m.id}', this)" class="toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">
-                  Inspect Quantizations & Memory Fit
-                </button>
-                <div class="file-container mt-3 hidden space-y-2"></div>
-              `;
-              container.appendChild(card);
-            });
-          } catch(err) {
-            container.innerHTML = '<p class="text-rose-400">Error retrieving models from Hugging Face.</p>';
-          }
-        }
-
-        async function toggleFiles(repoId, btn) {
-          const parent = btn.parentElement;
-          const fileContainer = parent.querySelector('.file-container');
-          
-          if (!fileContainer.classList.contains('hidden')) {
-            fileContainer.classList.add('hidden');
-            btn.textContent = 'Inspect Quantizations & Memory Fit';
-            btn.className = 'toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition';
-            return;
-          }
-
-          fileContainer.classList.remove('hidden');
-          btn.textContent = '▲ Minimize Quantizations';
-          btn.className = 'toggle-btn w-full text-xs bg-slate-700 hover:bg-slate-600 border border-slate-500 text-sky-300 px-3 py-1.5 rounded transition';
-          fileContainer.innerHTML = '<span class="text-xs text-slate-500">Fetching file metadata & calculating VRAM footprint...</span>';
-          
-          const res = await fetch(`/api/model_files?repo_id=${encodeURIComponent(repoId)}`);
-          const data = await res.json();
-          fileContainer.innerHTML = '';
-
-          if (!data.files || data.files.length === 0) {
-            fileContainer.innerHTML = '<span class="text-xs text-slate-500">No .gguf files found in repository.</span>';
-            return;
-          }
-
-          const table = document.createElement('div');
-          table.className = 'space-y-2';
-
-          data.files.forEach(f => {
-            let fitBadge = '';
-            if (f.fit_status === 'fits_gpu') {
-              fitBadge = '<span class="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded font-medium">Fits GPU VRAM</span>';
-            } else if (f.fit_status === 'split_gpu_ram') {
-              fitBadge = '<span class="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-1.5 py-0.5 rounded font-medium">Split GPU + RAM</span>';
-            } else if (f.fit_status === 'fits_ram') {
-              fitBadge = '<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded font-medium">Fits System RAM</span>';
-            } else if (f.fit_status === 'exceeds') {
-              fitBadge = '<span class="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-medium">Exceeds Memory</span>';
-            }
-
-            const isDownloaded = f.is_downloaded || localModelSet.has(f.group_name);
-            const isDownloading = f.is_downloading || (activeTasksMap[f.group_name] && activeTasksMap[f.group_name].status === 'downloading');
-
-            let btnHtml = '';
-            const btnId = `btn-${btoa(f.group_name).replace(/=/g, '')}`;
-            const filesPayload = encodeURIComponent(JSON.stringify(f.paths));
-
-            if (isDownloaded) {
-              btnHtml = `
-                <button id="${btnId}" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">
-                  ✓ Installed
-                </button>`;
-            } else if (isDownloading) {
-              btnHtml = `
-                <button id="${btnId}" disabled class="bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1">
-                  ⏳ Downloading...
-                </button>`;
-            } else {
-              btnHtml = `
-                <button id="${btnId}" onclick="triggerDownload('${repoId}', '${f.group_name}', '${filesPayload}', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition">
-                  Download
-                </button>`;
-            }
-
-            const shardBadge = f.is_sharded ? `<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded ml-1 font-mono">${f.shard_count} Shards</span>` : '';
-
-            const row = document.createElement('div');
-            row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
-            row.innerHTML = `
-              <div class="space-y-1 overflow-hidden pr-2">
-                <div class="font-medium text-sky-200 truncate flex items-center" title="${f.display_name}">
-                  <span class="truncate">${f.group_name}</span>
-                  ${shardBadge}
-                </div>
-                <div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">
-                  <span>Weight: <strong class="text-slate-200">${f.weight}</strong></span>
-                  <span>•</span>
-                  <span>Variant: <strong class="text-slate-200">${f.variant}</strong></span>
-                  <span>•</span>
-                  <span>Size: <strong class="text-emerald-400">${f.size_gb}</strong></span>
-                  <span>(${f.est_vram} Req)</span>
-                  ${fitBadge}
-                </div>
-                <div class="text-[11px] text-slate-400 italic bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/80">
-                  ℹ ${f.description}
-                </div>
-              </div>
-              ${btnHtml}
-            `;
-            table.appendChild(row);
-          });
-          fileContainer.appendChild(table);
-        }
-
-        async function triggerDownload(repoId, groupName, filesPayloadEncoded, btn) {
-          btn.disabled = true;
-          btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
-          btn.innerHTML = "⏳ Downloading...";
-
-          const filePaths = JSON.parse(decodeURIComponent(filesPayloadEncoded));
-          await fetch('/api/download', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({repo_id: repoId, group_name: groupName, files: filePaths})
-          });
-          updateTasks();
-        }
-
-        async function loadModelIntoGPU(modelPath, btn) {
-          btn.disabled = true;
-          btn.textContent = '⏳ Loading (32k ctx)...';
-          btn.className = 'bg-sky-950 text-sky-300 border border-sky-800 px-2.5 py-1 rounded text-xs animate-pulse';
-
-          try {
-            const res = await fetch('/api/load_model', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({model_path: modelPath, gpu_offload: 'max', context_length: 32768, ttl: 3600})
-            });
-            const data = await res.json();
-            if (data.status !== 'success') {
-              alert('Load Failure Output from LMS:\n\n' + (data.message || JSON.stringify(data)));
-            }
-          } catch(e) {
-            alert('Communication Error: ' + e.message);
-          }
-          await initHardwareInfo();
-          await fetchLocalModels();
-        }
-
-        async function unloadActiveModel(btn) {
-          if (btn) btn.textContent = '⏳ Unloading...';
-          try {
-            await fetch('/api/unload_model', {method: 'POST'});
-          } catch(e) {}
-          if (btn) btn.textContent = '⏹ Unload All';
-          await initHardwareInfo();
-          await fetchLocalModels();
-        }
-
-        async function deleteModel(filename) {
-          if (!confirm(`Are you sure you want to delete ${filename} to free up space?`)) return;
-          const res = await fetch('/api/delete', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({filename: filename})
-          });
-          const data = await res.json();
-          localModelSet.delete(filename);
-          if (data.storage) renderStorageMetrics(data.storage);
-          fetchLocalModels();
-        }
-
-        async function updateTasks() {
-          const res = await fetch('/api/tasks');
-          const data = await res.json();
-          activeTasksMap = data;
-          const list = document.getElementById('tasksList');
-          
-          if (Object.keys(data).length === 0) {
-            list.innerHTML = '<span class="text-slate-500">No active downloads</span>';
-            return;
-          }
-
-          list.innerHTML = Object.entries(data).map(([file, info]) => {
-            const pct = info.percent || 0;
-            const isDone = info.status === 'completed';
-            const barColor = isDone ? 'bg-emerald-500' : 'bg-sky-500';
-
-            return `
-              <div class="bg-slate-950 p-3 rounded border border-slate-700 space-y-2">
-                <div class="flex justify-between items-center text-xs">
-                  <div class="font-medium truncate pr-2">${file}</div>
-                  <div class="text-sky-300 font-mono shrink-0">${info.progress_str || info.status}</div>
-                </div>
-                <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                  <div class="${barColor} h-1.5 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
-                </div>
-              </div>
-            `;
-          }).join('');
-        }
-
-        async function fetchLocalModels() {
-          const res = await fetch('/api/local_models');
-          const data = await res.json();
-          const list = document.getElementById('localList');
-          localModelSet.clear();
-          loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
-
-          if (data.storage) renderStorageMetrics(data.storage);
-
-          if (!data.files || data.files.length === 0) {
-            list.innerHTML = '<span class="text-slate-500">No GGUF models on disk</span>';
-            return;
-          }
-
-          data.files.forEach(m => localModelSet.add(m.filename));
-
-          list.innerHTML = data.files.map(m => {
-            const fLower = m.filename.toLowerCase().replace('.gguf', '');
-            const pLower = m.path.toLowerCase();
-            
-            // Compare normalized slugs
-            const isLoaded = loadedModelsList.some(loaded => {
-              if (!loaded || loaded.length < 3) return false;
-              const cleanSlug = loaded.replace(/[^a-z0-9]/g, '');
-              const cleanF = fLower.replace(/[^a-z0-9]/g, '');
-              return cleanF.includes(cleanSlug) || cleanSlug.includes(cleanF) || pLower.includes(loaded);
-            });
-            
-            let actionBtn = '';
-            if (isLoaded) {
-              actionBtn = `
+          card.innerHTML = `
+            <div class="flex justify-between items-start">
+              <div class="overflow-hidden pr-2">
                 <div class="flex items-center gap-1.5">
-                  <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">
-                    ⚡ Loaded (32k)
-                  </span>
-                  <button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">
-                    ⏹
-                  </button>
-                </div>`;
-            } else {
-              actionBtn = `
-                <button onclick="loadModelIntoGPU('${m.path}', this)" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1">
-                  🚀 Load to GPU
-                </button>`;
-            }
-
-            return `
-              <div class="flex justify-between items-center bg-slate-950 p-3 rounded border ${isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700'} text-xs gap-3">
-                <div class="truncate pr-2">
-                  <div class="font-medium text-slate-200 truncate" title="${m.filename}">${m.filename}</div>
-                  <div class="text-slate-400 text-[10px] mt-0.5">Weight: ${m.weight} | Variant: ${m.variant}</div>
+                  ${verifiedBadge}
+                  ${trustBadge}
                 </div>
-                <div class="flex items-center gap-2 shrink-0">
-                  <span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">${m.size_gb}</span>
-                  ${actionBtn}
-                  <button onclick="deleteModel('${m.filename}')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">
-                    🗑️
-                  </button>
+                <h3 class="font-bold text-slate-100 text-base mt-1.5 truncate" title="${m.model_name}">${m.model_name}</h3>
+                <div class="text-[11px] text-slate-400 mt-0.5">
+                  Author: <button onclick="searchAuthor('${m.maker}')" class="font-semibold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer">${m.maker}</button> • Updated: ${m.lastModified || 'Recent'}
                 </div>
               </div>
-            `;
-          }).join('');
+              <div class="text-right text-xs text-slate-400 shrink-0">
+                <div>⬇ ${(m.downloads || 0).toLocaleString()}</div>
+                <div>❤ ${(m.likes || 0).toLocaleString()}</div>
+              </div>
+            </div>
+            <button onclick="toggleFiles('${m.id}', this)" class="toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">
+              Inspect Quantizations & Memory Fit
+            </button>
+            <div class="file-container mt-3 hidden space-y-2"></div>
+          `;
+          container.appendChild(card);
+        });
+      } catch(err) {
+        container.innerHTML = '<p class="text-rose-400">Error retrieving models from Hugging Face.</p>';
+      }
+    }
+
+    async function toggleFiles(repoId, btn) {
+      const parent = btn.parentElement;
+      const fileContainer = parent.querySelector('.file-container');
+      
+      if (!fileContainer.classList.contains('hidden')) {
+        fileContainer.classList.add('hidden');
+        btn.textContent = 'Inspect Quantizations & Memory Fit';
+        btn.className = 'toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition';
+        return;
+      }
+
+      fileContainer.classList.remove('hidden');
+      btn.textContent = '▲ Minimize Quantizations';
+      btn.className = 'toggle-btn w-full text-xs bg-slate-700 hover:bg-slate-600 border border-slate-500 text-sky-300 px-3 py-1.5 rounded transition';
+      fileContainer.innerHTML = '<span class="text-xs text-slate-500">Fetching file metadata & calculating VRAM footprint...</span>';
+      
+      const res = await fetch(`/api/model_files?repo_id=${encodeURIComponent(repoId)}`);
+      const data = await res.json();
+      fileContainer.innerHTML = '';
+
+      if (!data.files || data.files.length === 0) {
+        fileContainer.innerHTML = '<span class="text-xs text-slate-500">No .gguf files found in repository.</span>';
+        return;
+      }
+
+      const table = document.createElement('div');
+      table.className = 'space-y-2';
+
+      data.files.forEach(f => {
+        let fitBadge = '';
+        if (f.fit_status === 'fits_gpu') {
+          fitBadge = '<span class="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded font-medium">Fits GPU VRAM</span>';
+        } else if (f.fit_status === 'split_gpu_ram') {
+          fitBadge = '<span class="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-1.5 py-0.5 rounded font-medium">Split GPU + RAM</span>';
+        } else if (f.fit_status === 'fits_ram') {
+          fitBadge = '<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded font-medium">Fits System RAM</span>';
+        } else if (f.fit_status === 'exceeds') {
+          fitBadge = '<span class="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-medium">Exceeds Memory</span>';
         }
 
-        initHardwareInfo();
-        fetchLocalModels().then(() => { searchModels(); });
-        setInterval(updateTasks, 1000);
-        setInterval(fetchLocalModels, 4000);
-      </script>
-    </body>
-    </html>
-    """
+        const isDownloaded = f.is_downloaded || localModelSet.has(f.group_name);
+        const isDownloading = f.is_downloading || (activeTasksMap[f.group_name] && activeTasksMap[f.group_name].status === 'downloading');
+
+        let btnHtml = '';
+        const btnId = `btn-${btoa(f.group_name).replace(/=/g, '')}`;
+        const filesPayload = encodeURIComponent(JSON.stringify(f.paths));
+
+        if (isDownloaded) {
+          btnHtml = `
+            <button id="${btnId}" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">
+              ✓ Installed
+            </button>`;
+        } else if (isDownloading) {
+          btnHtml = `
+            <button id="${btnId}" disabled class="bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1">
+              ⏳ Downloading...
+            </button>`;
+        } else {
+          btnHtml = `
+            <button id="${btnId}" onclick="triggerDownload('${repoId}', '${f.group_name}', '${filesPayload}', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition">
+              Download
+            </button>`;
+        }
+
+        const shardBadge = f.is_sharded ? `<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded ml-1 font-mono">${f.shard_count} Shards</span>` : '';
+
+        const row = document.createElement('div');
+        row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
+        row.innerHTML = `
+          <div class="space-y-1 overflow-hidden pr-2">
+            <div class="font-medium text-sky-200 truncate flex items-center" title="${f.display_name}">
+              <span class="truncate">${f.group_name}</span>
+              ${shardBadge}
+            </div>
+            <div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">
+              <span>Weight: <strong class="text-slate-200">${f.weight}</strong></span>
+              <span>•</span>
+              <span>Variant: <strong class="text-slate-200">${f.variant}</strong></span>
+              <span>•</span>
+              <span>Size: <strong class="text-emerald-400">${f.size_gb}</strong></span>
+              <span>(${f.est_vram} Req)</span>
+              ${fitBadge}
+            </div>
+            <div class="text-[11px] text-slate-400 italic bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/80">
+              ℹ ${f.description}
+            </div>
+          </div>
+          ${btnHtml}
+        `;
+        table.appendChild(row);
+      });
+      fileContainer.appendChild(table);
+    }
+
+    async function triggerDownload(repoId, groupName, filesPayloadEncoded, btn) {
+      btn.disabled = true;
+      btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
+      btn.innerHTML = "⏳ Downloading...";
+
+      const filePaths = JSON.parse(decodeURIComponent(filesPayloadEncoded));
+      await fetch('/api/download', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({repo_id: repoId, group_name: groupName, files: filePaths})
+      });
+      updateTasks();
+    }
+
+    async function loadModelIntoGPU(modelPath, btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Loading (32k ctx)...';
+      btn.className = 'bg-sky-950 text-sky-300 border border-sky-800 px-2.5 py-1 rounded text-xs animate-pulse';
+
+      try {
+        const res = await fetch('/api/load_model', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({model_path: modelPath, gpu_offload: 'max', context_length: 32768, ttl: 3600})
+        });
+        const data = await res.json();
+        if (data.status !== 'success') {
+          alert('Load Failure Output from LMS:\\n\\n' + (data.message || JSON.stringify(data)));
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+      await initHardwareInfo();
+      await fetchLocalModels();
+    }
+
+    async function unloadActiveModel(btn) {
+      if (btn) btn.textContent = '⏳ Unloading...';
+      try {
+        await fetch('/api/unload_model', {method: 'POST'});
+      } catch(e) {}
+      if (btn) btn.textContent = '⏹ Unload All';
+      await initHardwareInfo();
+      await fetchLocalModels();
+    }
+
+    async function deleteModel(filename) {
+      if (!confirm(`Are you sure you want to delete ${filename} to free up space?`)) return;
+      const res = await fetch('/api/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({filename: filename})
+      });
+      const data = await res.json();
+      localModelSet.delete(filename);
+      if (data.storage) renderStorageMetrics(data.storage);
+      fetchLocalModels();
+    }
+
+    async function updateTasks() {
+      const res = await fetch('/api/tasks');
+      const data = await res.json();
+      activeTasksMap = data;
+      const list = document.getElementById('tasksList');
+      
+      if (Object.keys(data).length === 0) {
+        list.innerHTML = '<span class="text-slate-500">No active downloads</span>';
+        return;
+      }
+
+      list.innerHTML = Object.entries(data).map(([file, info]) => {
+        const pct = info.percent || 0;
+        const isDone = info.status === 'completed';
+        const barColor = isDone ? 'bg-emerald-500' : 'bg-sky-500';
+
+        return `
+          <div class="bg-slate-950 p-3 rounded border border-slate-700 space-y-2">
+            <div class="flex justify-between items-center text-xs">
+              <div class="font-medium truncate pr-2">${file}</div>
+              <div class="text-sky-300 font-mono shrink-0">${info.progress_str || info.status}</div>
+            </div>
+            <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+              <div class="${barColor} h-1.5 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function fetchLocalModels() {
+      const res = await fetch('/api/local_models');
+      const data = await res.json();
+      const list = document.getElementById('localList');
+      localModelSet.clear();
+      loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
+
+      if (data.storage) renderStorageMetrics(data.storage);
+
+      if (!data.files || data.files.length === 0) {
+        list.innerHTML = '<span class="text-slate-500">No GGUF models on disk</span>';
+        return;
+      }
+
+      data.files.forEach(m => localModelSet.add(m.filename));
+
+      list.innerHTML = data.files.map(m => {
+        const fLower = m.filename.toLowerCase().replace('.gguf', '');
+        const pLower = m.path.toLowerCase();
+        
+        const isLoaded = loadedModelsList.some(loaded => {
+          if (!loaded || loaded.length < 3) return false;
+          const cleanSlug = loaded.replace(/[^a-z0-9]/g, '');
+          const cleanF = fLower.replace(/[^a-z0-9]/g, '');
+          return cleanF.includes(cleanSlug) || cleanSlug.includes(cleanF) || pLower.includes(loaded);
+        });
+        
+        let actionBtn = '';
+        if (isLoaded) {
+          actionBtn = `
+            <div class="flex items-center gap-1.5">
+              <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">
+                ⚡ Loaded
+              </span>
+              <button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">
+                ⏹
+              </button>
+            </div>`;
+        } else {
+          actionBtn = `
+            <button onclick="loadModelIntoGPU('${m.path}', this)" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1">
+              🚀 Load to GPU
+            </button>`;
+        }
+
+        return `
+          <div class="flex justify-between items-center bg-slate-950 p-3 rounded border ${isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700'} text-xs gap-3">
+            <div class="truncate pr-2">
+              <div class="font-medium text-slate-200 truncate" title="${m.filename}">${m.filename}</div>
+              <div class="text-slate-400 text-[10px] mt-0.5">Weight: ${m.weight} | Variant: ${m.variant}</div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">${m.size_gb}</span>
+              ${actionBtn}
+              <button onclick="deleteModel('${m.filename}')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">
+                🗑️
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    initHardwareInfo();
+    fetchLocalModels().then(() => { searchModels(); });
+    setInterval(updateTasks, 1000);
+    setInterval(fetchLocalModels, 4000);
+  </script>
+</body>
+</html>"""
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)
