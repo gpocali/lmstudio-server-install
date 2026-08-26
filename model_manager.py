@@ -240,8 +240,15 @@ def run_download_job(repo_id: str, group_name: str, file_paths: list[str]):
         if not os.path.exists(link_target):
             os.symlink(dest_dir, link_target)
 
+        # Non-blocking import of downloaded model / first shard
         if first_shard_file:
-            subprocess.run(["sudo", "-u", "lmstudio", "HOME=/storage/lmstudio", "/usr/local/bin/lms", "import", first_shard_file], capture_output=True)
+            subprocess.run([
+                "sudo", "-u", "lmstudio", 
+                "HOME=/storage/lmstudio", 
+                "/usr/local/bin/lms", "import", 
+                "--yes", "--symbolic-link", 
+                first_shard_file
+            ], capture_output=True)
 
     except Exception as e:
         DOWNLOAD_JOBS[group_name] = {"status": "failed", "progress_str": f"Error: {str(e)}", "percent": 0.0}

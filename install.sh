@@ -136,7 +136,6 @@ echo "[✓] model_manager.py successfully updated."
 echo ""
 echo "--- [ Model Library Linking & Indexing ] ---"
 echo "[+] Linking custom storage models to internal LM Studio library..."
-# Symlink subfolders from /storage/lmstudio/models to .cache/lm-studio/models
 for model_dir in "$MODELS_DIR"/*; do
   if [ -d "$model_dir" ]; then
     folder_name=$(basename "$model_dir")
@@ -145,10 +144,14 @@ for model_dir in "$MODELS_DIR"/*; do
   fi
 done
 
-# Run import on all GGUF models on disk
-echo "[+] Importing GGUF files into LMS database index..."
+# Non-interactive GGUF import
+echo "[+] Importing GGUF files into LMS database index non-interactively..."
 find "$MODELS_DIR" -type f -name "*.gguf" | while read -r gguf_path; do
-  sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" import "$gguf_path" >/dev/null 2>&1 || true
+  # Avoid importing secondary shard slices (00002+) individually
+  if ! echo "$gguf_path" | grep -Eq -- "-0000[2-9]-of-"; then
+    echo "  -> Importing $(basename "$gguf_path")..."
+    sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" import --yes --symbolic-link "$gguf_path" >/dev/null 2>&1 || true
+  fi
 done
 echo "[✓] Model library indexing complete."
 
