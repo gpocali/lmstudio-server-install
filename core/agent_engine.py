@@ -17,12 +17,57 @@ def get_active_model_for_agent():
         return models[0]
     return "default"
 
+def generate_ai_summary(instruction: str, diff_text: str, modified_files: list[str], model_id: str) -> dict:
+    """Uses the local model to generate a standardized commit message and bullet summary."""
+    if not modified_files or not diff_text:
+        return {
+            "commit_msg": f"AI Update: {instruction[:60]}",
+            "summary": "Conversational inquiry / advisory response."
+        }
+    
+    summary_prompt = (
+        f"You are an automated Git release summarizer.\n\n"
+        f"User Instruction: {instruction}\n"
+        f"Modified Files: {', '.join(modified_files)}\n"
+        f"Git Diff Summary:\n```\n{diff_text[:1500]}\n```\n\n"
+        "Generate two things:\n"
+        "1. A concise conventional commit message (max 65 chars, e.g. 'feat(core): add multi-file diff parser').\n"
+        "2. A brief 1-2 sentence summary of what was changed.\n\n"
+        "Format output strictly as:\n"
+        "COMMIT_MSG: <message>\n"
+        "SUMMARY: <summary>"
+    )
+
+    try:
+        payload = {
+            "model": model_id,
+            "messages": [{"role": "user", "content": summary_prompt}],
+            "temperature": 0.1,
+            "max_tokens": 150
+        }
+        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=20)
+        if resp.status_code == 200:
+            out = resp.json()["choices"][0]["message"]["content"].strip()
+            c_match = re.search(r'COMMIT_MSG:\s*(.+)', out)
+            s_match = re.search(r'SUMMARY:\s*([\s\S]+)', out)
+            
+            commit_msg = c_match.group(1).strip() if c_match else f"Update {', '.join(modified_files[:2])}"
+            summary = s_match.group(1).strip() if s_match else instruction[:100]
+            return {"commit_msg": commit_msg, "summary": summary}
+    except Exception:
+        pass
+
+    return {
+        "commit_msg": f"Update {', '.join(modified_files[:2])}: {instruction[:45]}",
+        "summary": instruction
+    }
+
 def process_agent_task(repo_dir_name: str, target_files: list[str], instruction: str, thread_id: str = "", model_id: str = ""):
     workspace_path = os.path.join(WORKSPACES_ROOT, repo_dir_name)
     if not os.path.exists(workspace_path):
         return {"status": "error", "message": "Workspace not found"}
 
-    # 1. Package selected files into prompt context
+    # 1. Package context files
     context_blocks = []
     for rel_file in target_files:
         full_p = os.path.join(workspace_path, rel_file)
@@ -93,9 +138,9 @@ def process_agent_task(repo_dir_name: str, target_files: list[str], instruction:
                     f.write(code_match.group(1))
                 modified_files.append(single_rel)
 
-        # 3. Retrieve working tree status
+        # 3. Retrieve working tree diff & generate AI summary
         git_status = get_workspace_git_status(repo_dir_name)
-        proposed_commit_msg = f"Update {', '.join(modified_files[:3])}: {instruction[:50]}" if modified_files else "Code update"
+        ai_summary_meta = generate_ai_summary(instruction, git_status["diff"], modified_files, selected_model)
 
         # 4. Save persistently to .lmstudio_history.json
         hist = load_workspace_history(repo_dir_name)
@@ -124,9 +169,23 @@ def process_agent_task(repo_dir_name: str, target_files: list[str], instruction:
             "modified_files": modified_files,
             "ai_response": ai_response,
             "diff": git_status["diff"],
-            "proposed_commit_msg": proposed_commit_msg
+            "proposed_commit_msg": ai_summary_meta["commit_msg"],
+            "summary": ai_summary_meta["summary"]
         }
         target_thread["messages"].append(msg_payload)
+
+        # Append to unified timeline events list
+        hist.setdefault("timeline_events", []).insert(0, {
+            "id": f"evt-{int(datetime.datetime.utcnow().timestamp()*1000)}",
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "type": "code_edit" if modified_files else "inquiry",
+            "instruction": instruction,
+            "summary": ai_summary_meta["summary"],
+            "commit_msg": ai_summary_meta["commit_msg"],
+            "modified_files": modified_files,
+            "diff": git_status["diff"]
+        })
+
         save_workspace_history(repo_dir_name, hist)
 
         return {

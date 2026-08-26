@@ -1,11 +1,12 @@
 """
 LM Studio Server Entrypoint Router
-Dispatches API requests to modular core submodules with full chat persistence and upstream pull sync.
+Dispatches API requests with workspace timeline tracking and AI summarization.
 """
 
 import os
 import re
 import glob
+import datetime
 import requests
 import subprocess
 from fastapi import FastAPI, BackgroundTasks
@@ -397,7 +398,7 @@ def api_list_branches(account_username: str, repo_full_name: str):
     except Exception: pass
     return ["main", "dev", "master"]
 
-# ---------------- Workspace, Multi-Thread & Status Endpoints ----------------
+# ---------------- Workspace, History & Timeline Endpoints ----------------
 
 @app.get("/api/workspaces/active")
 def api_get_workspaces():
@@ -411,6 +412,29 @@ def api_get_status(repo_dir_name: str):
 def api_get_history(repo_dir_name: str):
     return load_workspace_history(repo_dir_name)
 
+@app.get("/api/workspace/timeline")
+def api_get_timeline(repo_dir_name: str):
+    hist = load_workspace_history(repo_dir_name)
+    events = hist.get("timeline_events", [])
+    
+    # Also fetch recent git commits for completeness
+    w_path = os.path.join(WORKSPACES_ROOT, repo_dir_name)
+    git_commits = []
+    if os.path.exists(w_path):
+        res = subprocess.run(["git", "-C", w_path, "log", "-n", "15", "--pretty=format:%h|%an|%ad|%s", "--date=iso"], capture_output=True, text=True)
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                parts = line.split("|", 3)
+                if len(parts) == 4:
+                    git_commits.append({
+                        "hash": parts[0],
+                        "author": parts[1],
+                        "date": parts[2],
+                        "subject": parts[3]
+                    })
+    
+    return {"events": events, "commits": git_commits}
+
 @app.post("/api/workspace/create_thread")
 def api_create_thread(req: CreateThreadRequest):
     hist = load_workspace_history(req.repo_dir_name)
@@ -418,7 +442,7 @@ def api_create_thread(req: CreateThreadRequest):
     new_thread = {
         "id": new_id,
         "title": req.title.strip() or "Untitled Thread",
-        "created_at": str(os.times().elapsed),
+        "created_at": datetime.datetime.utcnow().isoformat(),
         "messages": []
     }
     hist.setdefault("threads", []).insert(0, new_thread)
@@ -557,6 +581,19 @@ def api_commit(req: CommitRequest):
 
         res = subprocess.run(["git", "-C", w_path, "commit", "-m", req.commit_message], capture_output=True, text=True)
         if res.returncode == 0 or "nothing to commit" in res.stdout:
+            # Add commit event to timeline
+            hist = load_workspace_history(req.repo_dir_name)
+            hist.setdefault("timeline_events", []).insert(0, {
+                "id": f"evt-{int(datetime.datetime.utcnow().timestamp()*1000)}",
+                "timestamp": datetime.datetime.utcnow().isoformat(),
+                "type": "commit",
+                "branch": active_branch,
+                "commit_msg": req.commit_message,
+                "summary": req.instruction_summary or req.commit_message,
+                "modified_files": req.target_files
+            })
+            save_workspace_history(req.repo_dir_name, hist)
+
             git_status = get_workspace_git_status(req.repo_dir_name)
             return {"status": "success", "message": f"Committed to branch '{active_branch}'", "branch": active_branch, "git_status": git_status}
         return JSONResponse(status_code=400, content={"status": "error", "message": res.stderr or res.stdout})
