@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ensure script is executed with sudo
+# Ensure script is executed with root/sudo privileges
 if [ "$EUID" -ne 0 ]; then
-  echo "[-] Please run this script with sudo: sudo ./setup_lmstudio_storage.sh"
+  echo "[-] Please run this script with sudo: sudo ./install.sh"
   exit 1
 fi
 
@@ -14,41 +14,40 @@ APP_DIR="${BASE_STORAGE}/lmstudio"
 MODELS_DIR="${APP_DIR}/models"
 LM_PORT="1234"
 WEBUI_PORT="3000"
-SERVICE_NAME="lmstudio.service"
+MANAGER_PORT="8080"
+REPO_RAW_URL="https://raw.githubusercontent.com/gpocali/lmstudio-server-install/main"
 
 echo "================================================================="
-echo "   LM Studio Dedicated Service & Storage Setup (/storage)        "
+echo "   LM Studio Server & Model Manager Full Stack Installer         "
+echo "   Target Directory: ${APP_DIR}                                  "
 echo "================================================================="
 
-# 1. Validate Base Storage Directory
+# 1. Check Mount Point
 if [ ! -d "$BASE_STORAGE" ]; then
-  echo "[-] Target mount path $BASE_STORAGE does not exist. Please mount your drive first."
+  echo "[-] Base storage mount '${BASE_STORAGE}' not found. Please ensure the drive is mounted."
   exit 1
 fi
 
-# 2. Create Dedicated Service User & Group if not present
+# 2. Setup Dedicated User & Directories
+echo "[+] Ensuring dedicated user '${SERVICE_USER}' and directories exist..."
 if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
-  echo "[+] Creating dedicated system user: $SERVICE_USER..."
   useradd -r -m -d "$APP_DIR" -s /bin/bash -c "LM Studio Service Account" "$SERVICE_USER"
 else
-  echo "[✓] System user $SERVICE_USER already exists."
   usermod -d "$APP_DIR" -s /bin/bash "$SERVICE_USER"
 fi
 
-# Create required folder hierarchy
 mkdir -p "$APP_DIR" "$MODELS_DIR" "${APP_DIR}/.cache" "${APP_DIR}/.lmstudio"
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$APP_DIR"
 
-# 3. Install System Dependencies
-echo "[+] Installing system prerequisites..."
+# 3. Install System & Python Dependencies
+echo "[+] Installing system and Python prerequisites..."
 apt-get update -y
-apt-get install -y curl ca-certificates jq gnupg
+apt-get install -y curl ca-certificates jq gnupg python3 python3-pip python3-uvicorn python3-fastapi python3-requests
 
-# 4. Install / Update LM Studio CLI inside the dedicated user environment
-echo "[+] Fetching and installing LM Studio CLI for $SERVICE_USER..."
+# 4. Install / Update LM Studio CLI
+echo "[+] Installing LM Studio CLI inside ${APP_DIR}..."
 sudo -u "$SERVICE_USER" HOME="$APP_DIR" bash -c "curl -fsSL https://lmstudio.ai/install.sh | bash"
 
-# Locate the installed binary
 LMS_BIN=""
 if [ -f "${APP_DIR}/.cache/lm-studio/bin/lms" ]; then
   LMS_BIN="${APP_DIR}/.cache/lm-studio/bin/lms"
@@ -59,39 +58,52 @@ else
 fi
 
 if [ -z "$LMS_BIN" ] || [ ! -x "$LMS_BIN" ]; then
-  echo "[-] ERROR: Unable to locate the lms binary in $APP_DIR."
+  echo "[-] Error: Failed to locate 'lms' executable."
   exit 1
 fi
 
-# Symlink to global path so any admin can run 'lms' directly
 ln -sf "$LMS_BIN" /usr/local/bin/lms
-echo "[✓] Binary available at /usr/local/bin/lms"
+echo "[✓] LMS CLI symlinked to /usr/local/bin/lms"
 
-# 5. LM Link & Account Authentication
+# 5. LM Link Setup (Interactive if needed)
 echo ""
-echo "--- [ Step 1: LM Studio Account & Link Setup ] ---"
-echo "[*] Checking link daemon state for user: $SERVICE_USER..."
-
-# Run login as the dedicated service user if unauthenticated
+echo "--- [ LM Link & Account Authentication ] ---"
 if ! sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" link status >/dev/null 2>&1; then
-  echo "[!] Authentication required for the dedicated service account."
-  echo "    Please complete the browser authentication prompt below:"
+  echo "[*] Authenticating service account with LM Studio Hub..."
   sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" login || true
 fi
 
 sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" link enable || true
 
 CURRENT_HOST=$(hostname)
-read -rp "[?] Enter a display name for this node in LM Link [default: $CURRENT_HOST]: " INPUT_DEVICE_NAME
+read -rp "[?] Enter node name for LM Link [default: $CURRENT_HOST]: " INPUT_DEVICE_NAME
 DEVICE_NAME="${INPUT_DEVICE_NAME:-$CURRENT_HOST}"
 sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" link set-device-name "$DEVICE_NAME" || true
 
-# 6. Configure Systemd Service
+# 6. Install model_manager.py
 echo ""
-echo "--- [ Step 2: Systemd Unit Configuration ] ---"
-tee /etc/systemd/system/"${SERVICE_NAME}" > /dev/null <<EOF
+echo "--- [ Installing Web Model Manager ] ---"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -f "${SCRIPT_DIR}/model_manager.py" ]; then
+  echo "[+] Copying local model_manager.py to ${APP_DIR}/model_manager.py..."
+  cp "${SCRIPT_DIR}/model_manager.py" "${APP_DIR}/model_manager.py"
+else
+  echo "[+] Fetching model_manager.py from GitHub repository..."
+  curl -fsSL "${REPO_RAW_URL}/model_manager.py" -o "${APP_DIR}/model_manager.py"
+fi
+
+chown "${SERVICE_USER}:${SERVICE_GROUP}" "${APP_DIR}/model_manager.py"
+chmod 755 "${APP_DIR}/model_manager.py"
+
+# 7. Create Systemd Services
+echo ""
+echo "--- [ Configuring Systemd Services ] ---"
+
+# LM Studio Service
+tee /etc/systemd/system/lmstudio.service > /dev/null <<EOF
 [Unit]
-Description=LM Studio Headless Daemon
+Description=LM Studio Headless Server & Link Daemon
 After=network-online.target
 Wants=network-online.target
 
@@ -110,14 +122,36 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable --now "${SERVICE_NAME}"
-systemctl restart "${SERVICE_NAME}"
+# Model Manager Web UI Service
+tee /etc/systemd/system/modelmanager.service > /dev/null <<EOF
+[Unit]
+Description=LM Studio Custom Model Manager Web UI
+After=network.target lmstudio.service
+Wants=lmstudio.service
 
-# 7. Open WebUI Deployment (Optional)
+[Service]
+Type=simple
+User=${SERVICE_USER}
+Group=${SERVICE_GROUP}
+WorkingDirectory=${APP_DIR}
+Environment=HOME=${APP_DIR}
+Environment=PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 ${APP_DIR}/model_manager.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now lmstudio.service modelmanager.service
+systemctl restart lmstudio.service modelmanager.service
+
+# 8. Optional Open WebUI Container Deployment
 echo ""
-echo "--- [ Step 3: Open WebUI / Web Search Tools ] ---"
-read -rp "[?] Deploy/Update Open WebUI container connected to /storage? (y/n) [default: y]: " INSTALL_WEBUI
+echo "--- [ Open WebUI Integration ] ---"
+read -rp "[?] Deploy/Update Open WebUI container with Web Search? (y/n) [default: y]: " INSTALL_WEBUI
 INSTALL_WEBUI="${INSTALL_WEBUI:-y}"
 
 if [[ "$INSTALL_WEBUI" =~ ^[Yy]$ ]]; then
@@ -134,13 +168,11 @@ if [[ "$INSTALL_WEBUI" =~ ^[Yy]$ ]]; then
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   fi
 
-  # Store Open WebUI persistent database under /storage/lmstudio/webui_data
   WEBUI_DATA_DIR="${APP_DIR}/webui_data"
   mkdir -p "$WEBUI_DATA_DIR"
   chown -R 1000:1000 "$WEBUI_DATA_DIR"
 
   if docker ps -a --format '{{.Names}}' | grep -Eq "^open-webui$"; then
-    echo "[*] Refreshing Open WebUI container..."
     docker rm -f open-webui >/dev/null
   fi
 
@@ -157,21 +189,17 @@ if [[ "$INSTALL_WEBUI" =~ ^[Yy]$ ]]; then
     -v "${WEBUI_DATA_DIR}:/app/backend/data" \
     --restart always \
     ghcr.io/open-webui/open-webui:main
-
-  echo "[✓] Open WebUI deployed on port ${WEBUI_PORT}."
 fi
 
-# 8. Final Report
 SERVER_IP=$(hostname -I | awk '{print $1}')
 echo ""
 echo "================================================================="
-echo "                      SETUP COMPLETE                             "
+echo "                      INSTALLATION COMPLETE                      "
 echo "================================================================="
-echo "• Service User:           $SERVICE_USER (Home: $APP_DIR)"
-echo "• Storage Location:       $APP_DIR"
 echo "• LM Studio API:          http://${SERVER_IP}:${LM_PORT}/v1"
-echo "• Service Status:         sudo systemctl status $SERVICE_NAME"
+echo "• Model Manager UI:       http://${SERVER_IP}:${MANAGER_PORT}"
 if [[ "$INSTALL_WEBUI" =~ ^[Yy]$ ]]; then
-  echo "• Open WebUI Portal:      http://${SERVER_IP}:${WEBUI_PORT}"
+  echo "• Open WebUI Chat & Search: http://${SERVER_IP}:${WEBUI_PORT}"
 fi
+echo "• Base Storage Directory: ${APP_DIR}"
 echo "================================================================="
