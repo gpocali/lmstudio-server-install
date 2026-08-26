@@ -47,7 +47,7 @@ else
   usermod -d "$APP_DIR" -s /bin/bash "$SERVICE_USER"
 fi
 
-mkdir -p "$APP_DIR" "$MODELS_DIR" "${APP_DIR}/.cache" "${APP_DIR}/.lmstudio"
+mkdir -p "$APP_DIR" "$MODELS_DIR" "${APP_DIR}/.cache/lm-studio/models" "${APP_DIR}/.lmstudio/models"
 chmod 755 "$APP_DIR"
 chmod -R u+rwX,go+rX "$APP_DIR"
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$APP_DIR"
@@ -59,9 +59,7 @@ apt-get install -y curl ca-certificates jq gnupg python3 python3-pip python3-uvi
 
 # 4. Install / Update LM Studio CLI & llmster Daemon
 echo ""
-echo "--- [ LM Studio / llmster Engine Check ] ---"
-
-# Detect if lms binary is already installed
+echo "--- [ LM Studio Engine Check ] ---"
 LMS_BIN=""
 if [ -f "${APP_DIR}/.cache/lm-studio/bin/lms" ]; then
   LMS_BIN="${APP_DIR}/.cache/lm-studio/bin/lms"
@@ -73,18 +71,14 @@ fi
 
 if [ "$IS_UPDATE" = true ] && [ -n "$LMS_BIN" ] && [ -x "$LMS_BIN" ]; then
   echo "[✓] Existing LM Studio / llmster installation found."
-  echo "[*] Checking for daemon updates without full re-download..."
-  
-  # Run the native daemon update check as the dedicated service user
+  echo "[*] Checking for daemon updates..."
   sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" daemon update 2>/dev/null || true
-  
   CURRENT_VER=$(sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" --version 2>/dev/null || echo "Installed")
-  echo "[✓] Current engine version: $CURRENT_VER"
+  echo "[✓] Engine Version: $CURRENT_VER"
 else
   echo "[+] Fresh install or missing binary detected. Fetching LM Studio installer..."
   sudo -u "$SERVICE_USER" HOME="$APP_DIR" bash -c "curl -fsSL https://lmstudio.ai/install.sh | bash"
   
-  # Re-detect binary path after fresh install
   if [ -f "${APP_DIR}/.cache/lm-studio/bin/lms" ]; then
     LMS_BIN="${APP_DIR}/.cache/lm-studio/bin/lms"
   elif [ -f "${APP_DIR}/.lmstudio/bin/lms" ]; then
@@ -124,7 +118,7 @@ if [ "$IS_UPDATE" = false ]; then
   DEVICE_NAME="${INPUT_DEVICE_NAME:-$CURRENT_HOST}"
   sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" link set-device-name "$DEVICE_NAME" || true
 else
-  echo "[✓] Preserving existing LM Link configuration and device pairing."
+  echo "[✓] Preserving existing LM Link configuration."
   sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" link enable >/dev/null 2>&1 || true
 fi
 
@@ -138,11 +132,31 @@ chmod 755 "${APP_DIR}/model_manager.py"
 chown "${SERVICE_USER}:${SERVICE_GROUP}" "${APP_DIR}/model_manager.py"
 echo "[✓] model_manager.py successfully updated."
 
-# 7. Write / Update Systemd Services
+# 7. Symlink Custom Models into Internal LMS Cache & Index
+echo ""
+echo "--- [ Model Library Linking & Indexing ] ---"
+echo "[+] Linking custom storage models to internal LM Studio library..."
+# Symlink subfolders from /storage/lmstudio/models to .cache/lm-studio/models
+for model_dir in "$MODELS_DIR"/*; do
+  if [ -d "$model_dir" ]; then
+    folder_name=$(basename "$model_dir")
+    sudo -u "$SERVICE_USER" ln -sfn "$model_dir" "${APP_DIR}/.cache/lm-studio/models/${folder_name}"
+    sudo -u "$SERVICE_USER" ln -sfn "$model_dir" "${APP_DIR}/.lmstudio/models/${folder_name}"
+  fi
+done
+
+# Run import on all GGUF models on disk
+echo "[+] Importing GGUF files into LMS database index..."
+find "$MODELS_DIR" -type f -name "*.gguf" | while read -r gguf_path; do
+  sudo -u "$SERVICE_USER" HOME="$APP_DIR" "$LMS_BIN" import "$gguf_path" >/dev/null 2>&1 || true
+done
+echo "[✓] Model library indexing complete."
+
+# 8. Write / Update Systemd Services
 echo ""
 echo "--- [ Systemd Service Configuration ] ---"
 
-# LM Studio Service
+# LM Studio Headless Daemon Service (Fixed: no --host flag)
 tee /etc/systemd/system/lmstudio.service > /dev/null <<EOF
 [Unit]
 Description=LM Studio Headless Server & Link Daemon
@@ -156,7 +170,7 @@ Group=${SERVICE_GROUP}
 WorkingDirectory=${APP_DIR}
 Environment=HOME=${APP_DIR}
 Environment=PATH=/usr/local/bin:${APP_DIR}/.cache/lm-studio/bin:${APP_DIR}/.lmstudio/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=${LMS_BIN} server start --host 0.0.0.0 --port ${LM_PORT} --cors
+ExecStart=${LMS_BIN} server start --port ${LM_PORT} --cors
 Restart=always
 RestartSec=5
 
@@ -189,27 +203,43 @@ EOF
 systemctl daemon-reload
 systemctl enable --now lmstudio.service modelmanager.service
 systemctl restart lmstudio.service modelmanager.service
-echo "[✓] Background daemons restarted with latest configurations."
 
-# 8. Open WebUI Handling
+# 9. Health & API Sanity Check
+echo ""
+echo "--- [ Verifying LM Studio API Server ] ---"
+RETRIES=10
+API_READY=false
+while [ $RETRIES -gt 0 ]; do
+  if curl -s "http://127.0.0.1:${LM_PORT}/v1/models" >/dev/null 2>&1; then
+    API_READY=true
+    break
+  fi
+  sleep 1
+  RETRIES=$((RETRIES - 1))
+done
+
+if [ "$API_READY" = true ]; then
+  echo "[✓] LM Studio Server is responding at http://127.0.0.1:${LM_PORT}/v1/models"
+else
+  echo "[!] Warning: LM Studio Server did not respond within 10 seconds. Check 'sudo journalctl -u lmstudio -n 20'"
+fi
+
+# 10. Open WebUI Handling
 echo ""
 echo "--- [ Open WebUI Container Management ] ---"
-
 INSTALL_WEBUI="y"
 if [ "$IS_UPDATE" = true ]; then
-  # In update mode, read prior selection
   if [ -f "$CONFIG_FILE" ]; then
     # shellcheck disable=SC1090
     source "$CONFIG_FILE"
   fi
   if [ "${ENABLE_OPEN_WEBUI:-false}" = "true" ]; then
-    echo "[*] Existing Open WebUI installation detected. Updating container image..."
+    echo "[*] Existing Open WebUI installation detected. Updating container..."
     INSTALL_WEBUI="y"
   else
     INSTALL_WEBUI="n"
   fi
 else
-  # Fresh install: prompt user
   if [ -t 0 ]; then
     read -rp "[?] Deploy Open WebUI container with Web Search? (y/n) [default: y]: " INSTALL_WEBUI
   elif [ -e /dev/tty ]; then
@@ -261,7 +291,7 @@ else
   ENABLE_WEBUI_CONF="false"
 fi
 
-# 9. Save State to Config File
+# 11. Save State to Config File
 cat > "$CONFIG_FILE" <<EOF
 INSTALLED_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 ENABLE_OPEN_WEBUI="${ENABLE_WEBUI_CONF}"
@@ -271,7 +301,7 @@ EOF
 chown "${SERVICE_USER}:${SERVICE_GROUP}" "$CONFIG_FILE"
 chmod 600 "$CONFIG_FILE"
 
-# 10. Final Permissions Enforcement
+# 12. Final Permissions Enforcement
 chmod 755 "$APP_DIR"
 chmod -R u+rwX,go+rX "$APP_DIR"
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$APP_DIR"
