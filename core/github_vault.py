@@ -46,3 +46,25 @@ def get_active_workspaces():
                     "path": w_path
                 })
     return workspaces
+
+def get_workspace_branches(repo_dir_name: str):
+    w_path = os.path.join(WORKSPACES_ROOT, repo_dir_name)
+    if not os.path.exists(w_path):
+        return {"current": "main", "branches": ["main"]}
+    
+    current_res = subprocess.run(["git", "-C", w_path, "branch", "--show-current"], capture_output=True, text=True)
+    current = current_res.stdout.strip() or "main"
+
+    branches = set()
+    branches.add(current)
+
+    all_res = subprocess.run(["git", "-C", w_path, "branch", "-a"], capture_output=True, text=True)
+    if all_res.returncode == 0:
+        for line in all_res.stdout.splitlines():
+            b = line.strip().replace("*", "").strip()
+            if b and "->" not in b:
+                if b.startswith("remotes/origin/"):
+                    b = b.replace("remotes/origin/", "")
+                branches.add(b)
+    
+    return {"current": current, "branches": sorted(list(branches))}

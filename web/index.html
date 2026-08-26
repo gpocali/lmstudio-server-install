@@ -68,11 +68,20 @@
 
     <!-- Main Front & Center Chat / Code Studio -->
     <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden">
-      <div class="bg-slate-950/60 border-b border-slate-800 px-6 py-3 flex justify-between items-center shrink-0">
+      
+      <!-- Studio Header with Active Branch Selector -->
+      <div class="bg-slate-950/60 border-b border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-3 shrink-0">
         <div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-3">
             <span class="text-base font-bold text-slate-100" id="studioProjectHeader">Select a Project from Left Pane</span>
-            <span id="studioBranchBadge" class="hidden text-xs bg-sky-950 text-sky-300 border border-sky-800 px-2 py-0.5 rounded font-mono">main</span>
+            
+            <!-- Branch Selector Dropdown -->
+            <div id="studioBranchContainer" class="hidden flex items-center gap-1.5">
+              <span class="text-xs text-slate-400">🌿 Branch:</span>
+              <select id="studioBranchSelect" onchange="onStudioBranchChanged()" class="bg-slate-900 border border-slate-700 text-sky-300 px-2.5 py-1 rounded text-xs font-mono focus:border-sky-500 focus:outline-none">
+                <option value="main">main</option>
+              </select>
+            </div>
           </div>
           <span class="text-[11px] text-slate-400" id="studioAccountSubtitle">--</span>
         </div>
@@ -81,19 +90,21 @@
           <button onclick="runSyntaxValidation()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs px-3 py-1.5 rounded text-slate-200 transition">
             🧪 Validate Syntax
           </button>
-          <button onclick="pushChangesToGitHub()" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-3.5 py-1.5 rounded font-medium transition flex items-center gap-1">
+          <button onclick="pushCurrentBranch()" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-3.5 py-1.5 rounded font-medium transition flex items-center gap-1">
             🚀 Push to GitHub
           </button>
         </div>
       </div>
 
+      <!-- Chat / Execution History Window -->
       <div id="chatHistoryWindow" class="flex-1 overflow-y-auto p-6 space-y-4">
         <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">
           <div class="font-bold text-sky-400 mb-1">🤖 Local AI Software Engineer Ready</div>
-          Select a project on the left, check any files you want to refactor (or create new files), and enter your instructions below.
+          Select a project on the left, pick or create a target branch, check your context files, and submit instructions.
         </div>
       </div>
 
+      <!-- Instruction Input Bar -->
       <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0">
         <div class="max-w-4xl mx-auto space-y-2">
           <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
@@ -102,7 +113,7 @@
           </div>
           <div class="flex gap-2">
             <textarea id="studioPromptInput" rows="2" 
-                      placeholder="e.g. In install.sh and model_manager.py, add multi-file context support and validate bash syntax..."
+                      placeholder="e.g. In install.sh and model_manager.py, add branch switching support and validate bash syntax..."
                       class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none font-mono"></textarea>
             <button id="studioSendBtn" onclick="executeStudioTask()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
               ⚡ Run
@@ -385,14 +396,84 @@
       currentBranch = branch;
 
       document.getElementById('studioProjectHeader').textContent = displayName;
-      document.getElementById('studioBranchBadge').textContent = branch;
-      document.getElementById('studioBranchBadge').classList.remove('hidden');
+      document.getElementById('studioBranchContainer').classList.remove('hidden');
       document.getElementById('studioAccountSubtitle').textContent = `Workspace Path: /storage/lmstudio/workspaces/${dirName}`;
       document.getElementById('studioActionsGroup').classList.remove('hidden');
       document.getElementById('sidebarFilesBlock').classList.remove('hidden');
 
       loadSidebarWorkspaces();
+      await loadStudioBranches();
       await loadWorkspaceFiles();
+    }
+
+    async function loadStudioBranches() {
+      const select = document.getElementById('studioBranchSelect');
+      if (!currentWorkspaceDir) return;
+      try {
+        const res = await fetch(`/api/workspace/branches?repo_dir_name=${encodeURIComponent(currentWorkspaceDir)}`);
+        const data = await res.json();
+        currentBranch = data.current || "main";
+
+        select.innerHTML = data.branches.map(b => `
+          <option value="${b}" ${b === currentBranch ? 'selected' : ''}>${b}</option>
+        `).join('') + '<option value="__NEW_BRANCH__">+ New Branch...</option>';
+      } catch(e) {
+        console.error("Load branches error:", e);
+      }
+    }
+
+    async function onStudioBranchChanged() {
+      const select = document.getElementById('studioBranchSelect');
+      const val = select.value;
+
+      if (val === "__NEW_BRANCH__") {
+        const newBranchName = prompt("Enter new branch name (e.g. feature/my-new-feature):");
+        if (!newBranchName) {
+          select.value = currentBranch;
+          return;
+        }
+        try {
+          const res = await fetch('/api/workspace/create_branch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch_name: newBranchName})
+          });
+          const data = await res.json();
+          if (res.ok) {
+            currentBranch = data.active_branch;
+            await loadStudioBranches();
+            loadSidebarWorkspaces();
+          } else {
+            alert('Branch creation failed: ' + data.message);
+            select.value = currentBranch;
+          }
+        } catch(e) {
+          alert('Error: ' + e.message);
+          select.value = currentBranch;
+        }
+        return;
+      }
+
+      // Switch to existing branch
+      try {
+        const res = await fetch('/api/workspace/switch_branch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: val})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          currentBranch = data.active_branch;
+          loadSidebarWorkspaces();
+          await loadWorkspaceFiles();
+        } else {
+          alert('Switch branch failed: ' + data.message);
+          select.value = currentBranch;
+        }
+      } catch(e) {
+        alert('Error: ' + e.message);
+        select.value = currentBranch;
+      }
     }
 
     async function loadWorkspaceFiles() {
@@ -429,7 +510,7 @@
       } else if (count === 1) {
         summary.textContent = `1 file selected: ${checked[0].value}`;
       } else {
-        summary.textContent = `${count} files selected for coordinated refactoring`;
+        summary.textContent = `${count} files selected for context`;
       }
     }
 
@@ -456,7 +537,7 @@
       }
     }
 
-    // ---------------- Studio Chat & Multi-File Execution ----------------
+    // ---------------- Studio Chat & Interactive Review/Commit ----------------
 
     async function executeStudioTask() {
       const promptInput = document.getElementById('studioPromptInput');
@@ -470,11 +551,12 @@
       const checkedBoxes = document.querySelectorAll('#filesCheckboxList input[type="checkbox"]:checked');
       const selectedFiles = Array.from(checkedBoxes).map(cb => cb.value);
 
+      // Append User message
       const userMsgDiv = document.createElement('div');
       userMsgDiv.className = 'bg-slate-800 p-4 rounded-lg border border-slate-700 text-xs text-slate-100 space-y-1';
       userMsgDiv.innerHTML = `
         <div class="font-bold text-sky-300 flex items-center justify-between">
-          <span>You</span>
+          <span>You (Branch: ${currentBranch})</span>
           <span class="text-[10px] text-slate-400 font-normal">${selectedFiles.length > 0 ? selectedFiles.join(', ') : 'No files selected'}</span>
         </div>
         <p class="whitespace-pre-wrap font-mono mt-1">${instruction}</p>
@@ -485,9 +567,12 @@
       sendBtn.disabled = true;
       sendBtn.textContent = '⏳ Thinking...';
 
+      // Loading bubble
+      const cardId = `action-card-${Date.now()}`;
       const aiMsgDiv = document.createElement('div');
-      aiMsgDiv.className = 'bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-emerald-300 space-y-2 font-mono';
-      aiMsgDiv.innerHTML = `<span class="animate-pulse">🤖 Loading model context & analyzing files...</span>`;
+      aiMsgDiv.id = cardId;
+      aiMsgDiv.className = 'bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-emerald-300 space-y-3 font-mono';
+      aiMsgDiv.innerHTML = `<span class="animate-pulse">🤖 Analyzing context & generating file changes...</span>`;
       chatWindow.appendChild(aiMsgDiv);
       chatWindow.scrollTop = chatWindow.scrollHeight;
 
@@ -503,30 +588,154 @@
         });
         const data = await res.json();
         if (res.ok) {
-          const modStr = data.modified_files && data.modified_files.length > 0 
-            ? `✓ Modified Files: ${data.modified_files.join(', ')}`
-            : `ℹ Advisory / Conversational Response`;
+          const modFiles = data.modified_files || [];
+          const modFilesJson = encodeURIComponent(JSON.stringify(modFiles));
+
+          let commitReviewBox = '';
+          if (modFiles.length > 0) {
+            commitReviewBox = `
+              <div class="bg-slate-900 p-3 rounded-lg border border-slate-700 space-y-2 mt-3 text-slate-200">
+                <div class="flex justify-between items-center text-xs">
+                  <span class="font-bold text-sky-300">📝 Staged Changes (${modFiles.length} file${modFiles.length > 1 ? 's' : ''})</span>
+                  <span class="text-[10px] bg-slate-800 px-2 py-0.5 rounded font-mono text-amber-300">Target: ${currentBranch}</span>
+                </div>
+                
+                <details class="bg-slate-950 p-2 rounded border border-slate-800 text-xs">
+                  <summary class="cursor-pointer font-bold text-sky-400">View Git Diff</summary>
+                  <pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">${data.diff || 'No diff available'}</pre>
+                </details>
+
+                <div>
+                  <label class="block text-[11px] text-slate-400 mb-1">Commit Message:</label>
+                  <input type="text" id="commit-msg-${cardId}" value="${data.proposed_commit_msg.replace(/"/g, '&quot;')}" 
+                         class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-sky-500 focus:outline-none">
+                </div>
+
+                <div class="flex justify-end gap-2 pt-1">
+                  <button onclick="discardProposedChanges('${cardId}', '${modFilesJson}')" 
+                          class="bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1 rounded text-xs text-rose-300 transition">
+                    ✕ Discard
+                  </button>
+                  <button onclick="commitProposedChanges('${cardId}', '${modFilesJson}')" 
+                          class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1 rounded text-xs transition flex items-center gap-1">
+                    ✓ Commit to '${currentBranch}'
+                  </button>
+                </div>
+              </div>
+            `;
+          }
 
           aiMsgDiv.innerHTML = `
             <div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">
               <span>🤖 Local AI Agent</span>
-              <span class="text-[10px] text-slate-400 font-normal">${modStr}</span>
+              <span class="text-[10px] text-slate-400 font-normal">${modFiles.length > 0 ? 'Changes Staged' : 'Advisory Response'}</span>
             </div>
             <div class="text-slate-200 whitespace-pre-wrap mt-2">${data.ai_response.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            ${data.diff && data.diff.length > 20 ? `<details class="mt-3 bg-slate-900 p-2.5 rounded border border-slate-800 text-slate-300"><summary class="cursor-pointer font-bold text-sky-400">View Git Diff Commit</summary><pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">${data.diff}</pre></details>` : ''}
+            ${commitReviewBox}
           `;
           await loadWorkspaceFiles();
         } else {
-          console.error("Agent Execution Failed:", data);
-          aiMsgDiv.innerHTML = `<span class="text-rose-400">❌ Error: ${data.message || JSON.stringify(data)}</span>`;
+          aiMsgDiv.innerHTML = `<span class="text-rose-400">❌ Error: ${data.message}</span>`;
         }
       } catch(e) {
-        console.error("Agent Communication Error:", e);
         aiMsgDiv.innerHTML = `<span class="text-rose-400">❌ Communication Error: ${e.message}</span>`;
       }
 
       sendBtn.disabled = false;
       sendBtn.textContent = '⚡ Run';
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    async function commitProposedChanges(cardId, modFilesJson) {
+      const commitInput = document.getElementById(`commit-msg-${cardId}`);
+      const commitMsg = commitInput ? commitInput.value.trim() : "AI Update";
+      const modFiles = JSON.parse(decodeURIComponent(modFilesJson));
+      const card = document.getElementById(cardId);
+
+      try {
+        const res = await fetch('/api/workspace/commit', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            repo_dir_name: currentWorkspaceDir,
+            commit_message: commitMsg,
+            target_files: modFiles
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          card.querySelector('.bg-slate-900').innerHTML = `
+            <div class="flex justify-between items-center text-xs">
+              <span class="text-emerald-400 font-bold">✓ Committed: "${commitMsg}" to branch '${data.branch}'</span>
+              <button onclick="pushCurrentBranch()" class="bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded text-xs font-semibold transition flex items-center gap-1">
+                🚀 Push to GitHub
+              </button>
+            </div>
+          `;
+          loadSidebarWorkspaces();
+          await loadStudioBranches();
+        } else {
+          alert('Commit failed: ' + data.message);
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+    }
+
+    async function discardProposedChanges(cardId, modFilesJson) {
+      if (!confirm("Are you sure you want to discard these file changes?")) return;
+      const modFiles = JSON.parse(decodeURIComponent(modFilesJson));
+      const card = document.getElementById(cardId);
+
+      try {
+        const res = await fetch('/api/workspace/discard', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            repo_dir_name: currentWorkspaceDir,
+            target_files: modFiles
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          card.querySelector('.bg-slate-900').innerHTML = `
+            <span class="text-rose-400 font-bold">✕ Changes discarded.</span>
+          `;
+          await loadWorkspaceFiles();
+        } else {
+          alert('Discard failed: ' + data.message);
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+    }
+
+    async function pushCurrentBranch() {
+      if (!currentWorkspaceDir) return alert('Select an active project first.');
+      if (!confirm(`Push committed changes on branch '${currentBranch}' to GitHub origin/${currentBranch}?`)) return;
+      
+      const chatWindow = document.getElementById('chatHistoryWindow');
+      const pushDiv = document.createElement('div');
+      pushDiv.className = 'bg-slate-950 p-4 rounded border border-slate-800 text-xs font-mono text-slate-300';
+      pushDiv.innerHTML = `<span class="animate-pulse">🚀 Pushing commits to GitHub origin/${currentBranch}...</span>`;
+      chatWindow.appendChild(pushDiv);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+
+      try {
+        const res = await fetch('/api/workspace/push', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          pushDiv.innerHTML = `<div class="font-bold text-emerald-400">✓ Push Successful</div><p class="mt-1">${data.message}</p>`;
+        } else {
+          pushDiv.innerHTML = `<div class="font-bold text-rose-400">❌ Push Failed</div><p class="mt-1">${data.message}</p>`;
+        }
+      } catch(e) {
+        pushDiv.innerHTML = `<span class="text-rose-400">Push Error: ${e.message}</span>`;
+      }
       chatWindow.scrollTop = chatWindow.scrollHeight;
     }
 
@@ -553,39 +762,7 @@
           <pre class="mt-2 text-[11px] whitespace-pre-wrap">${data.logs}</pre>
         `;
       } catch(e) {
-        console.error("Validator Error:", e);
         valDiv.innerHTML = `<span class="text-rose-400">Validator Error: ${e.message}</span>`;
-      }
-      chatWindow.scrollTop = chatWindow.scrollHeight;
-    }
-
-    async function pushChangesToGitHub() {
-      if (!currentWorkspaceDir) return alert('Select an active project first.');
-      if (!confirm(`Push verified commits to branch '${currentBranch}' on GitHub?`)) return;
-      
-      const chatWindow = document.getElementById('chatHistoryWindow');
-      const pushDiv = document.createElement('div');
-      pushDiv.className = 'bg-slate-950 p-4 rounded border border-slate-800 text-xs font-mono text-slate-300';
-      pushDiv.innerHTML = `<span class="animate-pulse">🚀 Pushing commits to GitHub origin/${currentBranch}...</span>`;
-      chatWindow.appendChild(pushDiv);
-      chatWindow.scrollTop = chatWindow.scrollHeight;
-
-      try {
-        const res = await fetch('/api/workspace/push', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
-        });
-        const data = await res.json();
-        if (res.ok) {
-          pushDiv.innerHTML = `<div class="font-bold text-emerald-400">✓ Push Successful</div><p class="mt-1">${data.message}</p>`;
-        } else {
-          console.error("Git Push Failed:", data);
-          pushDiv.innerHTML = `<div class="font-bold text-rose-400">❌ Push Failed</div><p class="mt-1">${data.message}</p>`;
-        }
-      } catch(e) {
-        console.error("Push Communication Error:", e);
-        pushDiv.innerHTML = `<span class="text-rose-400">Push Error: ${e.message}</span>`;
       }
       chatWindow.scrollTop = chatWindow.scrollHeight;
     }
@@ -666,11 +843,9 @@
           toggleAddAccountForm();
           loadAccounts();
         } else {
-          console.error("Add Account Failed:", data);
           alert('Failed to add account: ' + data.message);
         }
       } catch(e) {
-        console.error("Add Account Communication Error:", e);
         alert('Communication Error: ' + e.message);
       }
     }
@@ -687,11 +862,9 @@
         if (res.ok) {
           loadAccounts();
         } else {
-          console.error("Remove Account Error:", data);
           alert('Error: ' + data.message);
         }
       } catch(e) {
-        console.error("Remove Account Communication Error:", e);
         alert('Communication Error: ' + e.message);
       }
     }
@@ -717,7 +890,6 @@
           repoDropdown.innerHTML = '<option value="">No repositories found</option>';
         }
       } catch(e) {
-        console.error("Load Repos Error:", e);
         repoDropdown.innerHTML = '<option value="">Error loading repos</option>';
       }
     }
@@ -732,9 +904,7 @@
         const res = await fetch(`/api/github/branches?account_username=${encodeURIComponent(username)}&repo_full_name=${encodeURIComponent(repoFullName)}`);
         const branches = await res.json();
         branchSelect.innerHTML = branches.map(b => `<option value="${b}">${b}</option>`).join('');
-      } catch(e) {
-        console.error("Fetch Branches Error:", e);
-      }
+      } catch(e) {}
     }
 
     async function submitCloneProject() {
@@ -755,11 +925,9 @@
           switchView('studio');
           selectStudioProject(data.dir_name, data.display_name, data.branch);
         } else {
-          console.error("Clone Failed:", data);
           alert('Clone failed: ' + data.message);
         }
       } catch(e) {
-        console.error("Clone Communication Error:", e);
         alert('Communication Error: ' + e.message);
       }
     }
@@ -837,7 +1005,6 @@
           container.appendChild(card);
         });
       } catch(err) {
-        console.error("Search Models Error:", err);
         container.innerHTML = '<p class="text-rose-400">Error retrieving models from Hugging Face.</p>';
       }
     }
@@ -963,13 +1130,9 @@
         });
         const data = await res.json();
         if (!res.ok || data.status !== 'success') {
-          console.error("Load Model Failure Payload:", data);
           alert('Load Failure Output from LMS:\n\n' + (data.message || JSON.stringify(data)));
-        } else {
-          console.log("Model Loaded Successfully:", data);
         }
       } catch(e) {
-        console.error("Load Model Communication Error:", e);
         alert('Communication Error: ' + e.message);
       }
       await initHardwareInfo();
@@ -980,9 +1143,7 @@
       if (btn) btn.textContent = '⏳ Unloading...';
       try {
         await fetch('/api/unload_model', {method: 'POST'});
-      } catch(e) {
-        console.error("Unload Model Error:", e);
-      }
+      } catch(e) {}
       if (btn) btn.textContent = '⏹ Unload All';
       await initHardwareInfo();
       await fetchLocalModels();
@@ -1000,9 +1161,7 @@
         localModelSet.delete(filename);
         if (data.storage) renderStorageMetrics(data.storage);
         fetchLocalModels();
-      } catch(e) {
-        console.error("Delete Model Error:", e);
-      }
+      } catch(e) {}
     }
 
     async function updateTasks() {
@@ -1105,7 +1264,6 @@
           `;
         }).join('');
       } catch(e) {
-        console.error("Fetch Local Models Error:", e);
         list.innerHTML = `<span class="text-rose-400">Error loading local models: ${e.message}</span>`;
       }
     }

@@ -1,6 +1,6 @@
 """
 LM Studio Server Entrypoint Router
-Dispatches API requests to modular core submodules with robust model key resolution.
+Dispatches API requests to modular core submodules.
 """
 
 import os
@@ -35,7 +35,8 @@ from core.github_vault import (
     load_accounts_data,
     save_accounts_data,
     get_token_for_user,
-    get_active_workspaces
+    get_active_workspaces,
+    get_workspace_branches
 )
 from core.agent_engine import process_agent_task
 
@@ -74,6 +75,10 @@ class GithubBranchSwitchRequest(BaseModel):
     repo_dir_name: str
     branch: str
 
+class CreateBranchRequest(BaseModel):
+    repo_dir_name: str
+    branch_name: str
+
 class CreateFileRequest(BaseModel):
     repo_dir_name: str
     file_path: str
@@ -84,6 +89,15 @@ class AgentTaskRequest(BaseModel):
     target_files: list[str] = []
     instruction: str
     model_identifier: str = ""
+
+class CommitRequest(BaseModel):
+    repo_dir_name: str
+    commit_message: str
+    target_files: list[str] = []
+
+class DiscardRequest(BaseModel):
+    repo_dir_name: str
+    target_files: list[str] = []
 
 class WorkspaceActionRequest(BaseModel):
     repo_dir_name: str
@@ -212,34 +226,28 @@ def api_load_model(req: LoadRequest):
     fname = os.path.basename(abs_path)
     clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname).lower()
 
-    # 1. Unload running models
-    try:
-        subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, timeout=5)
-    except Exception:
-        pass
+    try: subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, timeout=5)
+    except Exception: pass
 
-    # 2. Extract registered keys from `lms ls`
     registered_keys = []
     try:
         ls_res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=5)
         if ls_res.returncode == 0:
             in_llm_section = False
             for line in ls_res.stdout.splitlines():
-                line_str = line.strip()
-                if "LLM" in line_str:
+                l_str = line.strip()
+                if "LLM" in l_str:
                     in_llm_section = True
                     continue
-                if "EMBEDDING" in line_str or line_str.startswith("---"):
+                if "EMBEDDING" in l_str or l_str.startswith("---"):
                     in_llm_section = False
                     continue
-                if in_llm_section and line_str:
-                    parts = line_str.split()
+                if in_llm_section and l_str:
+                    parts = l_str.split()
                     if parts:
                         registered_keys.append(parts[0])
-    except Exception:
-        pass
+    except Exception: pass
 
-    # 3. Match candidate keys against filename
     matched_target = None
     f_strip = re.sub(r'[^a-z0-9]', '', clean_fname)
     for key in registered_keys:
@@ -248,14 +256,11 @@ def api_load_model(req: LoadRequest):
             matched_target = key
             break
 
-    # If no exact match found, fall back to registered keys or sanitized base name
     targets_to_try = []
-    if matched_target:
-        targets_to_try.append(matched_target)
+    if matched_target: targets_to_try.append(matched_target)
     targets_to_try.extend(registered_keys)
     targets_to_try.extend([clean_fname, fname])
 
-    # Deduplicate
     seen = set()
     dedup_targets = [t for t in targets_to_try if t and not (t in seen or seen.add(t))]
 
@@ -271,24 +276,13 @@ def api_load_model(req: LoadRequest):
             ]
             res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=30)
             if res.returncode == 0:
-                return {
-                    "status": "success",
-                    "loaded_target": target,
-                    "output": res.stdout or f"Loaded {target} into GPU VRAM."
-                }
+                return {"status": "success", "loaded_target": target, "output": res.stdout or f"Loaded {target} into GPU VRAM."}
             else:
                 last_error = (res.stderr or res.stdout or "").strip()
         except Exception as err:
             last_error = str(err)
 
-    return JSONResponse(
-        status_code=400,
-        content={
-            "status": "error",
-            "message": last_error or f"Could not load model for '{fname}'.",
-            "attempted_candidates": dedup_targets
-        }
-    )
+    return JSONResponse(status_code=400, content={"status": "error", "message": last_error or f"Could not load model for '{fname}'.", "attempted_candidates": dedup_targets})
 
 @app.post("/api/unload_model")
 def api_unload_model():
@@ -334,18 +328,10 @@ def api_local_models():
             for f in filenames:
                 if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
                     path = os.path.join(root, f)
-                    try:
-                        size_gb = round(os.path.getsize(path) / (1024**3), 2)
-                    except Exception:
-                        size_gb = 0.0
+                    try: size_gb = round(os.path.getsize(path) / (1024**3), 2)
+                    except Exception: size_gb = 0.0
                     weight, variant = parse_model_metadata(f, root)
-                    files.append({
-                        "filename": f,
-                        "weight": weight,
-                        "variant": variant,
-                        "size_gb": f"{size_gb} GB",
-                        "path": path
-                    })
+                    files.append({"filename": f, "weight": weight, "variant": variant, "size_gb": f"{size_gb} GB", "path": path})
     return {"files": files, "storage": get_storage_usage(), "loaded_models": get_loaded_models()}
 
 # ---------------- GitHub Multi-Account Endpoints ----------------
@@ -408,11 +394,42 @@ def api_list_branches(account_username: str, repo_full_name: str):
     except Exception: pass
     return ["main", "dev", "master"]
 
-# ---------------- Workspace & Agent Endpoints ----------------
+# ---------------- Workspace & Branch Endpoints ----------------
 
 @app.get("/api/workspaces/active")
 def api_get_workspaces():
     return get_active_workspaces()
+
+@app.get("/api/workspace/branches")
+def api_get_workspace_branches(repo_dir_name: str):
+    return get_workspace_branches(repo_dir_name)
+
+@app.post("/api/workspace/switch_branch")
+def api_switch_branch(req: GithubBranchSwitchRequest):
+    w_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
+    if not os.path.exists(w_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+    try:
+        subprocess.run(["git", "-C", w_path, "checkout", req.branch], capture_output=True)
+        res = subprocess.run(["git", "-C", w_path, "branch", "--show-current"], capture_output=True, text=True)
+        current = res.stdout.strip() or req.branch
+        return {"status": "success", "active_branch": current}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+@app.post("/api/workspace/create_branch")
+def api_create_branch(req: CreateBranchRequest):
+    w_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
+    if not os.path.exists(w_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+    clean_b = req.branch_name.strip().replace(" ", "-")
+    try:
+        res = subprocess.run(["git", "-C", w_path, "checkout", "-b", clean_b], capture_output=True, text=True)
+        if res.returncode == 0:
+            return {"status": "success", "active_branch": clean_b}
+        return JSONResponse(status_code=400, content={"status": "error", "message": res.stderr or res.stdout})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 @app.post("/api/github/clone")
 def api_clone_project(req: GithubCloneRequest):
@@ -461,7 +478,6 @@ def api_create_file(req: CreateFileRequest):
     try:
         with open(target, "w", encoding="utf-8") as f: f.write(req.initial_content)
         subprocess.run(["git", "-C", w_path, "add", req.file_path], capture_output=True)
-        subprocess.run(["git", "-C", w_path, "commit", "-m", f"Create {req.file_path}"], capture_output=True)
         return {"status": "success", "file_path": req.file_path}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
@@ -471,6 +487,46 @@ def api_agent_execute(req: AgentTaskRequest):
     res = process_agent_task(req.repo_dir_name, req.target_files, req.instruction, req.model_identifier)
     if res.get("status") == "error": return JSONResponse(status_code=500, content=res)
     return res
+
+@app.post("/api/workspace/commit")
+def api_commit(req: CommitRequest):
+    w_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
+    if not os.path.exists(w_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+    try:
+        # Add specified files or all
+        if req.target_files:
+            for f in req.target_files:
+                subprocess.run(["git", "-C", w_path, "add", f], capture_output=True)
+        else:
+            subprocess.run(["git", "-C", w_path, "add", "."], capture_output=True)
+
+        res = subprocess.run(["git", "-C", w_path, "commit", "-m", req.commit_message], capture_output=True, text=True)
+        if res.returncode == 0 or "nothing to commit" in res.stdout:
+            # Get current active branch
+            b_res = subprocess.run(["git", "-C", w_path, "branch", "--show-current"], capture_output=True, text=True)
+            active_branch = b_res.stdout.strip() or "main"
+            return {"status": "success", "message": f"Committed to branch '{active_branch}'", "branch": active_branch}
+        return JSONResponse(status_code=400, content={"status": "error", "message": res.stderr or res.stdout})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+@app.post("/api/workspace/discard")
+def api_discard(req: DiscardRequest):
+    w_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
+    if not os.path.exists(w_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+    try:
+        if req.target_files:
+            for f in req.target_files:
+                subprocess.run(["git", "-C", w_path, "checkout", "--", f], capture_output=True)
+                subprocess.run(["git", "-C", w_path, "clean", "-fd", f], capture_output=True)
+        else:
+            subprocess.run(["git", "-C", w_path, "checkout", "--", "."], capture_output=True)
+            subprocess.run(["git", "-C", w_path, "clean", "-fd"], capture_output=True)
+        return {"status": "success", "message": "Changes discarded."}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 @app.post("/api/workspace/validate")
 def api_validate(req: WorkspaceActionRequest):

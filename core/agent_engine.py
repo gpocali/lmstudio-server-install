@@ -63,7 +63,6 @@ def process_agent_task(repo_dir_name: str, target_files: list[str], instruction:
 
         ai_response = resp.json()["choices"][0]["message"]["content"]
         
-        # Regex using \x60 hex for backticks to completely prevent escape issues
         file_pattern = re.compile(r'###\s*File:\s*([^\n\r]+)[\r\n]+\x60\x60\x60(?:[a-zA-Z0-9_\-]+)?[\r\n]+([\s\S]*?)[\r\n]+\x60\x60\x60', re.MULTILINE)
         matches = file_pattern.findall(ai_response)
         
@@ -75,7 +74,6 @@ def process_agent_task(repo_dir_name: str, target_files: list[str], instruction:
                 os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
                 with open(dest_file_path, "w", encoding="utf-8") as f:
                     f.write(file_content)
-                subprocess.run(["git", "-C", workspace_path, "add", clean_rel], capture_output=True)
                 modified_files.append(clean_rel)
         elif len(target_files) == 1:
             fallback_pattern = re.compile(r'\x60\x60\x60(?:[a-zA-Z0-9_\-]+)?\n([\s\S]*?)\n\x60\x60\x60')
@@ -85,21 +83,22 @@ def process_agent_task(repo_dir_name: str, target_files: list[str], instruction:
                 dest_p = os.path.join(workspace_path, single_rel)
                 with open(dest_p, "w", encoding="utf-8") as f:
                     f.write(code_match.group(1))
-                subprocess.run(["git", "-C", workspace_path, "add", single_rel], capture_output=True)
                 modified_files.append(single_rel)
 
-        commit_msg = f"AI Update: {instruction[:70]}"
-        if modified_files:
-            subprocess.run(["git", "-C", workspace_path, "commit", "-m", commit_msg], capture_output=True)
-            diff_res = subprocess.run(["git", "-C", workspace_path, "diff", "HEAD~1", "HEAD"], capture_output=True, text=True)
-            diff_text = diff_res.stdout or "Files updated and committed."
-        else:
-            diff_text = "No direct file edits written to disk."
+        # Get working tree diff (unstaged/uncommitted changes)
+        diff_res = subprocess.run(["git", "-C", workspace_path, "diff"], capture_output=True, text=True)
+        diff_text = diff_res.stdout or ""
+        
+        # If diff is empty (e.g. newly created untracked files), check status
+        if not diff_text and modified_files:
+            diff_text = f"New file(s) staged on disk:\n" + "\n".join([f"+ {f}" for f in modified_files])
+
+        proposed_commit_msg = f"Update {', '.join(modified_files[:3])}: {instruction[:50]}" if modified_files else "Code update"
 
         return {
             "status": "success",
             "modified_files": modified_files,
-            "commit_message": commit_msg if modified_files else "No changes committed",
+            "proposed_commit_msg": proposed_commit_msg,
             "diff": diff_text[:5000],
             "ai_response": ai_response
         }
