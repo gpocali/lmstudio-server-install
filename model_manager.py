@@ -1,6 +1,6 @@
 """
-LM Studio Remote Model & Coding Studio Manager
-Manages HuggingFace GGUF downloads, GPU offloading, and GitHub workspace AI editing.
+LM Studio Remote Model & Multi-Account Code Studio Manager
+Manages HuggingFace GGUF models, multiple GitHub accounts, and local AI agent workspaces.
 """
 
 import os
@@ -24,7 +24,7 @@ DOWNLOAD_JOBS = {}
 STORAGE_PATH = "/storage/lmstudio"
 MODELS_PATH = os.path.join(STORAGE_PATH, "models")
 WORKSPACES_ROOT = os.path.join(STORAGE_PATH, "workspaces")
-GITHUB_TOKEN_FILE = os.path.join(STORAGE_PATH, ".github_token")
+ACCOUNTS_FILE = os.path.join(STORAGE_PATH, ".github_accounts.json")
 
 os.makedirs(MODELS_PATH, exist_ok=True)
 os.makedirs(WORKSPACES_ROOT, exist_ok=True)
@@ -75,11 +75,16 @@ class LoadRequest(BaseModel):
     context_length: int = 32768
     ttl: int = 3600
 
-class GithubAuthRequest(BaseModel):
+class AddAccountRequest(BaseModel):
     token: str
+    label: str = ""
+
+class RemoveAccountRequest(BaseModel):
+    username: str
 
 class GithubCloneRequest(BaseModel):
-    repo_full_name: str  # e.g. "gpocali/lmstudio-server-install"
+    account_username: str
+    repo_full_name: str
     branch: str = "main"
 
 class GithubBranchSwitchRequest(BaseModel):
@@ -92,9 +97,9 @@ class AgentTaskRequest(BaseModel):
     instruction: str
     model_identifier: str = ""
 
-class GitPushRequest(BaseModel):
+class WorkspaceActionRequest(BaseModel):
     repo_dir_name: str
-    branch: str
+    branch: str = "main"
 
 # ----------------- Helper Functions -----------------
 
@@ -104,13 +109,25 @@ def get_lms_bin():
             return p
     return shutil.which("lms") or "lms"
 
-def get_github_token():
-    if os.path.exists(GITHUB_TOKEN_FILE):
+def load_accounts_data():
+    if os.path.exists(ACCOUNTS_FILE):
         try:
-            with open(GITHUB_TOKEN_FILE, "r") as f:
-                return f.read().strip()
+            with open(ACCOUNTS_FILE, "r") as f:
+                return json.load(f)
         except Exception:
-            return ""
+            return {"accounts": []}
+    return {"accounts": []}
+
+def save_accounts_data(data):
+    with open(ACCOUNTS_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+    os.chmod(ACCOUNTS_FILE, 0o600)
+
+def get_token_for_user(username: str):
+    data = load_accounts_data()
+    for acc in data.get("accounts", []):
+        if acc.get("username", "").lower() == username.lower():
+            return acc.get("token", "")
     return ""
 
 def get_loaded_models():
@@ -133,7 +150,6 @@ def get_loaded_models():
     return list(set(loaded))
 
 def get_active_model_for_agent():
-    """Finds the primary loaded model identifier to send prompts to."""
     models = get_loaded_models()
     if models:
         return models[0]
@@ -240,8 +256,7 @@ def fetch_single_file_size(repo_id: str, rel_path: str):
         r = requests.head(url, headers={"Accept-Encoding": "identity"}, allow_redirects=True, timeout=5)
         if r.status_code == 200:
             return int(r.headers.get("Content-Length", 0))
-    except Exception:
-        pass
+    except Exception: pass
     return 0
 
 def run_download_job(repo_id: str, group_name: str, file_paths: list[str]):
@@ -512,57 +527,70 @@ def get_local_models():
                     })
     return {"files": files, "storage": get_storage_usage(), "loaded_models": get_loaded_models()}
 
-# ----------------- GitHub & AI Agent Routes -----------------
+# ----------------- Multi-Account GitHub Management -----------------
 
-@app.get("/api/github/status")
-def github_status():
-    token = get_github_token()
-    if not token:
-        return {"authenticated": False, "username": "", "workspaces": []}
-    
-    # Test token with GitHub API
-    try:
-        r = requests.get("https://api.github.com/user", headers={"Authorization": f"Bearer {token}"}, timeout=5)
-        if r.status_code == 200:
-            user_data = r.json()
-            username = user_data.get("login", "")
-            
-            # List local cloned workspaces
-            workspaces = []
-            if os.path.exists(WORKSPACES_ROOT):
-                for d in os.listdir(WORKSPACES_ROOT):
-                    w_path = os.path.join(WORKSPACES_ROOT, d)
-                    if os.path.isdir(w_path) and os.path.exists(os.path.join(w_path, ".git")):
-                        # Get current branch
-                        branch_res = subprocess.run(["git", "-C", w_path, "branch", "--show-current"], capture_output=True, text=True)
-                        branch = branch_res.stdout.strip() or "main"
-                        workspaces.append({"dir_name": d, "path": w_path, "branch": branch})
+@app.get("/api/github/accounts")
+def list_accounts():
+    data = load_accounts_data()
+    # Mask tokens for safe client display
+    safe_accounts = []
+    for a in data.get("accounts", []):
+        t = a.get("token", "")
+        masked_token = f"ghp_...{t[-4:]}" if len(t) > 4 else "ghp_****"
+        safe_accounts.append({
+            "username": a.get("username", ""),
+            "label": a.get("label", a.get("username", "")),
+            "masked_token": masked_token,
+            "avatar_url": a.get("avatar_url", "")
+        })
+    return safe_accounts
 
-            return {"authenticated": True, "username": username, "workspaces": workspaces}
-    except Exception:
-        pass
-    return {"authenticated": False, "username": "", "workspaces": []}
-
-@app.post("/api/github/auth")
-def github_auth(req: GithubAuthRequest):
+@app.post("/api/github/accounts/add")
+def add_account(req: AddAccountRequest):
     token = req.token.strip()
+    if not token:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Token cannot be empty"})
+
     try:
-        r = requests.get("https://api.github.com/user", headers={"Authorization": f"Bearer {token}"}, timeout=5)
-        if r.status_code == 200:
-            with open(GITHUB_TOKEN_FILE, "w") as f:
-                f.write(token)
-            os.chmod(GITHUB_TOKEN_FILE, 0o600)
-            return {"status": "success", "username": r.json().get("login")}
-        else:
-            return JSONResponse(status_code=401, content={"status": "error", "message": "Invalid GitHub Personal Access Token"})
+        # Validate token with GitHub API
+        r = requests.get("https://api.github.com/user", headers={"Authorization": f"Bearer {token}"}, timeout=6)
+        if r.status_code != 200:
+            return JSONResponse(status_code=401, content={"status": "error", "message": "Invalid GitHub Token. Please verify permissions."})
+        
+        user_info = r.json()
+        username = user_info.get("login", "")
+        avatar = user_info.get("avatar_url", "")
+        label = req.label.strip() or username
+
+        data = load_accounts_data()
+        # Remove if already exists to update
+        data["accounts"] = [a for a in data.get("accounts", []) if a.get("username", "").lower() != username.lower()]
+        data["accounts"].append({
+            "username": username,
+            "label": label,
+            "token": token,
+            "avatar_url": avatar
+        })
+        save_accounts_data(data)
+        return {"status": "success", "username": username, "label": label}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
+@app.post("/api/github/accounts/remove")
+def remove_account(req: RemoveAccountRequest):
+    data = load_accounts_data()
+    orig_len = len(data.get("accounts", []))
+    data["accounts"] = [a for a in data.get("accounts", []) if a.get("username", "").lower() != req.username.lower()]
+    if len(data["accounts"]) < orig_len:
+        save_accounts_data(data)
+        return {"status": "success", "message": f"Account @{req.username} removed."}
+    return JSONResponse(status_code=404, content={"status": "error", "message": "Account not found"})
+
 @app.get("/api/github/repos")
-def list_github_repos():
-    token = get_github_token()
+def list_repos_for_account(account_username: str):
+    token = get_token_for_user(account_username)
     if not token:
-        return JSONResponse(status_code=401, content={"status": "error", "message": "GitHub token not configured"})
+        return JSONResponse(status_code=401, content={"status": "error", "message": f"No active token for user @{account_username}"})
 
     try:
         r = requests.get("https://api.github.com/user/repos?per_page=100&sort=updated", headers={"Authorization": f"Bearer {token}"}, timeout=8)
@@ -582,58 +610,78 @@ def list_github_repos():
     return []
 
 @app.get("/api/github/branches")
-def list_github_branches(repo_full_name: str):
-    token = get_github_token()
+def list_branches_for_repo(account_username: str, repo_full_name: str):
+    token = get_token_for_user(account_username)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         r = requests.get(f"https://api.github.com/repos/{repo_full_name}/branches", headers=headers, timeout=6)
         if r.status_code == 200:
             return [b.get("name") for b in r.json()]
-    except Exception:
-        pass
+    except Exception: pass
     return ["main", "dev", "master"]
 
-@app.post("/api/github/clone")
-def clone_github_repo(req: GithubCloneRequest):
-    token = get_github_token()
-    if not token:
-        return JSONResponse(status_code=401, content={"status": "error", "message": "GitHub token not configured"})
+# ----------------- Workspaces Management -----------------
 
+@app.get("/api/workspaces/active")
+def get_active_workspaces():
+    """Lists all locally cloned projects on the disk."""
+    workspaces = []
+    if os.path.exists(WORKSPACES_ROOT):
+        for d in os.listdir(WORKSPACES_ROOT):
+            w_path = os.path.join(WORKSPACES_ROOT, d)
+            if os.path.isdir(w_path) and os.path.exists(os.path.join(w_path, ".git")):
+                branch_res = subprocess.run(["git", "-C", w_path, "branch", "--show-current"], capture_output=True, text=True)
+                branch = branch_res.stdout.strip() or "main"
+                
+                # Extract owner/repo from folder slug (format: user_repo)
+                display_name = d.replace("_", "/", 1) if "_" in d else d
+                workspaces.append({
+                    "dir_name": d,
+                    "display_name": display_name,
+                    "branch": branch,
+                    "path": w_path
+                })
+    return workspaces
+
+@app.post("/api/github/clone")
+def clone_or_open_project(req: GithubCloneRequest):
+    token = get_token_for_user(req.account_username)
+    if not token:
+        return JSONResponse(status_code=401, content={"status": "error", "message": f"Authentication required for @{req.account_username}"})
+
+    # Folder pattern: user_repo
     dir_name = req.repo_full_name.replace("/", "_")
     dest_path = os.path.join(WORKSPACES_ROOT, dir_name)
     auth_url = f"https://oauth2:{token}@github.com/{req.repo_full_name}.git"
 
     try:
         if os.path.exists(dest_path):
-            # Already exists, fetch and checkout
+            subprocess.run(["git", "-C", dest_path, "remote", "set-url", "origin", auth_url], capture_output=True)
             subprocess.run(["git", "-C", dest_path, "fetch", "--all"], capture_output=True, timeout=10)
             subprocess.run(["git", "-C", dest_path, "checkout", req.branch], capture_output=True, timeout=10)
             subprocess.run(["git", "-C", dest_path, "pull", "origin", req.branch], capture_output=True, timeout=10)
         else:
-            # Clone new
             res = subprocess.run(["git", "clone", "-b", req.branch, auth_url, dest_path], capture_output=True, text=True, timeout=30)
             if res.returncode != 0:
-                # Fallback to cloning default branch then creating new branch
                 subprocess.run(["git", "clone", auth_url, dest_path], capture_output=True, text=True, timeout=30)
                 subprocess.run(["git", "-C", dest_path, "checkout", "-B", req.branch], capture_output=True, timeout=10)
 
-        # Set user config inside repo
-        subprocess.run(["git", "-C", dest_path, "config", "user.name", "AI Code Studio"], capture_output=True)
-        subprocess.run(["git", "-C", dest_path, "config", "user.email", "agent@lmstudio.local"], capture_output=True)
+        # Set user configuration inside the specific repository
+        subprocess.run(["git", "-C", dest_path, "config", "user.name", req.account_username], capture_output=True)
+        subprocess.run(["git", "-C", dest_path, "config", "user.email", f"{req.account_username}@users.noreply.github.com"], capture_output=True)
         os.chmod(dest_path, 0o777)
 
         return {"status": "success", "dir_name": dir_name, "branch": req.branch, "path": dest_path}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
-@app.post("/api/github/switch_branch")
-def switch_branch(req: GithubBranchSwitchRequest):
+@app.post("/api/workspaces/switch_branch")
+def switch_workspace_branch(req: GithubBranchSwitchRequest):
     workspace_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
     if not os.path.exists(workspace_path):
-        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace directory not found"})
 
     try:
-        # Checkout existing branch or create new local branch tracking remote
         subprocess.run(["git", "-C", workspace_path, "checkout", req.branch], capture_output=True)
         res = subprocess.run(["git", "-C", workspace_path, "branch", "--show-current"], capture_output=True, text=True)
         current = res.stdout.strip()
@@ -651,10 +699,11 @@ def get_workspace_files(repo_dir_name: str):
 
     file_list = []
     for root, dirs, files in os.walk(workspace_path):
-        if ".git" in root: continue
+        if ".git" in root or "__pycache__" in root: continue
         for f in files:
             rel_path = os.path.relpath(os.path.join(root, f), workspace_path)
             file_list.append(rel_path)
+    file_list.sort()
     return file_list
 
 @app.post("/api/agent/execute")
@@ -663,7 +712,7 @@ def execute_agent_task(req: AgentTaskRequest):
     file_path = os.path.join(workspace_path, req.target_file)
 
     if not os.path.exists(file_path):
-        return JSONResponse(status_code=404, content={"status": "error", "message": f"File {req.target_file} not found in repository"})
+        return JSONResponse(status_code=404, content={"status": "error", "message": f"File {req.target_file} not found in workspace"})
 
     try:
         with open(file_path, "r", encoding="utf-8") as f:
@@ -671,14 +720,13 @@ def execute_agent_task(req: AgentTaskRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": f"Could not read target file: {str(e)}"})
 
-    # System instruction tailored for precise code rewrites
     system_prompt = (
-        "You are an expert software engineer AI. "
-        "Your task is to edit code precisely as instructed.\n"
+        "You are an expert AI software engineer. "
+        "Your task is to edit source code files precisely according to instruction.\n"
         "RULES:\n"
-        "1. Return ONLY the complete, updated source code for the requested file inside a single code block.\n"
-        "2. Do NOT truncate or abbreviate code with '// ... existing code ...'. Provide the full file.\n"
-        "3. Maintain all existing architecture, formatting, and functionality unless explicitly instructed to change it."
+        "1. Return ONLY the complete, updated source code for the requested file enclosed in a single markdown code block.\n"
+        "2. Do NOT truncate or abbreviate code with placeholders like '// ... existing code ...'. Always output the full file.\n"
+        "3. Maintain all existing imports, formatting, and functionality unless explicitly instructed to modify them."
     )
 
     user_prompt = (
@@ -701,40 +749,36 @@ def execute_agent_task(req: AgentTaskRequest):
             "max_tokens": 16384
         }
         
-        # Connect to local LM Studio endpoint
         resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=120)
         if resp.status_code != 200:
             return JSONResponse(status_code=500, content={"status": "error", "message": f"LM Studio API Error: {resp.text}"})
 
         ai_response = resp.json()["choices"][0]["message"]["content"]
         
-        # Extract code from markdown block
+        # Extract code cleanly from markdown fences
         code_match = re.search(r'```(?:[a-zA-Z0-9_\-]+)?\n([\s\S]*?)\n```', ai_response)
         updated_code = code_match.group(1) if code_match else ai_response.strip()
 
-        # Write updated file to disk
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(updated_code)
 
-        # Create automated Git commit
         subprocess.run(["git", "-C", workspace_path, "add", req.target_file], capture_output=True)
         commit_msg = f"AI Update: {req.instruction[:70]}"
         subprocess.run(["git", "-C", workspace_path, "commit", "-m", commit_msg], capture_output=True)
 
-        # Get git diff summary
         diff_res = subprocess.run(["git", "-C", workspace_path, "diff", "HEAD~1", "HEAD"], capture_output=True, text=True)
         diff_text = diff_res.stdout or "File modified and committed."
 
         return {
             "status": "success",
             "commit_message": commit_msg,
-            "diff": diff_text[:3000]
+            "diff": diff_text[:4000]
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": f"Execution error: {str(e)}"})
 
 @app.post("/api/workspace/validate")
-def validate_workspace(req: GitPushRequest):
+def validate_workspace(req: WorkspaceActionRequest):
     workspace_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
     if not os.path.exists(workspace_path):
         return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
@@ -742,7 +786,6 @@ def validate_workspace(req: GitPushRequest):
     logs = []
     has_error = False
 
-    # 1. Validate Python files
     py_files = glob.glob(f"{workspace_path}/**/*.py", recursive=True)
     for pf in py_files:
         res = subprocess.run(["python3", "-m", "py_compile", pf], capture_output=True, text=True)
@@ -751,9 +794,8 @@ def validate_workspace(req: GitPushRequest):
             has_error = True
             logs.append(f"❌ Python Syntax Error in {rel}:\n{res.stderr}")
         else:
-            logs.append(f"✓ Python Compilation Passed: {rel}")
+            logs.append(f"✓ Python Compilation OK: {rel}")
 
-    # 2. Validate Shell scripts
     sh_files = glob.glob(f"{workspace_path}/**/*.sh", recursive=True)
     for sf in sh_files:
         res = subprocess.run(["bash", "-n", sf], capture_output=True, text=True)
@@ -762,7 +804,7 @@ def validate_workspace(req: GitPushRequest):
             has_error = True
             logs.append(f"❌ Shell Script Syntax Error in {rel}:\n{res.stderr}")
         else:
-            logs.append(f"✓ Bash Syntax Passed: {rel}")
+            logs.append(f"✓ Bash Syntax OK: {rel}")
 
     return {
         "status": "error" if has_error else "success",
@@ -771,15 +813,13 @@ def validate_workspace(req: GitPushRequest):
     }
 
 @app.post("/api/workspace/push")
-def push_to_github(req: GitPushRequest):
+def push_to_github(req: WorkspaceActionRequest):
     workspace_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
-    token = get_github_token()
-    if not token:
-        return JSONResponse(status_code=401, content={"status": "error", "message": "GitHub token not found"})
+    if not os.path.exists(workspace_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
 
     try:
-        # Push to remote branch
-        res = subprocess.run(["git", "-C", workspace_path, "push", "origin", req.branch], capture_output=True, text=True, timeout=20)
+        res = subprocess.run(["git", "-C", workspace_path, "push", "origin", req.branch], capture_output=True, text=True, timeout=25)
         if res.returncode == 0:
             return {"status": "success", "message": f"Successfully pushed commits to branch '{req.branch}' on GitHub!"}
         else:
@@ -787,7 +827,7 @@ def push_to_github(req: GitPushRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
-# ----------------- Studio HTML Frontend -----------------
+# ----------------- Frontend HTML -----------------
 
 @app.get("/", response_class=HTMLResponse)
 def get_ui():
@@ -795,7 +835,7 @@ def get_ui():
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>LM Studio Remote Studio & Model Manager</title>
+  <title>LM Studio Remote Model & Multi-Account Code Studio</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8 font-sans">
@@ -832,7 +872,7 @@ def get_ui():
         📦 Model Manager
       </button>
       <button onclick="switchTab('workspaces')" id="tabBtnWorkspaces" class="px-5 py-2.5 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition flex items-center gap-2">
-        🤖 GitHub Workspaces & AI Agent
+        🤖 GitHub Multi-Account & AI Studio
       </button>
     </div>
 
@@ -909,60 +949,135 @@ def get_ui():
     <!-- ==================== TAB 2: GITHUB & AGENT STUDIO ==================== -->
     <div id="tabWorkspaces" class="hidden space-y-6">
       
-      <!-- GitHub Token Vault & Project Switcher -->
-      <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-700 pb-4">
-          <div>
-            <h2 class="text-lg font-semibold text-slate-100">GitHub Workspace Connection</h2>
-            <p class="text-xs text-slate-400">Authenticate with a GitHub Personal Access Token (PAT) with repository read/write scopes.</p>
+      <!-- Section 1: Instructions & PAT Setup Guide -->
+      <section class="bg-slate-800 p-5 rounded-lg border border-slate-700 space-y-3">
+        <div class="flex justify-between items-center cursor-pointer" onclick="togglePatGuide()">
+          <div class="flex items-center gap-2">
+            <span class="text-lg">📖</span>
+            <h2 class="text-sm font-bold text-sky-300 uppercase tracking-wide">How to Generate a GitHub Personal Access Token (PAT)</h2>
           </div>
-          <div id="githubUserBadge" class="text-xs bg-slate-950 px-3 py-1.5 rounded border border-slate-700 text-slate-400">
-            Checking GitHub Auth...
-          </div>
+          <button id="toggleGuideBtn" class="text-xs text-slate-400 hover:text-slate-200">Show Instructions ▼</button>
         </div>
-
-        <div id="githubAuthRow" class="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
-          <input id="githubTokenInput" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx (GitHub PAT)" 
-                 class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 text-sm focus:border-sky-500 focus:outline-none">
-          <button onclick="saveGithubToken()" class="bg-emerald-600 hover:bg-emerald-500 px-5 py-2 rounded text-sm font-medium transition">
-            Save GitHub Token
-          </button>
-        </div>
-
-        <!-- Repository & Branch Selector -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-          <div>
-            <label class="block text-xs text-slate-400 mb-1">Select Repository:</label>
-            <select id="repoSelect" onchange="fetchBranchesForSelectedRepo()" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200">
-              <option value="">-- Authenticate to load repos --</option>
-            </select>
-          </div>
-
-          <div>
-            <label class="block text-xs text-slate-400 mb-1">Branch (e.g. dev or main):</label>
-            <select id="branchSelect" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200">
-              <option value="main">main</option>
-              <option value="dev">dev</option>
-            </select>
-          </div>
-
-          <div class="flex items-end">
-            <button onclick="cloneOrOpenWorkspace()" class="w-full bg-sky-600 hover:bg-sky-500 py-2 rounded text-sm font-medium transition">
-              📂 Open / Clone Workspace
-            </button>
-          </div>
+        
+        <div id="patGuideContent" class="hidden text-xs text-slate-300 space-y-2 border-t border-slate-700 pt-3">
+          <ol class="list-decimal list-inside space-y-1.5 text-slate-300">
+            <li>Log into the GitHub account you wish to connect.</li>
+            <li>Click your <strong>Profile Photo (top-right)</strong> ➔ <strong>Settings</strong>.</li>
+            <li>In the left sidebar, scroll to the bottom and click <strong>Developer settings</strong>.</li>
+            <li>Click <strong>Personal access tokens</strong> ➔ <strong>Tokens (classic)</strong>.</li>
+            <li>Click <strong>Generate new token</strong> ➔ <strong>Generate new token (classic)</strong>.</li>
+            <li>Set a descriptive Note (e.g. <code class="bg-slate-900 px-1 py-0.5 rounded text-sky-300">LM Studio Code Studio</code>) and select Expiration.</li>
+            <li>Check the <strong><code class="text-emerald-400 font-semibold">repo</code></strong> scope (Full control of private repositories).</li>
+            <li>Click <strong>Generate token</strong> at the bottom and copy the token (<code class="text-amber-300">ghp_...</code>) below.</li>
+          </ol>
         </div>
       </section>
 
-      <!-- Active Workspace & Agent Command Panel -->
+      <!-- Section 2: Connected Accounts Management -->
+      <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-700 pb-3">
+          <div>
+            <h2 class="text-base font-semibold text-slate-100">Registered GitHub Accounts</h2>
+            <p class="text-xs text-slate-400">Add or manage multiple personal or organizational accounts.</p>
+          </div>
+          <button onclick="toggleAddAccountForm()" class="bg-sky-600 hover:bg-sky-500 text-xs px-3.5 py-1.5 rounded font-medium transition">
+            + Register New Account
+          </button>
+        </div>
+
+        <!-- Add Account Collapsible Form -->
+        <div id="addAccountForm" class="hidden bg-slate-950 p-4 rounded border border-slate-700 space-y-3">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Account Label / Alias:</label>
+              <input id="newAccountLabel" type="text" placeholder="e.g. Personal or Work / Client" 
+                     class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs focus:border-sky-500 focus:outline-none">
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">GitHub Personal Access Token (PAT):</label>
+              <input id="newAccountToken" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" 
+                     class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs focus:border-sky-500 focus:outline-none font-mono">
+            </div>
+          </div>
+          <div class="flex justify-end gap-2">
+            <button onclick="toggleAddAccountForm()" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded">Cancel</button>
+            <button onclick="submitAddAccount()" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-4 py-1.5 rounded font-medium">Verify & Save Account</button>
+          </div>
+        </div>
+
+        <!-- Registered Accounts Grid -->
+        <div id="accountsList" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <p class="text-xs text-slate-500">Loading accounts...</p>
+        </div>
+      </section>
+
+      <!-- Section 3: Project & Workspace Selector -->
+      <section class="bg-slate-800 p-6 rounded-lg shadow space-y-6">
+        <div class="border-b border-slate-700 pb-3">
+          <h2 class="text-base font-semibold text-slate-100">Project & Workspace Selector</h2>
+          <p class="text-xs text-slate-400">Select an account, then open an active local project or clone a new repository.</p>
+        </div>
+
+        <!-- Step 1: Select Active Account -->
+        <div>
+          <label class="block text-xs font-semibold text-sky-400 uppercase tracking-wide mb-1">1. Select GitHub Account:</label>
+          <select id="accountDropdown" onchange="onAccountSelected()" class="w-full md:w-1/2 bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200">
+            <option value="">-- Select an account --</option>
+          </select>
+        </div>
+
+        <!-- Step 2: Choose Project (Active or New) -->
+        <div id="projectSelectionBlock" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
+          
+          <!-- Option A: Active Local Edits -->
+          <div class="bg-slate-950 p-4 rounded-lg border border-slate-700 space-y-3">
+            <div class="flex justify-between items-center">
+              <h3 class="text-sm font-semibold text-slate-200">⚡ Active Local Projects</h3>
+              <span class="text-[11px] text-slate-400">Already on disk</span>
+            </div>
+            <div id="activeProjectsList" class="space-y-2 max-h-56 overflow-y-auto pr-1 text-xs">
+              <p class="text-slate-500">Scanning local workspaces...</p>
+            </div>
+          </div>
+
+          <!-- Option B: Clone New / Switch Repository -->
+          <div class="bg-slate-950 p-4 rounded-lg border border-slate-700 space-y-3">
+            <h3 class="text-sm font-semibold text-slate-200">📥 Clone from Account</h3>
+            
+            <div class="space-y-2 text-xs">
+              <div>
+                <label class="block text-slate-400 mb-1">Select Remote Repository:</label>
+                <select id="repoSelect" onchange="fetchBranchesForSelectedRepo()" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
+                  <option value="">Loading repositories...</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="block text-slate-400 mb-1">Branch:</label>
+                <select id="branchSelect" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
+                  <option value="main">main</option>
+                  <option value="dev">dev</option>
+                </select>
+              </div>
+
+              <button onclick="cloneOrOpenWorkspace()" class="w-full bg-sky-600 hover:bg-sky-500 py-2 rounded text-xs font-semibold transition mt-2">
+                📂 Open / Clone Project Workspace
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Section 4: Live AI Code Studio Panel -->
       <section id="agentStudioPanel" class="bg-slate-800 p-6 rounded-lg shadow space-y-6 hidden">
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-700 pb-4">
           <div>
             <h2 class="text-lg font-semibold text-emerald-400 flex items-center gap-2">
-              <span>🤖 Active Project:</span>
+              <span>🤖 Active Workspace:</span>
               <span id="activeProjectLabel" class="text-slate-100 font-mono">None</span>
             </h2>
-            <p class="text-xs text-slate-400">Branch: <strong id="activeBranchLabel" class="text-sky-300 font-mono">main</strong> • Sandboxed in /storage/lmstudio/workspaces</p>
+            <p class="text-xs text-slate-400">Account: <strong id="activeAccountLabel" class="text-amber-300 font-mono">--</strong> • Branch: <strong id="activeBranchLabel" class="text-sky-300 font-mono">main</strong></p>
           </div>
           
           <div class="flex items-center gap-2">
@@ -987,7 +1102,7 @@ def get_ui():
           <div>
             <label class="block text-xs text-slate-400 mb-1">Instruction for Local AI Agent:</label>
             <textarea id="agentInstructionInput" rows="4" 
-                      placeholder="e.g. Add a real-time system metrics chart in the dashboard footer and ensure errors are caught with try/except..."
+                      placeholder="e.g. Add an endpoint to fetch active branches and handle errors gracefully with try/except..."
                       class="w-full bg-slate-950 border border-slate-700 rounded p-3 text-sm focus:border-sky-500 focus:outline-none font-mono"></textarea>
           </div>
 
@@ -1013,6 +1128,7 @@ def get_ui():
     let localModelSet = new Set();
     let activeTasksMap = {};
     let loadedModelsList = [];
+    let currentAccountUser = "";
     let currentWorkspaceDir = "";
     let currentBranch = "main";
 
@@ -1027,8 +1143,26 @@ def get_ui():
         document.getElementById('tabWorkspaces').classList.remove('hidden');
         document.getElementById('tabBtnModels').className = 'px-5 py-2.5 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition flex items-center gap-2';
         document.getElementById('tabBtnWorkspaces').className = 'px-5 py-2.5 text-sm font-semibold border-b-2 border-sky-400 text-sky-400 transition flex items-center gap-2';
-        checkGithubStatus();
+        loadAccounts();
+        loadActiveWorkspaces();
       }
+    }
+
+    function togglePatGuide() {
+      const el = document.getElementById('patGuideContent');
+      const btn = document.getElementById('toggleGuideBtn');
+      if (el.classList.contains('hidden')) {
+        el.classList.remove('hidden');
+        btn.textContent = 'Hide Instructions ▲';
+      } else {
+        el.classList.add('hidden');
+        btn.textContent = 'Show Instructions ▼';
+      }
+    }
+
+    function toggleAddAccountForm() {
+      const el = document.getElementById('addAccountForm');
+      el.classList.toggle('hidden');
     }
 
     async function initHardwareInfo() {
@@ -1049,9 +1183,7 @@ def get_ui():
           document.getElementById('ramStat').innerHTML = `${data.system_ram.available_gb} GB Avail / ${data.system_ram.total_gb} GB Total`;
         }
 
-        if (data.storage) {
-          renderStorageMetrics(data.storage);
-        }
+        if (data.storage) renderStorageMetrics(data.storage);
 
         const agentBadge = document.getElementById('agentModelBadge');
         if (agentBadge) {
@@ -1388,71 +1520,163 @@ def get_ui():
       }).join('');
     }
 
-    // ---------------- GitHub Studio Logic ----------------
+    // ---------------- Multi-Account & Workspace Frontend Logic ----------------
 
-    async function checkGithubStatus() {
-      const badge = document.getElementById('githubUserBadge');
+    async function loadAccounts() {
+      const container = document.getElementById('accountsList');
+      const dropdown = document.getElementById('accountDropdown');
+      
       try {
-        const res = await fetch('/api/github/status');
-        const data = await res.json();
-        if (data.authenticated) {
-          badge.className = 'text-xs bg-emerald-950 px-3 py-1.5 rounded border border-emerald-800 text-emerald-300 font-medium';
-          badge.innerHTML = `✓ Connected as <strong>@${data.username}</strong>`;
-          await loadGithubRepos();
-        } else {
-          badge.className = 'text-xs bg-rose-950 px-3 py-1.5 rounded border border-rose-800 text-rose-300';
-          badge.textContent = '❌ Not Authenticated';
+        const res = await fetch('/api/github/accounts');
+        const accounts = await res.json();
+        
+        if (!accounts || accounts.length === 0) {
+          container.innerHTML = '<p class="text-xs text-slate-500 col-span-3">No GitHub accounts registered yet. Click "+ Register New Account" above.</p>';
+          dropdown.innerHTML = '<option value="">-- No accounts available --</option>';
+          document.getElementById('projectSelectionBlock').classList.add('hidden');
+          return;
+        }
+
+        container.innerHTML = accounts.map(a => `
+          <div class="bg-slate-950 p-3 rounded border border-slate-700 flex justify-between items-center text-xs">
+            <div class="flex items-center gap-2.5 overflow-hidden">
+              <img src="${a.avatar_url || 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png'}" class="w-7 h-7 rounded-full border border-slate-700">
+              <div class="truncate">
+                <div class="font-bold text-slate-200 truncate">${a.label}</div>
+                <div class="text-[11px] text-slate-400">@${a.username} • <span class="font-mono text-[10px] text-slate-500">${a.masked_token}</span></div>
+              </div>
+            </div>
+            <button onclick="removeAccount('${a.username}')" class="text-rose-400 hover:text-rose-300 px-2 py-1 bg-slate-900 rounded border border-slate-800 text-[11px] shrink-0" title="Remove Account">
+              ✕
+            </button>
+          </div>
+        `).join('');
+
+        dropdown.innerHTML = '<option value="">-- Choose Account --</option>' + accounts.map(a => `
+          <option value="${a.username}">${a.label} (@${a.username})</option>
+        `).join('');
+
+        if (currentAccountUser) {
+          dropdown.value = currentAccountUser;
         }
       } catch(e) {
-        badge.textContent = 'Auth Check Failed';
+        container.innerHTML = '<p class="text-xs text-rose-400">Error loading accounts.</p>';
       }
     }
 
-    async function saveGithubToken() {
-      const token = document.getElementById('githubTokenInput').value.trim();
+    async function submitAddAccount() {
+      const label = document.getElementById('newAccountLabel').value.trim();
+      const token = document.getElementById('newAccountToken').value.trim();
+
       if (!token) return alert('Please enter a valid GitHub token');
+
       try {
-        const res = await fetch('/api/github/auth', {
+        const res = await fetch('/api/github/accounts/add', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({token: token})
+          body: JSON.stringify({token: token, label: label})
         });
         const data = await res.json();
         if (res.ok) {
-          alert(`Successfully authenticated as @${data.username}`);
-          document.getElementById('githubTokenInput').value = '';
-          checkGithubStatus();
+          alert(`Account @${data.username} registered successfully!`);
+          document.getElementById('newAccountLabel').value = '';
+          document.getElementById('newAccountToken').value = '';
+          toggleAddAccountForm();
+          loadAccounts();
         } else {
-          alert('Auth failed: ' + data.message);
+          alert('Failed to add account: ' + data.message);
         }
       } catch(e) {
-        alert('Communication error: ' + e.message);
+        alert('Communication Error: ' + e.message);
       }
     }
 
-    async function loadGithubRepos() {
-      const select = document.getElementById('repoSelect');
-      select.innerHTML = '<option value="">Loading repositories...</option>';
+    async function removeAccount(username) {
+      if (!confirm(`Are you sure you want to remove account @${username}?`)) return;
       try {
-        const res = await fetch('/api/github/repos');
-        const repos = await res.json();
-        if (Array.isArray(repos)) {
-          select.innerHTML = repos.map(r => 
-            `<option value="${r.full_name}">${r.is_private ? '🔒 ' : ''}${r.full_name}</option>`
-          ).join('');
-          fetchBranchesForSelectedRepo();
+        const res = await fetch('/api/github/accounts/remove', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({username: username})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          loadAccounts();
+        } else {
+          alert('Error: ' + data.message);
         }
       } catch(e) {
-        select.innerHTML = '<option value="">Failed to load repositories</option>';
+        alert('Communication Error: ' + e.message);
+      }
+    }
+
+    async function onAccountSelected() {
+      const username = document.getElementById('accountDropdown').value;
+      currentAccountUser = username;
+      const block = document.getElementById('projectSelectionBlock');
+
+      if (!username) {
+        block.classList.add('hidden');
+        return;
+      }
+
+      block.classList.remove('hidden');
+      await loadActiveWorkspaces();
+      await loadRemoteReposForAccount(username);
+    }
+
+    async function loadActiveWorkspaces() {
+      const container = document.getElementById('activeProjectsList');
+      try {
+        const res = await fetch('/api/workspaces/active');
+        const workspaces = await res.json();
+        
+        if (!workspaces || workspaces.length === 0) {
+          container.innerHTML = '<p class="text-slate-500">No active workspaces on disk yet.</p>';
+          return;
+        }
+
+        container.innerHTML = workspaces.map(w => `
+          <div class="flex justify-between items-center bg-slate-900 p-2.5 rounded border border-slate-800">
+            <div class="truncate pr-2">
+              <span class="font-bold text-sky-300">${w.display_name}</span>
+              <span class="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono ml-1.5">${w.branch}</span>
+            </div>
+            <button onclick="openExistingWorkspace('${w.dir_name}', '${w.display_name}', '${w.branch}')" class="bg-emerald-700 hover:bg-emerald-600 px-2.5 py-1 rounded text-xs text-white font-medium shrink-0">
+              Open ➔
+            </button>
+          </div>
+        `).join('');
+      } catch(e) {
+        container.innerHTML = '<p class="text-slate-500">Error loading local workspaces.</p>';
+      }
+    }
+
+    async function loadRemoteReposForAccount(username) {
+      const select = document.getElementById('repoSelect');
+      select.innerHTML = '<option value="">Loading account repositories...</option>';
+      try {
+        const res = await fetch(`/api/github/repos?account_username=${encodeURIComponent(username)}`);
+        const repos = await res.json();
+        if (Array.isArray(repos) && repos.length > 0) {
+          select.innerHTML = repos.map(r => `
+            <option value="${r.full_name}">${r.is_private ? '🔒 ' : ''}${r.full_name}</option>
+          `).join('');
+          fetchBranchesForSelectedRepo();
+        } else {
+          select.innerHTML = '<option value="">No repositories found for account</option>';
+        }
+      } catch(e) {
+        select.innerHTML = '<option value="">Error fetching repos</option>';
       }
     }
 
     async function fetchBranchesForSelectedRepo() {
       const repoFullName = document.getElementById('repoSelect').value;
       const branchSelect = document.getElementById('branchSelect');
-      if (!repoFullName) return;
+      if (!repoFullName || !currentAccountUser) return;
       try {
-        const res = await fetch(`/api/github/branches?repo_full_name=${encodeURIComponent(repoFullName)}`);
+        const res = await fetch(`/api/github/branches?account_username=${encodeURIComponent(currentAccountUser)}&repo_full_name=${encodeURIComponent(repoFullName)}`);
         const branches = await res.json();
         branchSelect.innerHTML = branches.map(b => `<option value="${b}">${b}</option>`).join('');
       } catch(e) {}
@@ -1464,34 +1688,41 @@ def get_ui():
       const consoleOut = document.getElementById('agentConsoleOutput');
       if (!repoFullName) return alert('Select a repository first');
 
-      consoleOut.textContent = `[Git] Cloning / opening ${repoFullName} on branch '${branch}'...`;
+      consoleOut.textContent = `[Git] Preparing workspace for ${repoFullName} on branch '${branch}'...\\n`;
 
       try {
         const res = await fetch('/api/github/clone', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({repo_full_name: repoFullName, branch: branch})
+          body: JSON.stringify({account_username: currentAccountUser, repo_full_name: repoFullName, branch: branch})
         });
         const data = await res.json();
         if (res.ok) {
-          currentWorkspaceDir = data.dir_name;
-          currentBranch = data.branch;
-          document.getElementById('activeProjectLabel').textContent = repoFullName;
-          document.getElementById('activeBranchLabel').textContent = currentBranch;
-          document.getElementById('agentStudioPanel').classList.remove('hidden');
-          consoleOut.textContent += `\\n[Git] Workspace active at ${data.path}`;
-          await loadWorkspaceFiles();
+          openExistingWorkspace(data.dir_name, repoFullName, data.branch);
+          consoleOut.textContent += `[Git] Cloned / active at ${data.path}\\n`;
         } else {
-          alert('Workspace open failed: ' + data.message);
+          alert('Workspace error: ' + data.message);
         }
       } catch(e) {
-        alert('Communication error: ' + e.message);
+        alert('Communication Error: ' + e.message);
       }
+    }
+
+    async function openExistingWorkspace(dirName, displayName, branch) {
+      currentWorkspaceDir = dirName;
+      currentBranch = branch;
+
+      document.getElementById('activeProjectLabel').textContent = displayName;
+      document.getElementById('activeAccountLabel').textContent = `@${currentAccountUser || 'local'}`;
+      document.getElementById('activeBranchLabel').textContent = branch;
+      document.getElementById('agentStudioPanel').classList.remove('hidden');
+
+      await loadWorkspaceFiles();
     }
 
     async function loadWorkspaceFiles() {
       const select = document.getElementById('targetFileSelect');
-      select.innerHTML = '<option value="">Loading repository files...</option>';
+      select.innerHTML = '<option value="">Loading files...</option>';
       try {
         const res = await fetch(`/api/workspace/files?repo_dir_name=${encodeURIComponent(currentWorkspaceDir)}`);
         const files = await res.json();
@@ -1513,9 +1744,9 @@ def get_ui():
       if (!instruction) return alert('Please enter an instruction for the AI agent');
 
       btn.disabled = true;
-      btn.textContent = '⏳ AI Agent Generating & Testing...';
+      btn.textContent = '⏳ AI Agent Generating & Committing...';
       consoleOut.textContent = `[Agent] Loading ${targetFile} into local LLM context (32k tokens)...\\n`;
-      consoleOut.textContent += `[Agent] Prompt: "${instruction}"\\n`;
+      consoleOut.textContent += `[Agent] Task: "${instruction}"\\n`;
 
       try {
         const res = await fetch('/api/agent/execute', {
