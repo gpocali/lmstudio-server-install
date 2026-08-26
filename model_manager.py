@@ -208,58 +208,59 @@ def api_model_files(repo_id: str):
 @app.post("/api/load_model")
 def api_load_model(req: LoadRequest):
     lms = get_lms_bin()
-    fname = os.path.basename(req.model_path)
-    parent_dir = os.path.basename(os.path.dirname(req.model_path))
+    abs_path = os.path.abspath(req.model_path)
+    fname = os.path.basename(abs_path)
+    clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname).lower()
 
-    # 1. Non-interactive import to ensure it is indexed
-    try:
-        subprocess.run([lms, "import", "--yes", "--symbolic-link", req.model_path], env=LMS_ENV, capture_output=True, timeout=8)
-    except Exception:
-        pass
-
-    # 2. Unload running models
+    # 1. Unload running models
     try:
         subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, timeout=5)
     except Exception:
         pass
 
-    # 3. Dynamic Model Key Resolution via `lms ls`
-    candidates = []
+    # 2. Extract registered keys from `lms ls`
+    registered_keys = []
     try:
         ls_res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=5)
         if ls_res.returncode == 0:
-            f_clean = re.sub(r'[^a-zA-Z0-9]', '', fname.replace('.gguf', '')).lower()
-            p_clean = re.sub(r'[^a-zA-Z0-9]', '', parent_dir).lower()
-            
-            for line in ls_res.stdout.split("\n"):
-                l_str = line.strip()
-                if not l_str or l_str.startswith("---") or "LLM" in l_str or "EMBEDDING" in l_str or "SIZE" in l_str:
+            in_llm_section = False
+            for line in ls_res.stdout.splitlines():
+                line_str = line.strip()
+                if "LLM" in line_str:
+                    in_llm_section = True
                     continue
-                parts = l_str.split()
-                if parts:
-                    key = parts[0]
-                    k_clean = re.sub(r'[^a-zA-Z0-9]', '', key).lower()
-                    if k_clean in f_clean or f_clean in k_clean or k_clean in p_clean:
-                        candidates.append(key)
+                if "EMBEDDING" in line_str or line_str.startswith("---"):
+                    in_llm_section = False
+                    continue
+                if in_llm_section and line_str:
+                    parts = line_str.split()
+                    if parts:
+                        registered_keys.append(parts[0])
     except Exception:
         pass
 
-    # Secondary candidates
-    clean_base = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname)
-    if parent_dir and "_" in parent_dir:
-        candidates.append(parent_dir.replace("_", "/"))
-    candidates.extend([parent_dir, clean_base, fname, req.model_path])
-    
-    # Deduplicate candidates while preserving order
+    # 3. Match candidate keys against filename
+    matched_target = None
+    f_strip = re.sub(r'[^a-z0-9]', '', clean_fname)
+    for key in registered_keys:
+        k_strip = re.sub(r'[^a-z0-9]', '', key.lower())
+        if k_strip in f_strip or f_strip in k_strip:
+            matched_target = key
+            break
+
+    # If no exact match found, fall back to registered keys or sanitized base name
+    targets_to_try = []
+    if matched_target:
+        targets_to_try.append(matched_target)
+    targets_to_try.extend(registered_keys)
+    targets_to_try.extend([clean_fname, fname])
+
+    # Deduplicate
     seen = set()
-    dedup_candidates = []
-    for c in candidates:
-        if c and c not in seen:
-            seen.add(c)
-            dedup_candidates.append(c)
+    dedup_targets = [t for t in targets_to_try if t and not (t in seen or seen.add(t))]
 
     last_error = ""
-    for target in dedup_candidates:
+    for target in dedup_targets:
         try:
             cmd = [
                 lms, "load", target,
@@ -268,12 +269,12 @@ def api_load_model(req: LoadRequest):
                 f"--ttl={req.ttl}",
                 "--yes"
             ]
-            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=20)
+            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=30)
             if res.returncode == 0:
                 return {
                     "status": "success",
                     "loaded_target": target,
-                    "output": res.stdout or "Model loaded successfully into VRAM."
+                    "output": res.stdout or f"Loaded {target} into GPU VRAM."
                 }
             else:
                 last_error = (res.stderr or res.stdout or "").strip()
@@ -284,8 +285,8 @@ def api_load_model(req: LoadRequest):
         status_code=400,
         content={
             "status": "error",
-            "message": last_error or f"Could not find or load model '{fname}' in LM Studio library.",
-            "attempted_candidates": dedup_candidates
+            "message": last_error or f"Could not load model for '{fname}'.",
+            "attempted_candidates": dedup_targets
         }
     )
 
