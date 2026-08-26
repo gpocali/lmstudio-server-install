@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import subprocess
 import threading
 import requests
@@ -18,48 +19,76 @@ class DownloadRequest(BaseModel):
     repo_id: str
     filename: str
 
-def get_system_vram_gb():
-    """Detect NVIDIA GPU VRAM using nvidia-smi, fallback to 0 if not available."""
+def get_system_hardware_info():
+    """Detect both System RAM and NVIDIA GPU VRAM independently."""
+    # 1. System RAM Detection
+    sys_ram_total_gb = 0.0
+    sys_ram_avail_gb = 0.0
     try:
-        cmd = ["nvidia-smi", "--query-gpu=memory.total,memory.free", "--format=csv,nounits,noheader"]
-        output = subprocess.check_output(cmd, encoding='utf-8').strip()
-        lines = output.split('\n')
-        total_mb = 0
-        free_mb = 0
-        for line in lines:
-            parts = line.split(',')
-            if len(parts) >= 2:
-                total_mb += float(parts[0].strip())
-                free_mb += float(parts[1].strip())
-        return {
-            "has_gpu": True,
-            "total_vram_gb": round(total_mb / 1024, 2),
-            "free_vram_gb": round(free_mb / 1024, 2)
-        }
+        with open('/proc/meminfo', 'r') as f:
+            meminfo = f.read()
+        total_match = re.search(r'MemTotal:\s+(\d+)', meminfo)
+        avail_match = re.search(r'MemAvailable:\s+(\d+)', meminfo)
+        if total_match:
+            sys_ram_total_gb = round(int(total_match.group(1)) / (1024**2), 2)
+        if avail_match:
+            sys_ram_avail_gb = round(int(avail_match.group(1)) / (1024**2), 2)
     except Exception:
-        # Fallback to system RAM if no NVIDIA GPU is detected
+        pass
+
+    # 2. NVIDIA GPU VRAM Detection
+    gpu_found = False
+    gpu_name = "N/A"
+    gpu_vram_total_gb = 0.0
+    gpu_vram_free_gb = 0.0
+
+    nvidia_smi_path = shutil.which("nvidia-smi") or "/usr/bin/nvidia-smi"
+    if os.path.exists(nvidia_smi_path):
         try:
-            with open('/proc/meminfo', 'r') as f:
-                meminfo = f.read()
-            total_match = re.search(r'MemTotal:\s+(\d+)', meminfo)
-            free_match = re.search(r'MemAvailable:\s+(\d+)', meminfo)
-            total_gb = round(int(total_match.group(1)) / (1024**2), 2) if total_match else 0
-            free_gb = round(int(free_match.group(1)) / (1024**2), 2) if free_match else 0
-            return {
-                "has_gpu": False,
-                "total_vram_gb": total_gb,
-                "free_vram_gb": free_gb
-            }
+            cmd = [
+                nvidia_smi_path,
+                "--query-gpu=name,memory.total,memory.free",
+                "--format=csv,nounits,noheader"
+            ]
+            output = subprocess.check_output(cmd, encoding='utf-8').strip()
+            if output:
+                lines = output.split('\n')
+                total_mb = 0.0
+                free_mb = 0.0
+                names = []
+                for line in lines:
+                    parts = [p.strip() for p in line.split(',')]
+                    if len(parts) >= 3:
+                        names.append(parts[0])
+                        total_mb += float(parts[1])
+                        free_mb += float(parts[2])
+                
+                if total_mb > 0:
+                    gpu_found = True
+                    gpu_name = ", ".join(list(dict.fromkeys(names)))
+                    gpu_vram_total_gb = round(total_mb / 1024, 2)
+                    gpu_vram_free_gb = round(free_mb / 1024, 2)
         except Exception:
-            return {"has_gpu": False, "total_vram_gb": 0, "free_vram_gb": 0}
+            gpu_found = False
+
+    return {
+        "system_ram": {
+            "total_gb": sys_ram_total_gb,
+            "available_gb": sys_ram_avail_gb
+        },
+        "gpu": {
+            "has_gpu": gpu_found,
+            "gpu_name": gpu_name,
+            "total_vram_gb": gpu_vram_total_gb,
+            "free_vram_gb": gpu_vram_free_gb
+        }
+    }
 
 def parse_model_metadata(filename: str, repo_id: str):
     """Parse Weight, Quantization, and Format details from repo and filename."""
-    # Extract Weight (e.g. 7B, 8B, 70B, 1.5B, 0.5B, 128x8B)
     weight_match = re.search(r'(\d+(\.\d+)?(?:x\d+)?[bB])', f"{repo_id} {filename}")
     weight = weight_match.group(1).upper() if weight_match else "Unknown"
 
-    # Extract Quantization Variant (e.g., Q4_K_M, Q8_0, IQ3_XXS, FP16)
     quant_match = re.search(r'(IQ\d_[A-Z_]+|Q\d_[A-Z0-9_]+|FP16|BF16|F16|F32)', filename, re.IGNORECASE)
     variant = quant_match.group(1).upper() if quant_match else "Standard"
 
@@ -85,7 +114,7 @@ def run_download_job(repo_id: str, filename: str):
 
 @app.get("/api/system_info")
 def get_sys_info():
-    return get_system_vram_gb()
+    return get_system_hardware_info()
 
 @app.get("/api/search")
 def search_hf(q: str = "llama"):
@@ -112,46 +141,48 @@ def get_model_files(repo_id: str):
     url = f"https://huggingface.co/api/models/{repo_id}"
     res = requests.get(url).json()
     siblings = res.get("siblings", [])
-    vram_info = get_system_vram_gb()
-    available_vram = vram_info["total_vram_gb"]
+    hw = get_system_hardware_info()
+    vram_total = hw["gpu"]["total_vram_gb"]
+    ram_total = hw["system_ram"]["total_gb"]
 
     parsed_files = []
     for s in siblings:
         fname = s.get("rfilename", "")
         if fname.endswith(".gguf"):
-            # Estimate size if available in payload
             weight, variant = parse_model_metadata(fname, repo_id)
-            
-            # Fetch file metadata size via head request if necessary or sibling size
             size_bytes = s.get("size", 0)
             size_gb = round(size_bytes / (1024**3), 2) if size_bytes else None
 
-            # Determine VRAM Compatibility
-            # Approximate VRAM required for KV cache + runtime overhead = Size * 1.2
-            est_vram_req = round(size_gb * 1.2, 2) if size_gb else None
+            # Runtime memory estimation (Size * 1.2 overhead for KV cache & context)
+            est_mem_req = round(size_gb * 1.2, 2) if size_gb else None
             
             fit_status = "unknown"
-            if est_vram_req and available_vram > 0:
-                if est_vram_req <= available_vram:
-                    fit_status = "fits"
-                elif est_vram_req <= available_vram * 1.25:
-                    fit_status = "tight"
+            if est_mem_req:
+                if vram_total > 0:
+                    if est_mem_req <= vram_total:
+                        fit_status = "fits_gpu"
+                    elif est_mem_req <= (vram_total + ram_total * 0.75):
+                        fit_status = "split_gpu_ram"
+                    else:
+                        fit_status = "exceeds"
                 else:
-                    fit_status = "exceeds"
+                    if est_mem_req <= ram_total * 0.85:
+                        fit_status = "fits_ram"
+                    else:
+                        fit_status = "exceeds"
 
             parsed_files.append({
                 "filename": fname,
                 "weight": weight,
                 "variant": variant,
                 "size_gb": f"{size_gb} GB" if size_gb else "Dynamic",
-                "est_vram": f"~{est_vram_req} GB" if est_vram_req else "N/A",
+                "est_vram": f"~{est_mem_req} GB" if est_mem_req else "N/A",
                 "fit_status": fit_status
             })
 
-    # Sort files by variant/size
     return {
         "repo_id": repo_id,
-        "vram_info": vram_info,
+        "hardware": hw,
         "files": parsed_files
     }
 
@@ -193,31 +224,42 @@ def get_ui():
       <title>LM Studio Remote Model Manager</title>
       <script src="https://cdn.tailwindcss.com"></script>
     </head>
-    <body class="bg-slate-900 text-slate-100 min-h-screen p-8">
+    <body class="bg-slate-900 text-slate-100 min-h-screen p-6 md:p-8">
       <div class="max-w-7xl mx-auto space-y-8">
         
-        <!-- Header & Hardware Stats -->
-        <header class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-700 pb-4 gap-4">
+        <!-- Header & Hardware Metrics -->
+        <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-slate-700 pb-5 gap-4">
           <div>
             <h1 class="text-2xl font-bold text-sky-400">LM Studio Model Manager</h1>
-            <p class="text-xs text-slate-400">Target Path: /storage/lmstudio/models</p>
+            <p class="text-xs text-slate-400">Storage Target: /storage/lmstudio/models</p>
           </div>
-          <div id="vramBanner" class="flex items-center gap-3 bg-slate-800 px-4 py-2 rounded-lg border border-slate-700 text-sm">
-            <span class="text-slate-400">Hardware VRAM:</span>
-            <span id="vramStat" class="font-semibold text-emerald-400">Detecting...</span>
+          
+          <div class="flex flex-wrap items-center gap-3 text-xs">
+            <!-- GPU VRAM Badge -->
+            <div id="gpuCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
+              <span class="text-slate-400">GPU VRAM:</span>
+              <span id="vramStat" class="font-semibold text-emerald-400">Checking...</span>
+            </div>
+            
+            <!-- System RAM Badge -->
+            <div id="ramCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
+              <span class="text-slate-400">System RAM:</span>
+              <span id="ramStat" class="font-semibold text-sky-300">Checking...</span>
+            </div>
+            
+            <button onclick="initHardwareInfo(); fetchLocalModels();" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded text-xs text-slate-200 transition">
+              Refresh Stats
+            </button>
           </div>
         </header>
 
         <!-- Search Bar -->
         <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
-          <div class="flex justify-between items-center">
-            <h2 class="text-lg font-semibold">Search Hugging Face Repositories (GGUF)</h2>
-            <button onclick="fetchLocalModels()" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded">Refresh Disk</button>
-          </div>
+          <h2 class="text-lg font-semibold">Search Hugging Face Repositories (GGUF)</h2>
           <div class="flex gap-3">
-            <input id="searchInput" type="text" placeholder="Search by model or maker (e.g. Llama-3.1, bartowski, Qwen2.5, DeepSeek)..." 
+            <input id="searchInput" type="text" placeholder="Search by model or creator (e.g. Llama-3.1, bartowski, Qwen2.5, DeepSeek)..." 
                    class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500">
-            <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium">Search</button>
+            <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm">Search</button>
           </div>
           <div id="searchResults" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4"></div>
         </section>
@@ -237,17 +279,28 @@ def get_ui():
       </div>
 
       <script>
-        let serverVramGB = 0;
-
-        async function initSystemInfo() {
+        async function initHardwareInfo() {
           try {
             const res = await fetch('/api/system_info');
             const data = await res.json();
-            serverVramGB = data.total_vram_gb;
-            const label = data.has_gpu ? 'Total GPU VRAM' : 'System RAM (CPU mode)';
-            document.getElementById('vramStat').innerHTML = `${data.total_vram_gb} GB <span class="text-xs text-slate-400">(${label})</span>`;
+            
+            // Render GPU Stats
+            if (data.gpu && data.gpu.has_gpu) {
+              document.getElementById('vramStat').innerHTML = 
+                `${data.gpu.free_vram_gb} GB Free / ${data.gpu.total_vram_gb} GB <span class="text-slate-400 font-normal">(${data.gpu.gpu_name})</span>`;
+            } else {
+              document.getElementById('vramStat').innerHTML = 
+                `<span class="text-amber-400 font-normal">No NVIDIA GPU Detected</span>`;
+            }
+
+            // Render System RAM Stats
+            if (data.system_ram) {
+              document.getElementById('ramStat').innerHTML = 
+                `${data.system_ram.available_gb} GB Avail / ${data.system_ram.total_gb} GB Total`;
+            }
           } catch(e) {
-            document.getElementById('vramStat').textContent = 'Detection Unavailable';
+            document.getElementById('vramStat').textContent = 'Error fetching stats';
+            document.getElementById('ramStat').textContent = 'Error fetching stats';
           }
         }
 
@@ -277,7 +330,7 @@ def get_ui():
                 </div>
               </div>
               <button onclick="fetchFiles('${m.id}', this)" class="w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">
-                Inspect Quantizations & VRAM Fit
+                Inspect Quantizations & Memory Fit
               </button>
               <div class="file-container mt-3 hidden space-y-2"></div>
             `;
@@ -289,7 +342,7 @@ def get_ui():
           const parent = btn.parentElement;
           const fileContainer = parent.querySelector('.file-container');
           fileContainer.classList.remove('hidden');
-          fileContainer.innerHTML = '<span class="text-xs text-slate-500">Retrieving repository files & calculating VRAM footprint...</span>';
+          fileContainer.innerHTML = '<span class="text-xs text-slate-500">Calculating memory footprint...</span>';
           
           const res = await fetch(`/api/model_files?repo_id=${encodeURIComponent(repoId)}`);
           const data = await res.json();
@@ -305,12 +358,14 @@ def get_ui():
 
           data.files.forEach(f => {
             let fitBadge = '';
-            if (f.fit_status === 'fits') {
-              fitBadge = '<span class="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded">Fits VRAM</span>';
-            } else if (f.fit_status === 'tight') {
-              fitBadge = '<span class="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-1.5 py-0.5 rounded">Tight / Offload</span>';
+            if (f.fit_status === 'fits_gpu') {
+              fitBadge = '<span class="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded font-medium">Fits GPU VRAM</span>';
+            } else if (f.fit_status === 'split_gpu_ram') {
+              fitBadge = '<span class="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-1.5 py-0.5 rounded font-medium">Split GPU + RAM</span>';
+            } else if (f.fit_status === 'fits_ram') {
+              fitBadge = '<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded font-medium">Fits System RAM</span>';
             } else if (f.fit_status === 'exceeds') {
-              fitBadge = '<span class="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded">Exceeds VRAM</span>';
+              fitBadge = '<span class="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-medium">Exceeds Memory</span>';
             }
 
             const row = document.createElement('div');
@@ -318,13 +373,13 @@ def get_ui():
             row.innerHTML = `
               <div class="space-y-0.5 overflow-hidden">
                 <div class="font-medium text-sky-200 truncate" title="${f.filename}">${f.filename}</div>
-                <div class="flex items-center gap-2 text-slate-400 text-[11px]">
+                <div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">
                   <span>Weight: <strong class="text-slate-200">${f.weight}</strong></span>
                   <span>•</span>
                   <span>Variant: <strong class="text-slate-200">${f.variant}</strong></span>
                   <span>•</span>
                   <span>Size: <strong class="text-slate-200">${f.size_gb}</strong></span>
-                  <span>(${f.est_vram} VRAM)</span>
+                  <span>(${f.est_vram} Req)</span>
                   ${fitBadge}
                 </div>
               </div>
@@ -381,7 +436,7 @@ def get_ui():
           `).join('');
         }
 
-        initSystemInfo();
+        initHardwareInfo();
         setInterval(updateTasks, 3000);
         fetchLocalModels();
       </script>
