@@ -55,7 +55,10 @@ class DeleteRequest(BaseModel):
 
 class LoadRequest(BaseModel):
     model_path: str
+    identifier: str = ""
     gpu_offload: str = "max"
+    context_length: int = 32768  # Set default context to 32k
+    ttl: int = 600
 
 def get_loaded_models():
     """Queries `lms ps` to determine which models are currently in VRAM/RAM."""
@@ -367,12 +370,32 @@ def get_model_files(repo_id: str):
 
 @app.post("/api/load_model")
 def load_model(req: LoadRequest):
-    """Unloads active models and loads the target model into GPU VRAM."""
     try:
-        subprocess.run(["sudo", "-u", "lmstudio", "HOME=/storage/lmstudio", "/usr/local/bin/lms", "unload", "--all"], capture_output=True)
-        cmd = ["sudo", "-u", "lmstudio", "HOME=/storage/lmstudio", "/usr/local/bin/lms", "load", req.model_path, f"--gpu={req.gpu_offload}"]
+        subprocess.run([
+            "sudo", "-u", "lmstudio", 
+            "HOME=/storage/lmstudio", 
+            "/usr/local/bin/lms", "unload", "--all"
+        ], capture_output=True)
+
+        ident = req.identifier or os.path.basename(req.model_path).replace(".gguf", "")
+
+        cmd = [
+            "sudo", "-u", "lmstudio", 
+            "HOME=/storage/lmstudio", 
+            "/usr/local/bin/lms", "load", 
+            req.model_path, 
+            f"--gpu={req.gpu_offload}",
+            f"--context-length={req.context_length}",
+            f"--ttl={req.ttl}",
+            f"--identifier={ident}",
+            "--yes"
+        ]
         res = subprocess.run(cmd, capture_output=True, text=True)
-        return {"status": "success" if res.returncode == 0 else "error", "output": res.stdout or res.stderr}
+        return {
+            "status": "success" if res.returncode == 0 else "error",
+            "output": res.stdout or res.stderr,
+            "identifier": ident
+        }
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
