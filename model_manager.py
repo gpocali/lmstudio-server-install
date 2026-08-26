@@ -59,7 +59,6 @@ def calculate_trust_score(downloads: int, likes: int, is_verified: bool) -> int:
     if is_verified:
         score += 35
     
-    # Downloads weight (up to 40 pts)
     if downloads >= 100000:
         score += 40
     elif downloads >= 10000:
@@ -69,7 +68,6 @@ def calculate_trust_score(downloads: int, likes: int, is_verified: bool) -> int:
     elif downloads >= 100:
         score += 10
 
-    # Likes weight (up to 25 pts)
     if likes >= 500:
         score += 25
     elif likes >= 100:
@@ -560,10 +558,10 @@ def get_ui():
             <div class="flex flex-wrap gap-1.5 text-xs items-center">
               <span class="text-slate-400 mr-1">Filter by Creator:</span>
               <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">🔥 All</button>
-              <button onclick="quickSearch('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ bartowski</button>
-              <button onclick="quickSearch('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ unsloth</button>
-              <button onclick="quickSearch('TheBloke')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ TheBloke</button>
-              <button onclick="quickSearch('Qwen')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen</button>
+              <button onclick="searchAuthor('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ bartowski</button>
+              <button onclick="searchAuthor('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ unsloth</button>
+              <button onclick="searchAuthor('TheBloke')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ TheBloke</button>
+              <button onclick="searchAuthor('Qwen')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen</button>
               <button onclick="quickSearch('Llama-3')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Llama 3</button>
               <button onclick="quickSearch('Mistral')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Mistral</button>
             </div>
@@ -575,13 +573,11 @@ def get_ui():
                    class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500 text-sm">
             
             <div class="flex flex-wrap items-center gap-3">
-              <!-- Reputable Checkbox -->
               <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none bg-slate-950 px-3 py-2 rounded border border-slate-700 hover:border-slate-600">
                 <input type="checkbox" id="verifiedOnly" onchange="searchModels()" class="rounded bg-slate-900 border-slate-700 text-sky-600 focus:ring-0">
                 <span>🛡️ Verified Creators Only</span>
               </label>
 
-              <!-- Sort Selector -->
               <div class="flex items-center gap-2">
                 <label for="sortSelect" class="text-xs text-slate-400 shrink-0">Sort By:</label>
                 <select id="sortSelect" onchange="searchModels()" class="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500">
@@ -664,6 +660,13 @@ def get_ui():
           searchModels();
         }
 
+        function searchAuthor(author) {
+          document.getElementById('searchInput').value = author;
+          // Uncheck verified-only if looking up a custom creator to avoid filtering issues
+          document.getElementById('verifiedOnly').checked = false;
+          searchModels();
+        }
+
         async function searchModels() {
           const q = document.getElementById('searchInput').value.trim();
           const sortBy = document.getElementById('sortSelect').value;
@@ -700,8 +703,8 @@ def get_ui():
               card.className = 'bg-slate-950 p-4 rounded border border-slate-700 space-y-3';
               
               const verifiedBadge = m.is_verified 
-                ? '<span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">🛡️ Verified Creator</span>'
-                : `<span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800">${m.maker}</span>`;
+                ? `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer" title="Click to view all models by ${m.maker}">🛡️ ${m.maker}</button>`
+                : `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition cursor-pointer" title="Click to view all models by ${m.maker}">${m.maker}</button>`;
 
               const trustBadge = `<span class="text-[10px] bg-slate-800 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono" title="Community Trust Score">⭐ ${m.trust_score}/100</span>`;
 
@@ -713,7 +716,9 @@ def get_ui():
                       ${trustBadge}
                     </div>
                     <h3 class="font-bold text-slate-100 text-base mt-1.5 truncate" title="${m.model_name}">${m.model_name}</h3>
-                    <div class="text-[11px] text-slate-400 mt-0.5">Author: <strong class="text-slate-300">${m.maker}</strong> • Updated: ${m.lastModified || 'Recent'}</div>
+                    <div class="text-[11px] text-slate-400 mt-0.5">
+                      Author: <button onclick="searchAuthor('${m.maker}')" class="font-semibold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer">${m.maker}</button> • Updated: ${m.lastModified || 'Recent'}
+                    </div>
                   </div>
                   <div class="text-right text-xs text-slate-400 shrink-0">
                     <div>⬇ ${(m.downloads || 0).toLocaleString()}</div>
