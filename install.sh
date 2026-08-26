@@ -56,17 +56,24 @@ echo "[+] Installing system packages and Python runtime..."
 apt-get update -y
 apt-get install -y curl ca-certificates jq gnupg git python3 python3-pip python3-venv python3-uvicorn python3-fastapi python3-requests
 
-# Configure Aider inside a dedicated venv with modern wheel pre-seeding
-echo "[+] Configuring Aider AI Agent in dedicated virtual environment..."
-VENV_AIDER="${APP_DIR}/venv_aider"
-rm -rf "$VENV_AIDER"
-python3 -m venv "$VENV_AIDER"
-"${VENV_AIDER}/bin/pip" install --upgrade pip setuptools wheel
-"${VENV_AIDER}/bin/pip" install --only-binary :all: numpy aiohttp || true
-"${VENV_AIDER}/bin/pip" install --no-build-isolation aider-chat || "${VENV_AIDER}/bin/pip" install aider-chat || true
-ln -sf "${VENV_AIDER}/bin/aider" /usr/local/bin/aider
+# 4. Install / Verify Docker Engine
+if ! command -v docker >/dev/null 2>&1; then
+  echo "[+] Installing Docker Engine..."
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  echo \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+    tee /etc/apt/sources.list.d/docker.list > /dev/null
+  apt-get update -y
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+fi
 
-# 4. Install / Update LM Studio CLI & llmster Daemon
+echo "[+] Pre-fetching official Aider AI Agent container..."
+docker pull paulgauthier/aider:latest >/dev/null 2>&1 || true
+
+# 5. Install / Update LM Studio CLI & llmster Daemon
 echo ""
 echo "--- [ LM Studio Engine Check ] ---"
 LMS_BIN=""
@@ -104,7 +111,7 @@ fi
 chmod +x "$LMS_BIN"
 ln -sf "$LMS_BIN" /usr/local/bin/lms
 
-# 5. Model Library Linking & Indexing
+# 6. Model Library Linking & Indexing
 echo ""
 echo "--- [ Model Library Linking & Indexing ] ---"
 for model_dir in "$MODELS_DIR"/*; do
@@ -122,14 +129,14 @@ find "$MODELS_DIR" -type f -name "*.gguf" | while read -r gguf_path; do
 done
 echo "[✓] Model indexing complete."
 
-# 6. Fetch Model Manager UI
+# 7. Fetch Model Manager UI
 echo ""
 echo "--- [ Updating Model Manager Script ] ---"
 curl -fsSL "${REPO_RAW_URL}/model_manager.py" -o "${APP_DIR}/model_manager.py"
 chmod 755 "${APP_DIR}/model_manager.py"
 chown "${SERVICE_USER}:${SERVICE_GROUP}" "${APP_DIR}/model_manager.py"
 
-# 7. Configure AI Agent Workspace & Guardrails
+# 8. Configure AI Agent Workspace & Guardrails
 echo ""
 echo "--- [ Configuring AI Agent Workspace ] ---"
 mkdir -p "$WORKSPACE_DIR"
@@ -143,21 +150,8 @@ if [ ! -d "${WORKSPACE_DIR}/.git" ]; then
   )
 fi
 
-# Mirror codebase into workspace
 cp -f "${APP_DIR}/model_manager.py" "${WORKSPACE_DIR}/" 2>/dev/null || true
 curl -fsSL "${REPO_RAW_URL}/install.sh" -o "${WORKSPACE_DIR}/install.sh" 2>/dev/null || true
-
-# Aider Configuration for local LM Studio API
-cat > "${WORKSPACE_DIR}/.aider.conf.yml" <<EOF
-openai-api-base: http://127.0.0.1:${LM_PORT}/v1
-openai-api-key: lm-studio
-model: openai/gemma-4-26b-a4b-it-ud
-edit-format: diff
-auto-commits: true
-attribute-author: false
-attribute-committer: false
-show-diffs: true
-EOF
 
 # Pre-Push Syntax Validator Script
 cat > "${WORKSPACE_DIR}/validate-and-push.sh" << 'EOF'
@@ -178,20 +172,34 @@ git push origin "$TARGET_BRANCH"
 EOF
 chmod +x "${WORKSPACE_DIR}/validate-and-push.sh"
 
-# Global CLI launcher for the workspace
-cat > /usr/local/bin/lms-agent << EOF
+# Global CLI launcher for the workspace using Docker runtime
+cat > /usr/local/bin/lms-agent << 'EOF'
 #!/usr/bin/env bash
-cd "${WORKSPACE_DIR}"
+WORKSPACE="/storage/lmstudio/workspace"
+mkdir -p "$WORKSPACE"
+
 echo "====================================================="
-echo "   LM Studio AI Agent Workspace: ${WORKSPACE_DIR}    "
-echo "   Connecting to: http://127.0.0.1:${LM_PORT}/v1     "
+echo "   LM Studio AI Agent Workspace: ${WORKSPACE}        "
+echo "   Connecting to: http://127.0.0.1:1234/v1          "
 echo "====================================================="
-aider model_manager.py install.sh "\$@"
+
+docker run -it --rm \
+  --net=host \
+  -v "${WORKSPACE}:${WORKSPACE}" \
+  -v "${WORKSPACE}:/app" \
+  -w /app \
+  -e OPENAI_API_BASE="http://127.0.0.1:1234/v1" \
+  -e OPENAI_API_KEY="lm-studio" \
+  paulgauthier/aider:latest \
+  --model openai/gemma-4-26b-a4b-it-ud \
+  --edit-format diff \
+  --auto-commits \
+  model_manager.py install.sh "$@"
 EOF
 chmod +x /usr/local/bin/lms-agent
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$WORKSPACE_DIR"
 
-# 8. Write Systemd Services
+# 9. Write Systemd Services
 echo ""
 echo "--- [ Systemd Service Configuration ] ---"
 
@@ -243,7 +251,7 @@ systemctl daemon-reload
 systemctl enable --now lmstudio.service modelmanager.service
 systemctl restart lmstudio.service modelmanager.service
 
-# 9. Open WebUI Container Management
+# 10. Open WebUI Container Management
 echo ""
 echo "--- [ Open WebUI Container Management ] ---"
 INSTALL_WEBUI="y"
@@ -256,18 +264,6 @@ if [ "$IS_UPDATE" = true ]; then
 fi
 
 if [[ "$INSTALL_WEBUI" =~ ^[Yy]$ ]]; then
-  if ! command -v docker >/dev/null 2>&1; then
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-    chmod a+r /etc/apt/keyrings/docker.asc
-    echo \
-      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-      tee /etc/apt/sources.list.d/docker.list > /dev/null
-    apt-get update -y
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-  fi
-
   WEBUI_DATA_DIR="${APP_DIR}/webui_data"
   mkdir -p "$WEBUI_DATA_DIR"
   chown -R 1000:1000 "$WEBUI_DATA_DIR"
@@ -296,7 +292,7 @@ else
   ENABLE_WEBUI_CONF="false"
 fi
 
-# 10. Save Configuration
+# 11. Save Configuration
 cat > "$CONFIG_FILE" <<EOF
 INSTALLED_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 ENABLE_OPEN_WEBUI="${ENABLE_WEBUI_CONF}"
