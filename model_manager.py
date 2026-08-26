@@ -28,7 +28,7 @@ def get_system_hardware_info():
     2. nvidia-smi CLI.
     3. sysfs / PCI bus inspection specifically filtering for dedicated GPUs.
     """
-    # --- 1. System RAM Detection ---
+    # 1. System RAM Detection
     sys_ram_total_gb = 0.0
     sys_ram_avail_gb = 0.0
     try:
@@ -43,15 +43,14 @@ def get_system_hardware_info():
     except Exception:
         pass
 
-    # --- 2. GPU Detection ---
+    # 2. GPU Detection
     gpu_found = False
     gpu_name = "NVIDIA Dedicated GPU"
     gpu_vram_total_gb = 0.0
     gpu_vram_free_gb = 0.0
 
-    # Method A: Direct NVML ctypes library query (Exact method nvtop uses)
+    # Method A: Direct NVML ctypes library query
     try:
-        # Check standard NVML shared library locations
         nvml_lib_names = ["libnvidia-ml.so.1", "libnvidia-ml.so", "/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1"]
         nvml = None
         for name in nvml_lib_names:
@@ -62,7 +61,6 @@ def get_system_hardware_info():
                 continue
 
         if nvml:
-            # Struct for NVML memory return
             class nvmlMemory_t(ctypes.Structure):
                 _fields_ = [
                     ('total', ctypes.c_ulonglong),
@@ -81,12 +79,10 @@ def get_system_hardware_info():
                 for i in range(device_count.value):
                     handle = ctypes.c_void_p()
                     if nvml.nvmlDeviceGetHandleByIndex_v2(i, ctypes.byref(handle)) == 0:
-                        # Get Name
                         name_buf = ctypes.create_string_buffer(64)
                         nvml.nvmlDeviceGetName(handle, name_buf, 64)
                         names.append(name_buf.value.decode('utf-8'))
 
-                        # Get Memory
                         mem = nvmlMemory_t()
                         if nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(mem)) == 0:
                             tot_bytes += mem.total
@@ -131,7 +127,7 @@ def get_system_hardware_info():
             except Exception:
                 pass
 
-    # Method C: Dedicated PCI Inspection (Explicitly prioritizing Vendor 0x10de)
+    # Method C: Dedicated PCI Inspection (Prioritizing Vendor 0x10de)
     if not gpu_found:
         pci_devices = sorted(glob.glob('/sys/bus/pci/devices/*'))
         for dev in pci_devices:
@@ -141,7 +137,7 @@ def get_system_hardware_info():
                 try:
                     with open(vendor_file, 'r') as f:
                         vendor = f.read().strip().lower()
-                    if "0x10de" in vendor:  # NVIDIA Dedicated Vendor ID
+                    if "0x10de" in vendor:
                         with open(resource_file, 'r') as f:
                             res_lines = f.readlines()
                         max_bar_bytes = 0
@@ -209,8 +205,13 @@ def get_sys_info():
     return get_system_hardware_info()
 
 @app.get("/api/search")
-def search_hf(q: str = "llama"):
-    url = f"https://huggingface.co/api/models?search={q}&filter=gguf&sort=downloads&direction=-1&limit=20"
+def search_hf(q: str = ""):
+    # If query is empty, pull the top 30 most downloaded trending GGUF models
+    if not q or q.strip() == "":
+        url = "https://huggingface.co/api/models?filter=gguf&sort=downloads&direction=-1&limit=30"
+    else:
+        url = f"https://huggingface.co/api/models?search={q.strip()}&filter=gguf&sort=downloads&direction=-1&limit=30"
+        
     res = requests.get(url).json()
     results = []
     if isinstance(res, list):
@@ -245,7 +246,6 @@ def get_model_files(repo_id: str):
             size_bytes = s.get("size", 0)
             size_gb = round(size_bytes / (1024**3), 2) if size_bytes else None
 
-            # Runtime memory estimation (Size * 1.2 overhead for KV cache & context)
             est_mem_req = round(size_gb * 1.2, 2) if size_gb else None
             
             fit_status = "unknown"
@@ -345,15 +345,32 @@ def get_ui():
           </div>
         </header>
 
-        <!-- Search Bar -->
+        <!-- Search & Catalog Section -->
         <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
-          <h2 class="text-lg font-semibold">Search Hugging Face Repositories (GGUF)</h2>
+          <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+            <h2 id="catalogHeader" class="text-lg font-semibold">Available Models (Top GGUFs on Hugging Face)</h2>
+            <div class="flex flex-wrap gap-1.5 text-xs">
+              <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">🔥 All Top</button>
+              <button onclick="quickSearch('Llama-3')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Llama 3</button>
+              <button onclick="quickSearch('Qwen2.5')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen 2.5</button>
+              <button onclick="quickSearch('Mistral')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Mistral</button>
+              <button onclick="quickSearch('DeepSeek')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">DeepSeek</button>
+              <button onclick="quickSearch('Coder')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Coding</button>
+              <button onclick="quickSearch('bartowski')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">bartowski</button>
+            </div>
+          </div>
+          
           <div class="flex gap-3">
             <input id="searchInput" type="text" placeholder="Search by model or creator (e.g. Llama-3.1, bartowski, Qwen2.5, DeepSeek)..." 
-                   class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500">
-            <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm">Search</button>
+                   onkeydown="if(event.key === 'Enter') searchModels()"
+                   class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500 text-sm">
+            <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm transition">Search</button>
+            <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition" title="Reset to Trending">Reset</button>
           </div>
-          <div id="searchResults" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4"></div>
+          
+          <div id="searchResults" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <p class="text-slate-400">Loading popular Hugging Face models...</p>
+          </div>
         </section>
 
         <!-- Active Jobs & Local Models Grid -->
@@ -376,7 +393,6 @@ def get_ui():
             const res = await fetch('/api/system_info');
             const data = await res.json();
             
-            // Render Dedicated GPU Stats
             if (data.gpu && data.gpu.has_gpu) {
               const freeStr = data.gpu.free_vram_gb > 0 ? `${data.gpu.free_vram_gb} GB Free / ` : '';
               document.getElementById('vramStat').innerHTML = 
@@ -386,7 +402,6 @@ def get_ui():
                 `<span class="text-slate-400 font-normal">No Dedicated GPU Detected</span>`;
             }
 
-            // Render System RAM Stats
             if (data.system_ram) {
               document.getElementById('ramStat').innerHTML = 
                 `${data.system_ram.available_gb} GB Avail / ${data.system_ram.total_gb} GB Total`;
@@ -397,27 +412,42 @@ def get_ui():
           }
         }
 
+        function quickSearch(tag) {
+          document.getElementById('searchInput').value = tag;
+          searchModels();
+        }
+
         async function searchModels() {
-          const q = document.getElementById('searchInput').value;
+          const q = document.getElementById('searchInput').value.trim();
           const container = document.getElementById('searchResults');
+          const header = document.getElementById('catalogHeader');
+          
+          if (q === "") {
+            header.textContent = "Available Models (Top GGUFs on Hugging Face)";
+          } else {
+            header.textContent = `Search Results for "${q}"`;
+          }
+
           container.innerHTML = '<p class="text-slate-400">Querying Hugging Face API...</p>';
           const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
           const models = await res.json();
           container.innerHTML = '';
-          if (models.length === 0) {
-            container.innerHTML = '<p class="text-slate-400">No GGUF models found.</p>';
+          
+          if (!models || models.length === 0) {
+            container.innerHTML = '<p class="text-slate-400">No GGUF models found matching your query.</p>';
             return;
           }
+
           models.forEach(m => {
             const card = document.createElement('div');
             card.className = 'bg-slate-950 p-4 rounded border border-slate-700 space-y-3';
             card.innerHTML = `
               <div class="flex justify-between items-start">
-                <div>
-                  <span class="text-xs font-semibold px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800">${m.maker}</span>
-                  <h3 class="font-bold text-slate-100 text-base mt-1">${m.model_name}</h3>
+                <div class="overflow-hidden pr-2">
+                  <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800">${m.maker}</span>
+                  <h3 class="font-bold text-slate-100 text-base mt-1 truncate" title="${m.model_name}">${m.model_name}</h3>
                 </div>
-                <div class="text-right text-xs text-slate-400">
+                <div class="text-right text-xs text-slate-400 shrink-0">
                   <div>⬇ ${m.downloads.toLocaleString()}</div>
                   <div>❤ ${m.likes}</div>
                 </div>
@@ -529,7 +559,9 @@ def get_ui():
           `).join('');
         }
 
+        // Initialize on page load
         initHardwareInfo();
+        searchModels(); // Loads default top trending catalog
         setInterval(updateTasks, 3000);
         fetchLocalModels();
       </script>
