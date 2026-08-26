@@ -201,14 +201,6 @@ def get_sys_info():
 
 @app.get("/api/search")
 def search_hf(q: str = "", sort_by: str = "downloads"):
-    """
-    Search Hugging Face with selectable sorting:
-    - 'downloads': Most downloaded
-    - 'likes': Most liked
-    - 'lastModified': Most recently updated
-    - 'alphabetical': Sorted by model name after the slash
-    """
-    # Always pull with valid Hugging Face sort parameters
     hf_sort = "downloads"
     if sort_by == "likes":
         hf_sort = "likes"
@@ -239,7 +231,6 @@ def search_hf(q: str = "", sort_by: str = "downloads"):
             if not repo_id:
                 continue
             
-            # Extract Maker (before slash) and Model Name (after slash)
             if '/' in repo_id:
                 parts = repo_id.split('/', 1)
                 maker = parts[0]
@@ -257,7 +248,6 @@ def search_hf(q: str = "", sort_by: str = "downloads"):
                 "lastModified": (m.get("lastModified") or "")[:10]
             })
 
-    # Sort strictly by the model name after the slash (case-insensitive)
     if sort_by == "alphabetical":
         results.sort(key=lambda x: x["model_name"].lower())
 
@@ -265,50 +255,84 @@ def search_hf(q: str = "", sort_by: str = "downloads"):
 
 @app.get("/api/model_files")
 def get_model_files(repo_id: str):
-    url = f"https://huggingface.co/api/models/{repo_id}"
+    """
+    Fetches exact file sizes via the Hugging Face Tree API.
+    Falls back to the standard API if tree inspection fails.
+    """
+    files_data = []
+    
+    # Primary Method: Hugging Face Tree API (contains exact file sizes & LFS details)
+    tree_url = f"https://huggingface.co/api/models/{repo_id}/tree/main"
     try:
-        res = requests.get(url, timeout=10).json()
+        resp = requests.get(tree_url, timeout=10)
+        if resp.status_code == 200:
+            tree_items = resp.json()
+            if isinstance(tree_items, list):
+                for item in tree_items:
+                    fname = item.get("path", "")
+                    if fname.endswith(".gguf"):
+                        size_bytes = item.get("size", 0)
+                        # Check LFS size if top-level size is missing
+                        if not size_bytes and "lfs" in item and isinstance(item["lfs"], dict):
+                            size_bytes = item["lfs"].get("size", 0)
+                        files_data.append({"rfilename": fname, "size": size_bytes})
     except Exception:
-        res = {}
-        
-    siblings = res.get("siblings", []) if isinstance(res, dict) else []
+        pass
+
+    # Fallback Method: Standard models endpoint if tree returned nothing
+    if not files_data:
+        try:
+            url = f"https://huggingface.co/api/models/{repo_id}"
+            res = requests.get(url, timeout=10).json()
+            siblings = res.get("siblings", []) if isinstance(res, dict) else []
+            for s in siblings:
+                fname = s.get("rfilename", "")
+                if fname.endswith(".gguf"):
+                    files_data.append({"rfilename": fname, "size": s.get("size", 0)})
+        except Exception:
+            pass
+
     hw = get_system_hardware_info()
     vram_total = hw["gpu"]["total_vram_gb"]
     ram_total = hw["system_ram"]["total_gb"]
 
     parsed_files = []
-    for s in siblings:
-        fname = s.get("rfilename", "")
-        if fname.endswith(".gguf"):
-            weight, variant = parse_model_metadata(fname, repo_id)
-            size_bytes = s.get("size", 0)
-            size_gb = round(size_bytes / (1024**3), 2) if size_bytes else None
+    for item in files_data:
+        fname = item.get("rfilename", "")
+        weight, variant = parse_model_metadata(fname, repo_id)
+        
+        size_bytes = item.get("size", 0)
+        size_gb = round(size_bytes / (1024**3), 2) if size_bytes else None
 
-            est_mem_req = round(size_gb * 1.2, 2) if size_gb else None
-            
-            fit_status = "unknown"
-            if est_mem_req:
-                if vram_total > 0:
-                    if est_mem_req <= vram_total:
-                        fit_status = "fits_gpu"
-                    elif est_mem_req <= (vram_total + ram_total * 0.75):
-                        fit_status = "split_gpu_ram"
-                    else:
-                        fit_status = "exceeds"
+        # Memory estimation: model file size + 20% overhead for context/KV cache
+        est_mem_req = round(size_gb * 1.2, 2) if size_gb else None
+        
+        fit_status = "unknown"
+        if est_mem_req:
+            if vram_total > 0:
+                if est_mem_req <= vram_total:
+                    fit_status = "fits_gpu"
+                elif est_mem_req <= (vram_total + ram_total * 0.75):
+                    fit_status = "split_gpu_ram"
                 else:
-                    if est_mem_req <= ram_total * 0.85:
-                        fit_status = "fits_ram"
-                    else:
-                        fit_status = "exceeds"
+                    fit_status = "exceeds"
+            else:
+                if est_mem_req <= ram_total * 0.85:
+                    fit_status = "fits_ram"
+                else:
+                    fit_status = "exceeds"
 
-            parsed_files.append({
-                "filename": fname,
-                "weight": weight,
-                "variant": variant,
-                "size_gb": f"{size_gb} GB" if size_gb else "Dynamic",
-                "est_vram": f"~{est_mem_req} GB" if est_mem_req else "N/A",
-                "fit_status": fit_status
-            })
+        parsed_files.append({
+            "filename": fname,
+            "weight": weight,
+            "variant": variant,
+            "size_gb": f"{size_gb} GB" if size_gb else "Unknown",
+            "est_vram": f"~{est_mem_req} GB" if est_mem_req else "N/A",
+            "fit_status": fit_status
+        })
+
+    # Sort files by size ascending
+    parsed_files.sort(key=lambda x: float(x["size_gb"].replace(" GB", "")) if "GB" in x["size_gb"] else 999)
 
     return {
         "repo_id": repo_id,
@@ -492,7 +516,6 @@ def get_ui():
               return;
             }
 
-            // Frontend alphabetical fallback sorting strictly after the slash
             if (sortBy === 'alphabetical') {
               models.sort((a, b) => (a.model_name || '').localeCompare(b.model_name || '', undefined, { sensitivity: 'base' }));
             }
@@ -528,14 +551,14 @@ def get_ui():
           const parent = btn.parentElement;
           const fileContainer = parent.querySelector('.file-container');
           fileContainer.classList.remove('hidden');
-          fileContainer.innerHTML = '<span class="text-xs text-slate-500">Calculating memory footprint...</span>';
+          fileContainer.innerHTML = '<span class="text-xs text-slate-500">Fetching exact file sizes & calculating VRAM footprint...</span>';
           
           const res = await fetch(`/api/model_files?repo_id=${encodeURIComponent(repoId)}`);
           const data = await res.json();
           fileContainer.innerHTML = '';
 
           if (data.files.length === 0) {
-            fileContainer.innerHTML = '<span class="text-xs text-slate-500">No .gguf files found in repository root.</span>';
+            fileContainer.innerHTML = '<span class="text-xs text-slate-500">No .gguf files found in repository.</span>';
             return;
           }
 
@@ -564,7 +587,7 @@ def get_ui():
                   <span>•</span>
                   <span>Variant: <strong class="text-slate-200">${f.variant}</strong></span>
                   <span>•</span>
-                  <span>Size: <strong class="text-slate-200">${f.size_gb}</strong></span>
+                  <span>Size: <strong class="text-emerald-400">${f.size_gb}</strong></span>
                   <span>(${f.est_vram} Req)</span>
                   ${fitBadge}
                 </div>
@@ -622,7 +645,6 @@ def get_ui():
           `).join('');
         }
 
-        // Initialize on page load
         initHardwareInfo();
         searchModels();
         setInterval(updateTasks, 3000);
