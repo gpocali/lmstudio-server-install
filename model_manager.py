@@ -17,7 +17,12 @@ app = FastAPI(title="LM Studio Headless Model Manager")
 DOWNLOAD_JOBS = {}
 STORAGE_PATH = "/storage/lmstudio"
 MODELS_PATH = os.path.join(STORAGE_PATH, "models")
-LMS_ENV = {**os.environ, "HOME": STORAGE_PATH, "PATH": f"/usr/local/bin:{STORAGE_PATH}/.cache/lm-studio/bin:{STORAGE_PATH}/.lmstudio/bin:/usr/sbin:/usr/bin:/bin"}
+LMS_ENV = {
+    **os.environ,
+    "HOME": STORAGE_PATH,
+    "LMS_SERVER_HOST": "0.0.0.0",
+    "PATH": f"/usr/local/bin:{STORAGE_PATH}/.cache/lm-studio/bin:{STORAGE_PATH}/.lmstudio/bin:/usr/sbin:/usr/bin:/bin"
+}
 
 VERIFIED_CREATORS = {
     "bartowski", "unsloth", "TheBloke", "MaziyarPanahi", "mradermacher",
@@ -59,7 +64,7 @@ class LoadRequest(BaseModel):
     identifier: str = ""
     gpu_offload: str = "max"
     context_length: int = 32768
-    ttl: int = 600
+    ttl: int = 3600
 
 def get_lms_bin():
     for p in ["/usr/local/bin/lms", f"{STORAGE_PATH}/.lmstudio/bin/lms", f"{STORAGE_PATH}/.cache/lm-studio/bin/lms"]:
@@ -68,22 +73,38 @@ def get_lms_bin():
     return shutil.which("lms") or "lms"
 
 def get_loaded_models():
-    """Queries `lms ps` to find all active models in memory."""
-    loaded = []
+    """Extracts identifiers of loaded models from `lms ps` and the API."""
+    loaded = set()
+    lms = get_lms_bin()
+    
     try:
-        cmd = [get_lms_bin(), "ps"]
-        res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True)
+        res = subprocess.run([lms, "ps"], env=LMS_ENV, capture_output=True, text=True)
         if res.returncode == 0:
             lines = res.stdout.strip().split("\n")
             for line in lines:
-                if not line.strip() or "IDENTIFIER" in line or "---" in line:
+                l_str = line.strip()
+                if not l_str or "IDENTIFIER" in l_str or "---" in l_str or "No models" in l_str:
                     continue
-                parts = line.split()
+                parts = l_str.split()
                 if parts:
-                    loaded.append(parts[0])
+                    loaded.add(parts[0].lower())
+                    if len(parts) > 1:
+                        loaded.add(parts[1].lower())
     except Exception:
         pass
-    return loaded
+
+    try:
+        r = requests.get("http://127.0.0.1:1234/v1/models", timeout=1.5)
+        if r.status_code == 200:
+            m_data = r.json().get("data", [])
+            for item in m_data:
+                mid = item.get("id", "").lower()
+                if mid and "nomic-embed" not in mid:
+                    loaded.add(mid)
+    except Exception:
+        pass
+
+    return list(loaded)
 
 def calculate_trust_score(downloads: int, likes: int, is_verified: bool) -> int:
     score = 35 if is_verified else 0
@@ -244,7 +265,6 @@ def run_download_job(repo_id: str, group_name: str, file_paths: list[str]):
         DOWNLOAD_JOBS[group_name]["progress_str"] = "100% (Complete)"
         DOWNLOAD_JOBS[group_name]["percent"] = 100.0
         
-        # Link into LM Studio internal cache and register
         lms_cache = os.path.join(STORAGE_PATH, ".cache", "lm-studio", "models")
         os.makedirs(lms_cache, exist_ok=True)
         dest_folder_name = repo_id.replace('/', '_')
@@ -375,31 +395,43 @@ def get_model_files(repo_id: str):
 
 @app.post("/api/load_model")
 def load_model(req: LoadRequest):
-    """Unloads active models and loads the target model into GPU VRAM with high context."""
+    """Unloads active models and loads the target model into GPU VRAM."""
     lms = get_lms_bin()
-    try:
-        # 1. Unload all models first
-        subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True)
-        
-        # 2. Derive identifier from filename
-        ident = req.identifier or os.path.basename(req.model_path).replace(".gguf", "")
+    fname = os.path.basename(req.model_path)
+    ident = req.identifier or fname.replace(".gguf", "")
 
-        # 3. Load target model
-        cmd = [
-            lms, "load", req.model_path,
+    # 1. Unload all running models
+    subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True)
+    subprocess.run([lms, "unload", ident], env=LMS_ENV, capture_output=True)
+
+    # 2. Try loading by absolute file path
+    cmd = [
+        lms, "load", req.model_path,
+        f"--gpu={req.gpu_offload}",
+        f"--context-length={req.context_length}",
+        f"--ttl={req.ttl}",
+        "--yes"
+    ]
+    res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True)
+
+    # 3. Fallback to model filename if needed
+    if res.returncode != 0:
+        cmd_fallback = [
+            lms, "load", fname,
             f"--gpu={req.gpu_offload}",
             f"--context-length={req.context_length}",
             f"--ttl={req.ttl}",
-            f"--identifier={ident}",
             "--yes"
         ]
-        res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True)
-        if res.returncode == 0:
-            return {"status": "success", "output": res.stdout, "identifier": ident}
-        else:
-            return JSONResponse(status_code=500, content={"status": "error", "message": res.stderr or res.stdout})
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        res_fallback = subprocess.run(cmd_fallback, env=LMS_ENV, capture_output=True, text=True)
+        if res_fallback.returncode == 0:
+            return {"status": "success", "output": res_fallback.stdout, "identifier": ident}
+
+    if res.returncode == 0:
+        return {"status": "success", "output": res.stdout, "identifier": ident}
+    else:
+        err_msg = (res.stderr or res.stdout or "Command returned non-zero exit status").strip()
+        return JSONResponse(status_code=500, content={"status": "error", "message": err_msg})
 
 @app.post("/api/unload_model")
 def unload_model():
@@ -573,7 +605,7 @@ def get_ui():
           try {
             const res = await fetch('/api/system_info');
             const data = await res.json();
-            loadedModelsList = data.loaded_models || [];
+            loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
             
             if (data.gpu && data.gpu.has_gpu) {
               const freeStr = data.gpu.free_vram_gb > 0 ? `${data.gpu.free_vram_gb} GB Free / ` : '';
@@ -796,15 +828,16 @@ def get_ui():
             const res = await fetch('/api/load_model', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({model_path: modelPath, gpu_offload: 'max', context_length: 32768, ttl: 600})
+              body: JSON.stringify({model_path: modelPath, gpu_offload: 'max', context_length: 32768, ttl: 3600})
             });
             const data = await res.json();
             if (data.status !== 'success') {
-              alert('Load error: ' + (data.message || JSON.stringify(data)));
+              alert('Load Failure Output from LMS:\n\n' + (data.message || JSON.stringify(data)));
             }
           } catch(e) {
-            alert('Error communicating with server: ' + e.message);
+            alert('Communication Error: ' + e.message);
           }
+          await initHardwareInfo();
           await fetchLocalModels();
         }
 
@@ -814,6 +847,7 @@ def get_ui():
             await fetch('/api/unload_model', {method: 'POST'});
           } catch(e) {}
           if (btn) btn.textContent = '⏹ Unload All';
+          await initHardwareInfo();
           await fetchLocalModels();
         }
 
@@ -865,7 +899,7 @@ def get_ui():
           const data = await res.json();
           const list = document.getElementById('localList');
           localModelSet.clear();
-          loadedModelsList = data.loaded_models || [];
+          loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
 
           if (data.storage) renderStorageMetrics(data.storage);
 
@@ -877,18 +911,21 @@ def get_ui():
           data.files.forEach(m => localModelSet.add(m.filename));
 
           list.innerHTML = data.files.map(m => {
-            const isLoaded = loadedModelsList.some(loaded => 
-              m.filename.includes(loaded) || 
-              loaded.includes(m.filename.replace('.gguf', '')) ||
-              m.path.includes(loaded)
-            );
+            const fLower = m.filename.toLowerCase().replace('.gguf', '');
+            const pLower = m.path.toLowerCase();
+            
+            // Fuzzy match active slug from lms ps
+            const isLoaded = loadedModelsList.some(loaded => {
+              if (!loaded || loaded.length < 3) return false;
+              return fLower.includes(loaded) || loaded.includes(fLower) || pLower.includes(loaded);
+            });
             
             let actionBtn = '';
             if (isLoaded) {
               actionBtn = `
                 <div class="flex items-center gap-1.5">
                   <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">
-                    ⚡ Loaded (32k)
+                    ⚡ Loaded
                   </span>
                   <button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">
                     ⏹
