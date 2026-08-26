@@ -52,20 +52,18 @@ chmod -R u+rwX,go+rX "$APP_DIR"
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$APP_DIR"
 
 # 3. Install System & Python Dependencies
-echo "[+] Installing system packages and Python dependencies..."
+echo "[+] Installing system packages and Python runtime..."
 apt-get update -y
-apt-get install -y curl ca-certificates jq gnupg git pipx python3 python3-pip python3-venv python3-uvicorn python3-fastapi python3-requests
+apt-get install -y curl ca-certificates jq gnupg git python3 python3-pip python3-venv python3-uvicorn python3-fastapi python3-requests
 
-# Install Aider using pipx or dedicated isolated venv
-echo "[+] Configuring Aider AI Agent in isolated environment..."
-if ! command -v aider >/dev/null 2>&1; then
-  PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install --force aider-chat || {
-    echo "[*] Falling back to dedicated virtualenv for Aider..."
-    python3 -m venv "${APP_DIR}/venv_aider"
-    "${APP_DIR}/venv_aider/bin/pip" install --upgrade pip
-    "${APP_DIR}/venv_aider/bin/pip" install aider-chat || true
-    ln -sf "${APP_DIR}/venv_aider/bin/aider" /usr/local/bin/aider
-  }
+# Configure Aider inside a dedicated, isolated venv
+echo "[+] Configuring Aider AI Agent in dedicated virtual environment..."
+VENV_AIDER="${APP_DIR}/venv_aider"
+if [ ! -d "$VENV_AIDER" ] || [ ! -f "${VENV_AIDER}/bin/aider" ]; then
+  python3 -m venv "$VENV_AIDER"
+  "${VENV_AIDER}/bin/pip" install --upgrade pip setuptools wheel
+  "${VENV_AIDER}/bin/pip" install aider-chat
+  ln -sf "${VENV_AIDER}/bin/aider" /usr/local/bin/aider
 fi
 
 # 4. Install / Update LM Studio CLI & llmster Daemon
