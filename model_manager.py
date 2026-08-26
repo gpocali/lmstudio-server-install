@@ -205,14 +205,40 @@ def get_sys_info():
     return get_system_hardware_info()
 
 @app.get("/api/search")
-def search_hf(q: str = ""):
-    # If query is empty, pull the top 30 most downloaded trending GGUF models
-    if not q or q.strip() == "":
-        url = "https://huggingface.co/api/models?filter=gguf&sort=downloads&direction=-1&limit=30"
+def search_hf(q: str = "", sort_by: str = "downloads"):
+    """
+    Search Hugging Face with selectable sorting:
+    - 'downloads': Most downloaded (default)
+    - 'likes': Most liked / starred
+    - 'lastModified': Most recently updated / released
+    - 'alphabetical': Alphabetical by repo ID (A-Z)
+    """
+    direction = "-1"
+    hf_sort = "downloads"
+
+    if sort_by == "likes":
+        hf_sort = "likes"
+        direction = "-1"
+    elif sort_by == "lastModified":
+        hf_sort = "lastModified"
+        direction = "-1"
+    elif sort_by == "alphabetical":
+        hf_sort = "author"
+        direction = "1"
     else:
-        url = f"https://huggingface.co/api/models?search={q.strip()}&filter=gguf&sort=downloads&direction=-1&limit=30"
+        hf_sort = "downloads"
+        direction = "-1"
+
+    if not q or q.strip() == "":
+        url = f"https://huggingface.co/api/models?filter=gguf&sort={hf_sort}&direction={direction}&limit=30"
+    else:
+        url = f"https://huggingface.co/api/models?search={q.strip()}&filter=gguf&sort={hf_sort}&direction={direction}&limit=30"
         
-    res = requests.get(url).json()
+    try:
+        res = requests.get(url, timeout=10).json()
+    except Exception:
+        res = []
+
     results = []
     if isinstance(res, list):
         for m in res:
@@ -227,12 +253,21 @@ def search_hf(q: str = ""):
                 "likes": m.get("likes", 0),
                 "lastModified": m.get("lastModified", "")[:10]
             })
+
+    # Client-side fallback sorting if alphabetical
+    if sort_by == "alphabetical":
+        results.sort(key=lambda x: x["model_name"].lower())
+
     return results
 
 @app.get("/api/model_files")
 def get_model_files(repo_id: str):
     url = f"https://huggingface.co/api/models/{repo_id}"
-    res = requests.get(url).json()
+    try:
+        res = requests.get(url, timeout=10).json()
+    except Exception:
+        res = {}
+        
     siblings = res.get("siblings", [])
     hw = get_system_hardware_info()
     vram_total = hw["gpu"]["total_vram_gb"]
@@ -345,7 +380,7 @@ def get_ui():
           </div>
         </header>
 
-        <!-- Search & Catalog Section -->
+        <!-- Search, Filter & Sort Section -->
         <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
           <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
             <h2 id="catalogHeader" class="text-lg font-semibold">Available Models (Top GGUFs on Hugging Face)</h2>
@@ -360,10 +395,22 @@ def get_ui():
             </div>
           </div>
           
-          <div class="flex gap-3">
+          <div class="flex flex-col md:flex-row gap-3">
             <input id="searchInput" type="text" placeholder="Search by model or creator (e.g. Llama-3.1, bartowski, Qwen2.5, DeepSeek)..." 
                    onkeydown="if(event.key === 'Enter') searchModels()"
                    class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500 text-sm">
+            
+            <!-- Sort Selector -->
+            <div class="flex items-center gap-2">
+              <label for="sortSelect" class="text-xs text-slate-400 shrink-0">Sort By:</label>
+              <select id="sortSelect" onchange="searchModels()" class="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500">
+                <option value="downloads">Most Downloads</option>
+                <option value="likes">Most Likes / Stars</option>
+                <option value="lastModified">Recent Release Date</option>
+                <option value="alphabetical">Alphabetical (A-Z)</option>
+              </select>
+            </div>
+
             <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm transition">Search</button>
             <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition" title="Reset to Trending">Reset</button>
           </div>
@@ -419,22 +466,23 @@ def get_ui():
 
         async function searchModels() {
           const q = document.getElementById('searchInput').value.trim();
+          const sortBy = document.getElementById('sortSelect').value;
           const container = document.getElementById('searchResults');
           const header = document.getElementById('catalogHeader');
           
           if (q === "") {
-            header.textContent = "Available Models (Top GGUFs on Hugging Face)";
+            header.textContent = `Available Models (${document.getElementById('sortSelect').selectedOptions[0].text})`;
           } else {
-            header.textContent = `Search Results for "${q}"`;
+            header.textContent = `Search Results for "${q}" (${document.getElementById('sortSelect').selectedOptions[0].text})`;
           }
 
           container.innerHTML = '<p class="text-slate-400">Querying Hugging Face API...</p>';
-          const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+          const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort_by=${encodeURIComponent(sortBy)}`);
           const models = await res.json();
           container.innerHTML = '';
           
           if (!models || models.length === 0) {
-            container.innerHTML = '<p class="text-slate-400">No GGUF models found matching your query.</p>';
+            container.innerHTML = '<p class="text-slate-400">No GGUF models found matching your criteria.</p>';
             return;
           }
 
@@ -446,10 +494,11 @@ def get_ui():
                 <div class="overflow-hidden pr-2">
                   <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800">${m.maker}</span>
                   <h3 class="font-bold text-slate-100 text-base mt-1 truncate" title="${m.model_name}">${m.model_name}</h3>
+                  <div class="text-[11px] text-slate-400 mt-0.5">Updated: ${m.lastModified || 'Recent'}</div>
                 </div>
                 <div class="text-right text-xs text-slate-400 shrink-0">
                   <div>⬇ ${m.downloads.toLocaleString()}</div>
-                  <div>❤ ${m.likes}</div>
+                  <div>❤ ${m.likes.toLocaleString()}</div>
                 </div>
               </div>
               <button onclick="fetchFiles('${m.id}', this)" class="w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">
@@ -561,7 +610,7 @@ def get_ui():
 
         // Initialize on page load
         initHardwareInfo();
-        searchModels(); // Loads default top trending catalog
+        searchModels();
         setInterval(updateTasks, 3000);
         fetchLocalModels();
       </script>
