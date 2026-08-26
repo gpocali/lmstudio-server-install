@@ -18,7 +18,6 @@ DOWNLOAD_JOBS = {}
 STORAGE_PATH = "/storage/lmstudio"
 MODELS_PATH = os.path.join(STORAGE_PATH, "models")
 
-# List of vetted, reputable quantizers and official AI research organizations
 VERIFIED_CREATORS = {
     "bartowski", "unsloth", "TheBloke", "MaziyarPanahi", "mradermacher",
     "QuantFactory", "meta-llama", "Qwen", "mistralai", "google",
@@ -49,50 +48,51 @@ QUANT_DESCRIPTIONS = {
 class DownloadRequest(BaseModel):
     repo_id: str
     group_name: str
-    files: list[str]  # Exact relative repository paths
+    files: list[str]
 
 class DeleteRequest(BaseModel):
     filename: str
 
+class LoadRequest(BaseModel):
+    model_path: str
+    gpu_offload: str = "max"
+
+def get_loaded_models():
+    """Queries `lms ps` to determine which models are currently in VRAM/RAM."""
+    loaded = []
+    try:
+        cmd = ["sudo", "-u", "lmstudio", "HOME=/storage/lmstudio", "/usr/local/bin/lms", "ps"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            lines = res.stdout.strip().split("\n")
+            for line in lines[1:]:
+                parts = line.split()
+                if parts:
+                    loaded.append(parts[0])
+    except Exception:
+        pass
+    return loaded
+
 def calculate_trust_score(downloads: int, likes: int, is_verified: bool) -> int:
-    score = 0
-    if is_verified:
-        score += 35
-    if downloads >= 100000:
-        score += 40
-    elif downloads >= 10000:
-        score += 30
-    elif downloads >= 1000:
-        score += 20
-    elif downloads >= 100:
-        score += 10
+    score = 35 if is_verified else 0
+    if downloads >= 100000: score += 40
+    elif downloads >= 10000: score += 30
+    elif downloads >= 1000: score += 20
+    elif downloads >= 100: score += 10
 
-    if likes >= 500:
-        score += 25
-    elif likes >= 100:
-        score += 18
-    elif likes >= 20:
-        score += 10
-    elif likes >= 5:
-        score += 5
-
+    if likes >= 500: score += 25
+    elif likes >= 100: score += 18
+    elif likes >= 20: score += 10
+    elif likes >= 5: score += 5
     return min(score, 100)
 
 def get_quant_description(variant: str):
     v_upper = variant.upper().replace("-", "_")
     for key, desc in QUANT_DESCRIPTIONS.items():
-        if key == v_upper:
-            return desc
-    if "Q4" in v_upper:
-        return "4-bit quantization (Balanced everyday performance and memory efficiency)."
-    elif "Q5" in v_upper:
-        return "5-bit quantization (High fidelity with moderate memory overhead)."
-    elif "Q8" in v_upper:
-        return "8-bit quantization (Near-lossless precision with high memory requirements)."
-    elif "Q3" in v_upper or "IQ3" in v_upper:
-        return "3-bit quantization (Compact memory profile with some quality compromise)."
-    elif "Q2" in v_upper or "IQ2" in v_upper:
-        return "2-bit quantization (Ultra-compressed for resource-constrained hardware)."
+        if key == v_upper: return desc
+    if "Q4" in v_upper: return "4-bit quantization (Balanced performance and efficiency)."
+    elif "Q5" in v_upper: return "5-bit quantization (High fidelity)."
+    elif "Q8" in v_upper: return "8-bit quantization (Near-lossless precision)."
     return "Standard GGUF model quantization variant."
 
 def get_storage_usage():
@@ -116,10 +116,8 @@ def get_system_hardware_info():
             meminfo = f.read()
         total_m = re.search(r'MemTotal:\s+(\d+)\s+kB', meminfo)
         avail_m = re.search(r'MemAvailable:\s+(\d+)\s+kB', meminfo)
-        if total_m:
-            sys_ram_total_gb = round(int(total_m.group(1)) / (1024**2), 2)
-        if avail_m:
-            sys_ram_avail_gb = round(int(avail_m.group(1)) / (1024**2), 2)
+        if total_m: sys_ram_total_gb = round(int(total_m.group(1)) / (1024**2), 2)
+        if avail_m: sys_ram_avail_gb = round(int(avail_m.group(1)) / (1024**2), 2)
     except Exception:
         pass
 
@@ -140,95 +138,47 @@ def get_system_hardware_info():
 
         if nvml:
             class nvmlMemory_t(ctypes.Structure):
-                _fields_ = [
-                    ('total', ctypes.c_ulonglong),
-                    ('free', ctypes.c_ulonglong),
-                    ('used', ctypes.c_ulonglong)
-                ]
+                _fields_ = [('total', ctypes.c_ulonglong), ('free', ctypes.c_ulonglong), ('used', ctypes.c_ulonglong)]
 
             if nvml.nvmlInit_v2() == 0 or nvml.nvmlInit() == 0:
                 device_count = ctypes.c_uint()
                 nvml.nvmlDeviceGetCount_v2(ctypes.byref(device_count))
-                
-                tot_bytes = 0
-                free_bytes = 0
-                names = []
-
+                tot_bytes, free_bytes, names = 0, 0, []
                 for i in range(device_count.value):
                     handle = ctypes.c_void_p()
                     if nvml.nvmlDeviceGetHandleByIndex_v2(i, ctypes.byref(handle)) == 0:
                         name_buf = ctypes.create_string_buffer(64)
                         nvml.nvmlDeviceGetName(handle, name_buf, 64)
                         names.append(name_buf.value.decode('utf-8'))
-
                         mem = nvmlMemory_t()
                         if nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(mem)) == 0:
                             tot_bytes += mem.total
                             free_bytes += mem.free
-
                 if tot_bytes > 0:
                     gpu_found = True
                     gpu_name = ", ".join(names)
                     gpu_vram_total_gb = round(tot_bytes / (1024**3), 2)
                     gpu_vram_free_gb = round(free_bytes / (1024**3), 2)
-
-                try:
-                    nvml.nvmlShutdown()
-                except Exception:
-                    pass
+                try: nvml.nvmlShutdown()
+                except Exception: pass
     except Exception:
         gpu_found = False
 
-    if not gpu_found:
-        nvidia_smi_path = shutil.which("nvidia-smi") or "/usr/bin/nvidia-smi"
-        if os.path.exists(nvidia_smi_path):
-            try:
-                cmd = [nvidia_smi_path, "--query-gpu=name,memory.total,memory.free", "--format=csv,nounits,noheader"]
-                output = subprocess.check_output(cmd, encoding='utf-8').strip()
-                if output:
-                    lines = output.split('\n')
-                    total_mb = 0.0
-                    free_mb = 0.0
-                    names = []
-                    for line in lines:
-                        parts = [p.strip() for p in line.split(',')]
-                        if len(parts) >= 3:
-                            names.append(parts[0])
-                            total_mb += float(parts[1])
-                            free_mb += float(parts[2])
-                    if total_mb > 0:
-                        gpu_found = True
-                        gpu_name = ", ".join(list(dict.fromkeys(names)))
-                        gpu_vram_total_gb = round(total_mb / 1024, 2)
-                        gpu_vram_free_gb = round(free_mb / 1024, 2)
-            except Exception:
-                pass
-
     return {
-        "system_ram": {
-            "total_gb": sys_ram_total_gb,
-            "available_gb": sys_ram_avail_gb
-        },
-        "gpu": {
-            "has_gpu": gpu_found,
-            "gpu_name": gpu_name,
-            "total_vram_gb": gpu_vram_total_gb,
-            "free_vram_gb": gpu_vram_free_gb
-        },
-        "storage": get_storage_usage()
+        "system_ram": {"total_gb": sys_ram_total_gb, "available_gb": sys_ram_avail_gb},
+        "gpu": {"has_gpu": gpu_found, "gpu_name": gpu_name, "total_vram_gb": gpu_vram_total_gb, "free_vram_gb": gpu_vram_free_gb},
+        "storage": get_storage_usage(),
+        "loaded_models": get_loaded_models()
     }
 
 def parse_model_metadata(filename: str, repo_id: str):
     weight_match = re.search(r'(\d+(\.\d+)?(?:x\d+)?[bB])', f"{repo_id} {filename}")
     weight = weight_match.group(1).upper() if weight_match else "Unknown"
-
     quant_match = re.search(r'(IQ\d_[A-Z_]+|Q\d_[A-Z0-9_]+|FP16|BF16|F16|F32)', filename, re.IGNORECASE)
     variant = quant_match.group(1).upper() if quant_match else "Standard"
-
     return weight, variant
 
 def fetch_single_file_size(repo_id: str, rel_path: str):
-    """Probe exact file size using HTTP HEAD directly against the exact repo path."""
     url = f"https://huggingface.co/{repo_id}/resolve/main/{rel_path}"
     try:
         r = requests.head(url, headers={"Accept-Encoding": "identity"}, allow_redirects=True, timeout=6)
@@ -239,9 +189,6 @@ def fetch_single_file_size(repo_id: str, rel_path: str):
     return 0
 
 def run_download_job(repo_id: str, group_name: str, file_paths: list[str]):
-    """
-    Downloads all parts/shards of a model sequentially using full relative repo paths.
-    """
     DOWNLOAD_JOBS[group_name] = {
         "status": "downloading",
         "downloaded_bytes": 0,
@@ -253,37 +200,27 @@ def run_download_job(repo_id: str, group_name: str, file_paths: list[str]):
     os.makedirs(dest_dir, exist_ok=True)
 
     try:
-        total_all_shards = 0
-        # Calculate total payload size across all shards
-        for rel_path in file_paths:
-            total_all_shards += fetch_single_file_size(repo_id, rel_path)
+        total_all_shards = sum(fetch_single_file_size(repo_id, p) for p in file_paths)
         DOWNLOAD_JOBS[group_name]["total_bytes"] = total_all_shards
-
         cum_downloaded = 0
         first_shard_file = None
 
         for idx, rel_path in enumerate(file_paths, 1):
-            fname = os.path.basename(rel_path)
-            dest_file = os.path.join(dest_dir, fname)
+            dest_file = os.path.join(dest_dir, os.path.basename(rel_path))
             if not first_shard_file:
                 first_shard_file = dest_file
 
             url = f"https://huggingface.co/{repo_id}/resolve/main/{rel_path}"
-            
             with requests.get(url, stream=True, timeout=30) as r:
                 r.raise_for_status()
-                shard_total = int(r.headers.get('content-length', 0))
-                
                 with open(dest_file, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=4 * 1024 * 1024):
                         if chunk:
                             f.write(chunk)
                             cum_downloaded += len(chunk)
-                            
                             dl_gb = round(cum_downloaded / (1024**3), 2)
                             tot_gb = round(total_all_shards / (1024**3), 2) if total_all_shards > 0 else 0
                             pct = round((cum_downloaded / total_all_shards) * 100, 1) if total_all_shards > 0 else 0.0
-                            
                             shard_note = f" (Part {idx}/{len(file_paths)})" if len(file_paths) > 1 else ""
                             DOWNLOAD_JOBS[group_name].update({
                                 "downloaded_bytes": cum_downloaded,
@@ -295,16 +232,19 @@ def run_download_job(repo_id: str, group_name: str, file_paths: list[str]):
         DOWNLOAD_JOBS[group_name]["progress_str"] = "100% (Complete)"
         DOWNLOAD_JOBS[group_name]["percent"] = 100.0
         
-        # Import the primary model/first shard into LM Studio
+        # Link into LM Studio internal cache and register
+        lms_cache = "/storage/lmstudio/.cache/lm-studio/models"
+        os.makedirs(lms_cache, exist_ok=True)
+        dest_folder_name = repo_id.replace('/', '_')
+        link_target = os.path.join(lms_cache, dest_folder_name)
+        if not os.path.exists(link_target):
+            os.symlink(dest_dir, link_target)
+
         if first_shard_file:
-            subprocess.run(["/usr/local/bin/lms", "import", first_shard_file], capture_output=True)
+            subprocess.run(["sudo", "-u", "lmstudio", "HOME=/storage/lmstudio", "/usr/local/bin/lms", "import", first_shard_file], capture_output=True)
 
     except Exception as e:
-        DOWNLOAD_JOBS[group_name] = {
-            "status": "failed",
-            "progress_str": f"Error: {str(e)}",
-            "percent": 0.0
-        }
+        DOWNLOAD_JOBS[group_name] = {"status": "failed", "progress_str": f"Error: {str(e)}", "percent": 0.0}
 
 @app.get("/api/system_info")
 def get_sys_info():
@@ -312,22 +252,9 @@ def get_sys_info():
 
 @app.get("/api/search")
 def search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool = False):
-    hf_sort = "downloads"
-    if sort_by == "likes":
-        hf_sort = "likes"
-    elif sort_by == "lastModified":
-        hf_sort = "lastModified"
-
-    params = {
-        "filter": "gguf",
-        "sort": hf_sort,
-        "direction": "-1",
-        "limit": 60
-    }
-    
-    clean_q = q.strip() if q else ""
-    if clean_q:
-        params["search"] = clean_q
+    hf_sort = "likes" if sort_by == "likes" else ("lastModified" if sort_by == "lastModified" else "downloads")
+    params = {"filter": "gguf", "sort": hf_sort, "direction": "-1", "limit": 60}
+    if q.strip(): params["search"] = q.strip()
 
     try:
         resp = requests.get("https://huggingface.co/api/models", params=params, timeout=10)
@@ -339,127 +266,57 @@ def search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool = Fal
     if isinstance(res, list):
         for m in res:
             repo_id = m.get("id", "")
-            if not repo_id:
-                continue
-            
-            if '/' in repo_id:
-                parts = repo_id.split('/', 1)
-                maker = parts[0]
-                model_name = parts[1]
-            else:
-                maker = "Community"
-                model_name = repo_id
-
+            if not repo_id: continue
+            maker, model_name = repo_id.split('/', 1) if '/' in repo_id else ("Community", repo_id)
             is_verified = maker in VERIFIED_CREATORS
-            if verified_only and not is_verified:
-                continue
-
-            dl_count = m.get("downloads", 0) or 0
-            like_count = m.get("likes", 0) or 0
-            trust_score = calculate_trust_score(dl_count, like_count, is_verified)
-
+            if verified_only and not is_verified: continue
+            dl = m.get("downloads", 0) or 0
+            likes = m.get("likes", 0) or 0
             results.append({
-                "id": repo_id,
-                "maker": maker,
-                "model_name": model_name,
-                "downloads": dl_count,
-                "likes": like_count,
-                "lastModified": (m.get("lastModified") or "")[:10],
-                "is_verified": is_verified,
-                "trust_score": trust_score
+                "id": repo_id, "maker": maker, "model_name": model_name,
+                "downloads": dl, "likes": likes, "lastModified": (m.get("lastModified") or "")[:10],
+                "is_verified": is_verified, "trust_score": calculate_trust_score(dl, likes, is_verified)
             })
 
     if sort_by == "alphabetical":
         results.sort(key=lambda x: x["model_name"].lower())
     elif sort_by == "trust":
         results.sort(key=lambda x: x["trust_score"], reverse=True)
-
     return results
 
 @app.get("/api/model_files")
 def get_model_files(repo_id: str):
-    """
-    Retrieves full repository tree, groups multi-part shard models together, 
-    and verifies file paths.
-    """
     raw_files = {}
-
-    tree_url = f"https://huggingface.co/api/models/{repo_id}/tree/main?recursive=true"
     try:
-        resp = requests.get(tree_url, timeout=8)
+        resp = requests.get(f"https://huggingface.co/api/models/{repo_id}/tree/main?recursive=true", timeout=8)
         if resp.status_code == 200:
-            tree_data = resp.json()
-            if isinstance(tree_data, list):
-                for item in tree_data:
-                    path = item.get("path", "")
-                    if path.endswith(".gguf"):
-                        size = item.get("size", 0)
-                        if not size and "lfs" in item and isinstance(item["lfs"], dict):
-                            size = item["lfs"].get("size", 0)
-                        raw_files[path] = size
-    except Exception:
-        pass
+            for item in resp.json():
+                path = item.get("path", "")
+                if path.endswith(".gguf"):
+                    sz = item.get("size", 0) or (item.get("lfs", {}).get("size", 0) if isinstance(item.get("lfs"), dict) else 0)
+                    raw_files[path] = sz
+    except Exception: pass
 
     if not raw_files:
         try:
-            url = f"https://huggingface.co/api/models/{repo_id}"
-            res = requests.get(url, timeout=8).json()
-            siblings = res.get("siblings", []) if isinstance(res, dict) else []
-            for s in siblings:
+            res = requests.get(f"https://huggingface.co/api/models/{repo_id}", timeout=8).json()
+            for s in res.get("siblings", []):
                 fname = s.get("rfilename", "")
-                if fname.endswith(".gguf"):
-                    raw_files[fname] = s.get("size", 0)
-        except Exception:
-            pass
+                if fname.endswith(".gguf"): raw_files[fname] = s.get("size", 0)
+        except Exception: pass
 
-    # Group multi-shard files (e.g. model-00001-of-00002.gguf + model-00002-of-00002.gguf)
-    # Key: Group name (basename without -0000X-of-0000Y)
     grouped_variants = {}
-
     for rel_path, size_bytes in raw_files.items():
         fname = os.path.basename(rel_path)
-        # Check if file has shard pattern: -00001-of-00004
         shard_match = re.search(r'(-\d{5}-of-\d{5})', fname)
-        if shard_match:
-            clean_name = fname.replace(shard_match.group(1), "")
-            is_sharded = True
-        else:
-            clean_name = fname
-            is_sharded = False
-
+        clean_name = fname.replace(shard_match.group(1), "") if shard_match else fname
         if clean_name not in grouped_variants:
-            grouped_variants[clean_name] = {
-                "group_name": clean_name,
-                "is_sharded": is_sharded,
-                "paths": [],
-                "total_bytes": 0
-            }
-        
+            grouped_variants[clean_name] = {"group_name": clean_name, "paths": [], "total_bytes": 0}
         grouped_variants[clean_name]["paths"].append(rel_path)
         grouped_variants[clean_name]["total_bytes"] += size_bytes
 
-    # Ensure paths in shards are sorted in proper sequence (00001 before 00002)
     for group in grouped_variants.values():
         group["paths"].sort()
-
-    # Missing size parallel probe
-    missing_probes = []
-    for gname, gdata in grouped_variants.items():
-        if gdata["total_bytes"] == 0:
-            for p in gdata["paths"]:
-                missing_probes.append((gname, p))
-
-    if missing_probes:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-            future_to_probe = {executor.submit(fetch_single_file_size, repo_id, p): (gname, p) for gname, p in missing_probes}
-            for future in concurrent.futures.as_completed(future_to_probe):
-                gname, p = future_to_probe[future]
-                try:
-                    sz = future.result()
-                    if sz > 0:
-                        grouped_variants[gname]["total_bytes"] += sz
-                except Exception:
-                    pass
 
     hw = get_system_hardware_info()
     vram_total = hw["gpu"]["total_vram_gb"]
@@ -469,67 +326,57 @@ def get_model_files(repo_id: str):
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH):
             for f in filenames:
-                if f.endswith(".gguf"):
-                    local_files_on_disk.add(f)
+                if f.endswith(".gguf"): local_files_on_disk.add(f)
 
     parsed_files = []
     for gname, gdata in grouped_variants.items():
         weight, variant = parse_model_metadata(gname, repo_id)
-        description = get_quant_description(variant)
-        
-        size_bytes = gdata["total_bytes"]
-        size_gb = round(size_bytes / (1024**3), 2) if size_bytes > 0 else 0.0
+        size_gb = round(gdata["total_bytes"] / (1024**3), 2) if gdata["total_bytes"] > 0 else 0.0
         est_mem_req = round(size_gb * 1.2, 2) if size_gb > 0 else 0.0
 
         fit_status = "unknown"
         if size_gb > 0:
             if vram_total > 0:
-                if est_mem_req <= vram_total:
-                    fit_status = "fits_gpu"
-                elif est_mem_req <= (vram_total + ram_total * 0.75):
-                    fit_status = "split_gpu_ram"
-                else:
-                    fit_status = "exceeds"
+                fit_status = "fits_gpu" if est_mem_req <= vram_total else ("split_gpu_ram" if est_mem_req <= (vram_total + ram_total * 0.75) else "exceeds")
             else:
-                if est_mem_req <= ram_total * 0.85:
-                    fit_status = "fits_ram"
-                else:
-                    fit_status = "exceeds"
+                fit_status = "fits_ram" if est_mem_req <= ram_total * 0.85 else "exceeds"
 
-        # Check if all required shard files exist on disk
         shard_basenames = [os.path.basename(p) for p in gdata["paths"]]
         is_downloaded = all(sb in local_files_on_disk for sb in shard_basenames)
         is_downloading = gname in DOWNLOAD_JOBS and DOWNLOAD_JOBS[gname].get("status") == "downloading"
-
-        size_label = f"{size_gb} GB" if size_gb > 0 else "Pending..."
-        est_vram_label = f"~{est_mem_req} GB" if est_mem_req > 0 else "N/A"
-        
-        shard_info = f" ({len(gdata['paths'])} Shards Complete Package)" if len(gdata['paths']) > 1 else ""
+        shard_info = f" ({len(gdata['paths'])} Shards Package)" if len(gdata['paths']) > 1 else ""
 
         parsed_files.append({
-            "group_name": gname,
-            "display_name": gname + shard_info,
-            "paths": gdata["paths"],
-            "is_sharded": len(gdata["paths"]) > 1,
-            "shard_count": len(gdata["paths"]),
-            "weight": weight,
-            "variant": variant,
-            "description": description,
-            "size_gb": size_label,
-            "raw_size_gb": size_gb,
-            "est_vram": est_vram_label,
-            "fit_status": fit_status,
-            "is_downloaded": is_downloaded,
-            "is_downloading": is_downloading
+            "group_name": gname, "display_name": gname + shard_info, "paths": gdata["paths"],
+            "is_sharded": len(gdata["paths"]) > 1, "shard_count": len(gdata["paths"]),
+            "weight": weight, "variant": variant, "description": get_quant_description(variant),
+            "size_gb": f"{size_gb} GB" if size_gb > 0 else "Pending...", "raw_size_gb": size_gb,
+            "est_vram": f"~{est_mem_req} GB" if est_mem_req > 0 else "N/A",
+            "fit_status": fit_status, "is_downloaded": is_downloaded, "is_downloading": is_downloading
         })
 
     parsed_files.sort(key=lambda x: x["raw_size_gb"] if x["raw_size_gb"] > 0 else 999)
+    return {"repo_id": repo_id, "hardware": hw, "files": parsed_files}
 
-    return {
-        "repo_id": repo_id,
-        "hardware": hw,
-        "files": parsed_files
-    }
+@app.post("/api/load_model")
+def load_model(req: LoadRequest):
+    """Unloads active models and loads the target model into GPU VRAM."""
+    try:
+        subprocess.run(["sudo", "-u", "lmstudio", "HOME=/storage/lmstudio", "/usr/local/bin/lms", "unload", "--all"], capture_output=True)
+        cmd = ["sudo", "-u", "lmstudio", "HOME=/storage/lmstudio", "/usr/local/bin/lms", "load", req.model_path, f"--gpu={req.gpu_offload}"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        return {"status": "success" if res.returncode == 0 else "error", "output": res.stdout or res.stderr}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+@app.post("/api/unload_model")
+def unload_model():
+    """Unloads all running models from VRAM/RAM."""
+    try:
+        res = subprocess.run(["sudo", "-u", "lmstudio", "HOME=/storage/lmstudio", "/usr/local/bin/lms", "unload", "--all"], capture_output=True, text=True)
+        return {"status": "success", "output": res.stdout}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 @app.post("/api/download")
 def start_download(req: DownloadRequest, background_tasks: BackgroundTasks):
@@ -538,30 +385,22 @@ def start_download(req: DownloadRequest, background_tasks: BackgroundTasks):
 
 @app.post("/api/delete")
 def delete_local_model(req: DeleteRequest):
-    """Deletes a model or all related shards from disk."""
     deleted = False
     if os.path.exists(MODELS_PATH):
-        # Match exact file or split shards belonging to this model
         prefix_pattern = req.filename.replace(".gguf", "")
         for root, _, filenames in os.walk(MODELS_PATH):
             for f in filenames:
                 if f == req.filename or (prefix_pattern in f and f.endswith(".gguf")):
-                    file_path = os.path.join(root, f)
                     try:
-                        os.remove(file_path)
+                        os.remove(os.path.join(root, f))
                         deleted = True
-                    except Exception:
-                        pass
+                    except Exception: pass
             if not os.listdir(root):
-                try:
-                    os.rmdir(root)
-                except Exception:
-                    pass
-
+                try: os.rmdir(root)
+                except Exception: pass
     if req.filename in DOWNLOAD_JOBS:
         del DOWNLOAD_JOBS[req.filename]
-
-    return {"status": "deleted" if deleted else "not_found", "filename": req.filename, "storage": get_storage_usage()}
+    return {"status": "deleted" if deleted else "not_found", "storage": get_storage_usage()}
 
 @app.get("/api/tasks")
 def get_tasks():
@@ -573,18 +412,15 @@ def get_local_models():
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH):
             for f in filenames:
-                if f.endswith(".gguf"):
+                if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
                     path = os.path.join(root, f)
                     size_gb = round(os.path.getsize(path) / (1024**3), 2)
                     weight, variant = parse_model_metadata(f, root)
                     files.append({
-                        "filename": f,
-                        "weight": weight,
-                        "variant": variant,
-                        "size_gb": f"{size_gb} GB",
-                        "path": path
+                        "filename": f, "weight": weight, "variant": variant,
+                        "size_gb": f"{size_gb} GB", "path": path
                     })
-    return {"files": files, "storage": get_storage_usage()}
+    return {"files": files, "storage": get_storage_usage(), "loaded_models": get_loaded_models()}
 
 @app.get("/", response_class=HTMLResponse)
 def get_ui():
@@ -599,7 +435,6 @@ def get_ui():
     <body class="bg-slate-900 text-slate-100 min-h-screen p-6 md:p-8">
       <div class="max-w-7xl mx-auto space-y-8">
         
-        <!-- Header & Hardware Metrics -->
         <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-slate-700 pb-5 gap-4">
           <div>
             <h1 class="text-2xl font-bold text-sky-400">LM Studio Model Manager</h1>
@@ -628,46 +463,44 @@ def get_ui():
           </div>
         </header>
 
-        <!-- Search, Filter & Sort Section -->
         <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
           <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
             <h2 id="catalogHeader" class="text-lg font-semibold">Available Models (Top GGUFs on Hugging Face)</h2>
             <div class="flex flex-wrap gap-1.5 text-xs items-center">
-              <span class="text-slate-400 mr-1">Filter by Creator:</span>
+              <span class="text-slate-400 mr-1">Filter:</span>
               <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">🔥 All</button>
               <button onclick="searchAuthor('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ bartowski</button>
               <button onclick="searchAuthor('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ unsloth</button>
               <button onclick="searchAuthor('TheBloke')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ TheBloke</button>
               <button onclick="searchAuthor('Qwen')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen</button>
               <button onclick="quickSearch('Llama-3')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Llama 3</button>
-              <button onclick="quickSearch('Mistral')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Mistral</button>
             </div>
           </div>
           
           <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
-            <input id="searchInput" type="text" placeholder="Search by model or creator (leave empty to view all)..." 
+            <input id="searchInput" type="text" placeholder="Search models or creators..." 
                    onkeydown="if(event.key === 'Enter') searchModels()"
                    class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500 text-sm">
             
             <div class="flex flex-wrap items-center gap-3">
-              <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none bg-slate-950 px-3 py-2 rounded border border-slate-700 hover:border-slate-600">
+              <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none bg-slate-950 px-3 py-2 rounded border border-slate-700">
                 <input type="checkbox" id="verifiedOnly" onchange="searchModels()" class="rounded bg-slate-900 border-slate-700 text-sky-600 focus:ring-0">
                 <span>🛡️ Verified Creators Only</span>
               </label>
 
               <div class="flex items-center gap-2">
-                <label for="sortSelect" class="text-xs text-slate-400 shrink-0">Sort By:</label>
-                <select id="sortSelect" onchange="searchModels()" class="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500">
+                <label for="sortSelect" class="text-xs text-slate-400 shrink-0">Sort:</label>
+                <select id="sortSelect" onchange="searchModels()" class="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
                   <option value="downloads">Most Downloads</option>
-                  <option value="trust">⭐ Trust Score (Reputation)</option>
-                  <option value="likes">Most Likes / Stars</option>
-                  <option value="lastModified">Recent Release Date</option>
-                  <option value="alphabetical">Alphabetical by Name (A-Z)</option>
+                  <option value="trust">⭐ Trust Score</option>
+                  <option value="likes">Most Likes</option>
+                  <option value="lastModified">Recent Release</option>
+                  <option value="alphabetical">Alphabetical (A-Z)</option>
                 </select>
               </div>
 
               <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm transition">Search</button>
-              <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition" title="Reset Search">Reset</button>
+              <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition">Reset</button>
             </div>
           </div>
           
@@ -683,10 +516,15 @@ def get_ui():
             <div id="tasksList" class="space-y-3 text-sm text-slate-300">No active downloads</div>
           </section>
 
-          <section class="bg-slate-800 p-6 rounded-lg">
-            <div class="flex justify-between items-center mb-4">
-              <h2 class="text-lg font-semibold">Downloaded Models on Disk</h2>
-              <span id="diskSubStat" class="text-xs text-slate-400">-- / -- GB</span>
+          <section class="bg-slate-800 p-6 rounded-lg space-y-4">
+            <div class="flex justify-between items-center">
+              <div>
+                <h2 class="text-lg font-semibold">Installed Models on Server</h2>
+                <span id="diskSubStat" class="text-xs text-slate-400">-- / -- GB</span>
+              </div>
+              <button onclick="unloadActiveModel()" class="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-xs px-3 py-1.5 rounded transition">
+                ⏹ Unload All
+              </button>
             </div>
             <div id="localList" class="space-y-2 text-sm text-slate-300">Scanning...</div>
           </section>
@@ -696,11 +534,13 @@ def get_ui():
       <script>
         let localModelSet = new Set();
         let activeTasksMap = {};
+        let loadedModelsList = [];
 
         async function initHardwareInfo() {
           try {
             const res = await fetch('/api/system_info');
             const data = await res.json();
+            loadedModelsList = data.loaded_models || [];
             
             if (data.gpu && data.gpu.has_gpu) {
               const freeStr = data.gpu.free_vram_gb > 0 ? `${data.gpu.free_vram_gb} GB Free / ` : '';
@@ -721,7 +561,6 @@ def get_ui():
             }
           } catch(e) {
             document.getElementById('vramStat').textContent = 'Error probing VRAM';
-            document.getElementById('ramStat').textContent = 'Error probing RAM';
           }
         }
 
@@ -751,13 +590,7 @@ def get_ui():
           const header = document.getElementById('catalogHeader');
           const sortLabel = document.getElementById('sortSelect').selectedOptions[0].text;
           
-          const suffix = verifiedOnly ? ' [Verified Only]' : '';
-          if (q === "") {
-            header.textContent = `All Available Models (${sortLabel})${suffix}`;
-          } else {
-            header.textContent = `Search Results for "${q}" (${sortLabel})${suffix}`;
-          }
-
+          header.textContent = q === "" ? `All Available Models (${sortLabel})` : `Search Results for "${q}" (${sortLabel})`;
           container.innerHTML = '<p class="text-slate-400">Loading catalog from Hugging Face...</p>';
           
           try {
@@ -766,7 +599,7 @@ def get_ui():
             container.innerHTML = '';
             
             if (!models || models.length === 0) {
-              container.innerHTML = '<p class="text-slate-400">No GGUF models found matching your criteria.</p>';
+              container.innerHTML = '<p class="text-slate-400">No GGUF models found.</p>';
               return;
             }
 
@@ -779,10 +612,10 @@ def get_ui():
               card.className = 'bg-slate-950 p-4 rounded border border-slate-700 space-y-3';
               
               const verifiedBadge = m.is_verified 
-                ? `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer" title="Click to view all models by ${m.maker}">🛡️ ${m.maker}</button>`
-                : `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition cursor-pointer" title="Click to view all models by ${m.maker}">${m.maker}</button>`;
+                ? `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer">🛡️ ${m.maker}</button>`
+                : `<button onclick="searchAuthor('${m.maker}')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition cursor-pointer">${m.maker}</button>`;
 
-              const trustBadge = `<span class="text-[10px] bg-slate-800 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono" title="Community Trust Score">⭐ ${m.trust_score}/100</span>`;
+              const trustBadge = `<span class="text-[10px] bg-slate-800 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono">⭐ ${m.trust_score}/100</span>`;
 
               card.innerHTML = `
                 <div class="flex justify-between items-start">
@@ -858,13 +691,12 @@ def get_ui():
 
             let btnHtml = '';
             const btnId = `btn-${btoa(f.group_name).replace(/=/g, '')}`;
-
             const filesPayload = encodeURIComponent(JSON.stringify(f.paths));
 
             if (isDownloaded) {
               btnHtml = `
                 <button id="${btnId}" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">
-                  ✓ Downloaded
+                  ✓ Installed
                 </button>`;
             } else if (isDownloading) {
               btnHtml = `
@@ -910,11 +742,10 @@ def get_ui():
 
         async function triggerDownload(repoId, groupName, filesPayloadEncoded, btn) {
           btn.disabled = true;
-          btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
+          btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
           btn.innerHTML = "⏳ Downloading...";
 
           const filePaths = JSON.parse(decodeURIComponent(filesPayloadEncoded));
-
           await fetch('/api/download', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -923,35 +754,36 @@ def get_ui():
           updateTasks();
         }
 
+        async function loadModelIntoGPU(modelPath, btn) {
+          btn.disabled = true;
+          btn.textContent = '⏳ Loading...';
+          btn.className = 'bg-sky-950 text-sky-300 border border-sky-800 px-2.5 py-1 rounded text-xs animate-pulse';
+
+          const res = await fetch('/api/load_model', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({model_path: modelPath, gpu_offload: 'max'})
+          });
+          const data = await res.json();
+          fetchLocalModels();
+        }
+
+        async function unloadActiveModel() {
+          await fetch('/api/unload_model', {method: 'POST'});
+          fetchLocalModels();
+        }
+
         async function deleteModel(filename) {
           if (!confirm(`Are you sure you want to delete ${filename} to free up space?`)) return;
-
-          try {
-            const res = await fetch('/api/delete', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({filename: filename})
-            });
-            const data = await res.json();
-            
-            localModelSet.delete(filename);
-
-            const btnId = `btn-${btoa(filename).replace(/=/g, '')}`;
-            const targetBtn = document.getElementById(btnId);
-            if (targetBtn) {
-              targetBtn.disabled = false;
-              targetBtn.className = "bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition";
-              targetBtn.textContent = "Download";
-            }
-
-            if (data.storage) {
-              renderStorageMetrics(data.storage);
-            }
-
-            fetchLocalModels();
-          } catch(e) {
-            alert('Failed to delete model file.');
-          }
+          const res = await fetch('/api/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({filename: filename})
+          });
+          const data = await res.json();
+          localModelSet.delete(filename);
+          if (data.storage) renderStorageMetrics(data.storage);
+          fetchLocalModels();
         }
 
         async function updateTasks() {
@@ -966,24 +798,6 @@ def get_ui():
           }
 
           list.innerHTML = Object.entries(data).map(([file, info]) => {
-            const btnId = `btn-${btoa(file).replace(/=/g, '')}`;
-            const targetBtn = document.getElementById(btnId);
-
-            if (info.status === 'completed') {
-              localModelSet.add(file);
-              if (targetBtn) {
-                targetBtn.disabled = true;
-                targetBtn.className = "bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1";
-                targetBtn.innerHTML = "✓ Downloaded";
-              }
-            } else if (info.status === 'downloading') {
-              if (targetBtn) {
-                targetBtn.disabled = true;
-                targetBtn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
-                targetBtn.innerHTML = `⏳ ${info.percent || 0}%`;
-              }
-            }
-
             const pct = info.percent || 0;
             const isDone = info.status === 'completed';
             const barColor = isDone ? 'bg-emerald-500' : 'bg-sky-500';
@@ -1007,10 +821,9 @@ def get_ui():
           const data = await res.json();
           const list = document.getElementById('localList');
           localModelSet.clear();
+          loadedModelsList = data.loaded_models || [];
 
-          if (data.storage) {
-            renderStorageMetrics(data.storage);
-          }
+          if (data.storage) renderStorageMetrics(data.storage);
 
           if (!data.files || data.files.length === 0) {
             list.innerHTML = '<span class="text-slate-500">No GGUF models on disk</span>';
@@ -1019,28 +832,45 @@ def get_ui():
 
           data.files.forEach(m => localModelSet.add(m.filename));
 
-          list.innerHTML = data.files.map(m => `
-            <div class="flex justify-between items-center bg-slate-950 p-2.5 rounded border border-slate-700 text-xs gap-3">
-              <div class="truncate pr-2">
-                <div class="font-medium text-slate-200 truncate" title="${m.filename}">${m.filename}</div>
-                <div class="text-slate-400 text-[10px]">Weight: ${m.weight} | Variant: ${m.variant}</div>
+          list.innerHTML = data.files.map(m => {
+            // Check if this model is currently loaded in memory
+            const isLoaded = loadedModelsList.some(loaded => m.filename.includes(loaded) || loaded.includes(m.filename.replace('.gguf', '')));
+            
+            let actionBtn = '';
+            if (isLoaded) {
+              actionBtn = `
+                <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">
+                  ⚡ Loaded in GPU
+                </span>`;
+            } else {
+              actionBtn = `
+                <button onclick="loadModelIntoGPU('${m.path}', this)" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1">
+                  🚀 Load to GPU
+                </button>`;
+            }
+
+            return `
+              <div class="flex justify-between items-center bg-slate-950 p-3 rounded border ${isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700'} text-xs gap-3">
+                <div class="truncate pr-2">
+                  <div class="font-medium text-slate-200 truncate" title="${m.filename}">${m.filename}</div>
+                  <div class="text-slate-400 text-[10px] mt-0.5">Weight: ${m.weight} | Variant: ${m.variant}</div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">${m.size_gb}</span>
+                  ${actionBtn}
+                  <button onclick="deleteModel('${m.filename}')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">
+                    🗑️
+                  </button>
+                </div>
               </div>
-              <div class="flex items-center gap-2 shrink-0">
-                <span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">${m.size_gb}</span>
-                <button onclick="deleteModel('${m.filename}')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">
-                  🗑️ Delete
-                </button>
-              </div>
-            </div>
-          `).join('');
+            `;
+          }).join('');
         }
 
         initHardwareInfo();
-        fetchLocalModels().then(() => {
-          searchModels();
-        });
+        fetchLocalModels().then(() => { searchModels(); });
         setInterval(updateTasks, 1000);
-        setInterval(fetchLocalModels, 6000);
+        setInterval(fetchLocalModels, 4000);
       </script>
     </body>
     </html>
