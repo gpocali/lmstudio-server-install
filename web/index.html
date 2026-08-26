@@ -11,7 +11,7 @@
   <header class="bg-slate-950 border-b border-slate-800 px-6 py-3.5 flex flex-wrap justify-between items-center gap-4 shrink-0">
     <div class="flex items-center gap-3">
       <h1 class="text-lg font-bold text-sky-400">LM Studio Studio</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded border border-slate-700">Modular Edition</span>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded border border-slate-700">Persistent Multi-Thread Edition</span>
     </div>
 
     <!-- Navigation Page Buttons -->
@@ -38,44 +38,59 @@
     </div>
   </header>
 
-  <!-- ==================== VIEW 1: PROJECT STUDIO (IDE & CHAT) ==================== -->
+  <!-- ==================== VIEW 1: PROJECT STUDIO (IDE & MULTI-THREAD CHAT) ==================== -->
   <main id="viewStudio" class="flex-1 flex overflow-hidden">
     
-    <!-- Left Sidebar: Workspace & Project List -->
+    <!-- Left Sidebar: Workspaces & Chat Threads -->
     <aside class="w-80 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0">
+      
+      <!-- Top Section: Workspaces -->
       <div class="p-4 border-b border-slate-800 flex justify-between items-center">
-        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Active Workspaces</h2>
-        <button onclick="switchView('github')" class="text-xs text-sky-400 hover:text-sky-300 hover:underline">+ Clone New</button>
+        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Workspaces</h2>
+        <button onclick="switchView('github')" class="text-xs text-sky-400 hover:text-sky-300 hover:underline">+ Clone</button>
       </div>
-
-      <div id="sidebarProjectList" class="flex-1 overflow-y-auto p-3 space-y-2 text-xs">
+      <div id="sidebarProjectList" class="max-h-48 overflow-y-auto p-3 space-y-2 text-xs border-b border-slate-800">
         <p class="text-slate-500">Loading workspaces...</p>
       </div>
 
-      <div id="sidebarFilesBlock" class="hidden border-t border-slate-800 p-4 bg-slate-950/80 flex flex-col space-y-3">
+      <!-- Middle Section: Multi-Chat Threads for Active Workspace -->
+      <div id="sidebarThreadsBlock" class="hidden flex-1 flex flex-col p-4 overflow-hidden border-b border-slate-800">
+        <div class="flex justify-between items-center mb-2">
+          <h3 class="text-xs font-bold text-slate-300">Chat Threads</h3>
+          <button onclick="createNewThreadDialog()" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-sky-300 px-2 py-0.5 rounded border border-slate-700">
+            + New Thread
+          </button>
+        </div>
+        <div id="threadsList" class="flex-1 overflow-y-auto space-y-1.5 text-xs pr-1">
+          <p class="text-slate-500">No threads created</p>
+        </div>
+      </div>
+
+      <!-- Bottom Section: Context Files -->
+      <div id="sidebarFilesBlock" class="hidden p-4 bg-slate-950/80 flex flex-col space-y-2 shrink-0">
         <div class="flex justify-between items-center">
           <h3 class="text-xs font-bold text-slate-300">Context Files</h3>
           <button onclick="openNewFileDialog()" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-sky-300 px-2 py-0.5 rounded border border-slate-700">
-            + New Script
+            + New File
           </button>
         </div>
-        <p class="text-[11px] text-slate-400">Check files to include in AI context (or leave empty):</p>
-        <div id="filesCheckboxList" class="max-h-48 overflow-y-auto space-y-1.5 pr-1 font-mono text-[11px] text-slate-300">
+        <div id="filesCheckboxList" class="max-h-36 overflow-y-auto space-y-1.5 pr-1 font-mono text-[11px] text-slate-300">
           <p class="text-slate-500">Select a project</p>
         </div>
       </div>
+
     </aside>
 
     <!-- Main Front & Center Chat / Code Studio -->
     <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden">
       
-      <!-- Studio Header with Active Branch Selector -->
-      <div class="bg-slate-950/60 border-b border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-3 shrink-0">
+      <!-- Studio Top Action Header -->
+      <div class="bg-slate-950/70 border-b border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-3 shrink-0">
         <div>
           <div class="flex items-center gap-3">
             <span class="text-base font-bold text-slate-100" id="studioProjectHeader">Select a Project from Left Pane</span>
             
-            <!-- Branch Selector Dropdown -->
+            <!-- Branch Selector -->
             <div id="studioBranchContainer" class="hidden flex items-center gap-1.5">
               <span class="text-xs text-slate-400">🌿 Branch:</span>
               <select id="studioBranchSelect" onchange="onStudioBranchChanged()" class="bg-slate-900 border border-slate-700 text-sky-300 px-2.5 py-1 rounded text-xs font-mono focus:border-sky-500 focus:outline-none">
@@ -86,12 +101,32 @@
           <span class="text-[11px] text-slate-400" id="studioAccountSubtitle">--</span>
         </div>
 
+        <!-- Git Actions: Pull, Validate, Push -->
         <div id="studioActionsGroup" class="hidden flex items-center gap-2">
-          <button onclick="runSyntaxValidation()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs px-3 py-1.5 rounded text-slate-200 transition">
-            🧪 Validate Syntax
+          <button onclick="pullUpstreamChanges()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs px-3 py-1.5 rounded text-sky-300 transition flex items-center gap-1" title="Pull remote changes into local branch">
+            ⬇ Pull
           </button>
-          <button onclick="pushCurrentBranch()" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-3.5 py-1.5 rounded font-medium transition flex items-center gap-1">
+          <button onclick="runSyntaxValidation()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs px-3 py-1.5 rounded text-slate-200 transition">
+            🧪 Validate
+          </button>
+          <button id="studioPushBtn" onclick="pushCurrentBranch()" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-3.5 py-1.5 rounded font-medium transition flex items-center gap-1">
             🚀 Push to GitHub
+          </button>
+        </div>
+      </div>
+
+      <!-- Persistent Pending Changes Alert Banner -->
+      <div id="pendingChangesBanner" class="hidden bg-amber-950/40 border-b border-amber-800/80 px-6 py-2.5 flex justify-between items-center text-xs shrink-0">
+        <div class="flex items-center gap-2 overflow-hidden">
+          <span class="text-amber-400 font-bold">⚠️ Pending Changes on Disk:</span>
+          <span id="pendingFilesCount" class="text-slate-300 truncate">0 files</span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button onclick="showPendingDiffModal()" class="bg-slate-800 hover:bg-slate-700 text-amber-300 px-2.5 py-1 rounded border border-slate-700 text-xs">
+            Review & Commit
+          </button>
+          <button onclick="discardAllWorkingChanges()" class="bg-slate-800 hover:bg-slate-700 text-rose-300 px-2.5 py-1 rounded border border-slate-700 text-xs">
+            Discard
           </button>
         </div>
       </div>
@@ -100,7 +135,7 @@
       <div id="chatHistoryWindow" class="flex-1 overflow-y-auto p-6 space-y-4">
         <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">
           <div class="font-bold text-sky-400 mb-1">🤖 Local AI Software Engineer Ready</div>
-          Select a project on the left, pick or create a target branch, check your context files, and submit instructions.
+          Prompts and outputs are tracked inside <code class="text-amber-300 font-mono">.lmstudio_history.json</code> so your chat and staged diffs are restored automatically after page reloads.
         </div>
       </div>
 
@@ -113,7 +148,7 @@
           </div>
           <div class="flex gap-2">
             <textarea id="studioPromptInput" rows="2" 
-                      placeholder="e.g. In install.sh and model_manager.py, add branch switching support and validate bash syntax..."
+                      placeholder="e.g. In install.sh and model_manager.py, track chat history persistently in a dot file and add upstream pull..."
                       class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none font-mono"></textarea>
             <button id="studioSendBtn" onclick="executeStudioTask()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
               ⚡ Run
@@ -138,7 +173,7 @@
       <div id="patGuideContent" class="hidden text-xs text-slate-300 space-y-2 border-t border-slate-700 pt-3">
         <ol class="list-decimal list-inside space-y-1.5 text-slate-300">
           <li>Log into your GitHub account.</li>
-          <li>Click <strong>Profile Photo (top-right)</strong> ➔ <strong>Settings</strong> ➔ <strong>Developer settings</strong>.</li>
+          <li>Click <strong>Profile Photo</strong> ➔ <strong>Settings</strong> ➔ <strong>Developer settings</strong>.</li>
           <li>Click <strong>Personal access tokens</strong> ➔ <strong>Tokens (classic)</strong>.</li>
           <li>Click <strong>Generate new token (classic)</strong>.</li>
           <li>Check the <strong><code class="text-emerald-400 font-semibold">repo</code></strong> scope.</li>
@@ -297,6 +332,8 @@
     let currentWorkspaceDir = "";
     let currentBranch = "main";
     let currentDisplayName = "";
+    let activeThreadId = "thread-default";
+    let currentHistoryData = null;
 
     function switchView(viewName) {
       document.getElementById('viewStudio').classList.toggle('hidden', viewName !== 'studio');
@@ -317,6 +354,7 @@
 
       if (viewName === 'studio') {
         loadSidebarWorkspaces();
+        if (currentWorkspaceDir) refreshWorkspaceStatus();
       } else if (viewName === 'github') {
         loadAccounts();
       } else if (viewName === 'models') {
@@ -340,9 +378,7 @@
           document.getElementById('vramStat').textContent = 'No GPU';
         }
 
-        if (data.storage) {
-          renderStorageMetrics(data.storage);
-        }
+        if (data.storage) renderStorageMetrics(data.storage);
 
         const agentBadge = document.getElementById('agentModelBadge');
         if (agentBadge) {
@@ -354,15 +390,11 @@
     function renderStorageMetrics(storage) {
       const mainStat = document.getElementById('storageStat');
       const subStat = document.getElementById('diskSubStat');
-      if (mainStat && storage) {
-        mainStat.innerHTML = `${storage.used_gb} / ${storage.total_gb} GB`;
-      }
-      if (subStat && storage) {
-        subStat.innerHTML = `Storage: <span class="text-amber-300">${storage.used_gb} GB</span> / ${storage.total_gb} GB (${storage.percent_used}%)`;
-      }
+      if (mainStat && storage) mainStat.innerHTML = `${storage.used_gb} / ${storage.total_gb} GB`;
+      if (subStat && storage) subStat.innerHTML = `Storage: <span class="text-amber-300">${storage.used_gb} GB</span> / ${storage.total_gb} GB (${storage.percent_used}%)`;
     }
 
-    // ---------------- Studio Left Sidebar & Workspaces ----------------
+    // ---------------- Studio Left Sidebar, Threads & Workspaces ----------------
 
     async function loadSidebarWorkspaces() {
       const container = document.getElementById('sidebarProjectList');
@@ -375,16 +407,22 @@
           return;
         }
 
-        container.innerHTML = workspaces.map(w => `
-          <div onclick="selectStudioProject('${w.dir_name}', '${w.display_name}', '${w.branch}')" 
-               class="p-2.5 rounded-lg border ${currentWorkspaceDir === w.dir_name ? 'bg-sky-950/40 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'} cursor-pointer transition">
-            <div class="font-bold truncate">${w.display_name}</div>
-            <div class="flex justify-between items-center text-[10px] text-slate-400 mt-1">
-              <span class="bg-slate-800 px-1.5 py-0.5 rounded font-mono">${w.branch}</span>
-              <span class="text-slate-500">Local Git</span>
+        container.innerHTML = workspaces.map(w => {
+          const pendingBadge = w.has_pending_changes ? `<span class="bg-amber-950 text-amber-300 border border-amber-800 px-1 py-0.2 rounded font-mono text-[9px]">Pending Changes</span>` : '';
+          const pushBadge = w.unpushed_commits > 0 ? `<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-1 py-0.2 rounded font-mono text-[9px]">${w.unpushed_commits} Unpushed</span>` : '';
+
+          return `
+            <div onclick="selectStudioProject('${w.dir_name}', '${w.display_name}', '${w.branch}')" 
+                 class="p-2.5 rounded-lg border ${currentWorkspaceDir === w.dir_name ? 'bg-sky-950/40 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'} cursor-pointer transition">
+              <div class="font-bold truncate">${w.display_name}</div>
+              <div class="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400 mt-1">
+                <span class="bg-slate-800 px-1.5 py-0.5 rounded font-mono">${w.branch}</span>
+                ${pendingBadge}
+                ${pushBadge}
+              </div>
             </div>
-          </div>
-        `).join('');
+          `;
+        }).join('');
       } catch(e) {
         container.innerHTML = '<p class="text-rose-400 p-2">Error loading workspaces.</p>';
       }
@@ -400,10 +438,163 @@
       document.getElementById('studioAccountSubtitle').textContent = `Workspace Path: /storage/lmstudio/workspaces/${dirName}`;
       document.getElementById('studioActionsGroup').classList.remove('hidden');
       document.getElementById('sidebarFilesBlock').classList.remove('hidden');
+      document.getElementById('sidebarThreadsBlock').classList.remove('hidden');
 
       loadSidebarWorkspaces();
       await loadStudioBranches();
       await loadWorkspaceFiles();
+      await loadWorkspaceHistoryAndRender();
+      await refreshWorkspaceStatus();
+    }
+
+    async function refreshWorkspaceStatus() {
+      if (!currentWorkspaceDir) return;
+      try {
+        const res = await fetch(`/api/workspace/status?repo_dir_name=${encodeURIComponent(currentWorkspaceDir)}`);
+        const status = await res.json();
+        
+        const banner = document.getElementById('pendingChangesBanner');
+        const pushBtn = document.getElementById('studioPushBtn');
+
+        if (status.has_pending_changes) {
+          banner.classList.remove('hidden');
+          document.getElementById('pendingFilesCount').textContent = status.pending_files ? status.pending_files.join(', ') : 'Uncommitted file changes';
+        } else {
+          banner.classList.add('hidden');
+        }
+
+        if (status.unpushed_commits > 0) {
+          pushBtn.textContent = `🚀 Push (${status.unpushed_commits})`;
+          pushBtn.className = 'bg-emerald-600 hover:bg-emerald-500 text-xs px-3.5 py-1.5 rounded font-bold transition flex items-center gap-1 animate-pulse';
+        } else {
+          pushBtn.textContent = '🚀 Push to GitHub';
+          pushBtn.className = 'bg-emerald-600 hover:bg-emerald-500 text-xs px-3.5 py-1.5 rounded font-medium transition flex items-center gap-1';
+        }
+      } catch(e) {}
+    }
+
+    async function loadWorkspaceHistoryAndRender() {
+      if (!currentWorkspaceDir) return;
+      try {
+        const res = await fetch(`/api/workspace/history?repo_dir_name=${encodeURIComponent(currentWorkspaceDir)}`);
+        currentHistoryData = await res.json();
+        activeThreadId = currentHistoryData.active_thread_id || "thread-default";
+        
+        renderThreadsSidebar();
+        renderActiveThreadChat();
+      } catch(e) {
+        console.error("Load History Error:", e);
+      }
+    }
+
+    function renderThreadsSidebar() {
+      const container = document.getElementById('threadsList');
+      if (!currentHistoryData || !currentHistoryData.threads || currentHistoryData.threads.length === 0) {
+        container.innerHTML = '<p class="text-slate-500">No threads created</p>';
+        return;
+      }
+
+      container.innerHTML = currentHistoryData.threads.map(t => `
+        <div onclick="switchActiveThread('${t.id}')" 
+             class="p-2 rounded border ${t.id === activeThreadId ? 'bg-sky-950/60 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'} cursor-pointer truncate flex justify-between items-center">
+          <span class="truncate" title="${t.title}">💬 ${t.title}</span>
+          <span class="text-[9px] text-slate-500 ml-1 font-mono">${(t.messages || []).length}</span>
+        </div>
+      `).join('');
+    }
+
+    async function switchActiveThread(threadId) {
+      if (!currentWorkspaceDir) return;
+      activeThreadId = threadId;
+      try {
+        await fetch('/api/workspace/switch_thread', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, thread_id: threadId})
+        });
+        renderThreadsSidebar();
+        renderActiveThreadChat();
+      } catch(e) {}
+    }
+
+    async function createNewThreadDialog() {
+      if (!currentWorkspaceDir) return;
+      const title = prompt("Enter a title for the new chat thread (e.g. 'Refactor Auth Pipeline'):");
+      if (!title) return;
+
+      try {
+        const res = await fetch('/api/workspace/create_thread', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, title: title})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          currentHistoryData = data.history;
+          activeThreadId = data.thread.id;
+          renderThreadsSidebar();
+          renderActiveThreadChat();
+        }
+      } catch(e) {
+        alert('Failed to create thread: ' + e.message);
+      }
+    }
+
+    function renderActiveThreadChat() {
+      const chatWindow = document.getElementById('chatHistoryWindow');
+      chatWindow.innerHTML = '';
+
+      const activeThread = (currentHistoryData?.threads || []).find(t => t.id === activeThreadId);
+      if (!activeThread || !activeThread.messages || activeThread.messages.length === 0) {
+        chatWindow.innerHTML = `
+          <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">
+            <div class="font-bold text-sky-400 mb-1">💬 Thread: ${activeThread ? activeThread.title : 'New Thread'}</div>
+            Fresh context ready. Check your target files and run your next coding task.
+          </div>
+        `;
+        return;
+      }
+
+      activeThread.messages.forEach(msg => {
+        // User Message
+        const userMsgDiv = document.createElement('div');
+        userMsgDiv.className = 'bg-slate-800 p-4 rounded-lg border border-slate-700 text-xs text-slate-100 space-y-1';
+        userMsgDiv.innerHTML = `
+          <div class="font-bold text-sky-300 flex items-center justify-between">
+            <span>You</span>
+            <span class="text-[10px] text-slate-400 font-normal">${(msg.target_files || []).join(', ') || 'No files selected'}</span>
+          </div>
+          <p class="whitespace-pre-wrap font-mono mt-1">${msg.instruction}</p>
+        `;
+        chatWindow.appendChild(userMsgDiv);
+
+        // AI Response Message
+        const modFiles = msg.modified_files || [];
+        const aiMsgDiv = document.createElement('div');
+        aiMsgDiv.className = 'bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-emerald-300 space-y-3 font-mono';
+        
+        let reviewDiff = '';
+        if (modFiles.length > 0 && msg.diff) {
+          reviewDiff = `
+            <details class="bg-slate-900 p-2.5 rounded border border-slate-800 text-xs text-slate-200 mt-2">
+              <summary class="cursor-pointer font-bold text-sky-400">View Staged Diff</summary>
+              <pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">${msg.diff}</pre>
+            </details>
+          `;
+        }
+
+        aiMsgDiv.innerHTML = `
+          <div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">
+            <span>🤖 Local AI Agent</span>
+            <span class="text-[10px] text-slate-400 font-normal">${modFiles.length > 0 ? `Modified: ${modFiles.join(', ')}` : 'Advisory Response'}</span>
+          </div>
+          <div class="text-slate-200 whitespace-pre-wrap mt-2">${(msg.ai_response || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+          ${reviewDiff}
+        `;
+        chatWindow.appendChild(aiMsgDiv);
+      });
+
+      chatWindow.scrollTop = chatWindow.scrollHeight;
     }
 
     async function loadStudioBranches() {
@@ -417,9 +608,7 @@
         select.innerHTML = data.branches.map(b => `
           <option value="${b}" ${b === currentBranch ? 'selected' : ''}>${b}</option>
         `).join('') + '<option value="__NEW_BRANCH__">+ New Branch...</option>';
-      } catch(e) {
-        console.error("Load branches error:", e);
-      }
+      } catch(e) {}
     }
 
     async function onStudioBranchChanged() {
@@ -427,7 +616,7 @@
       const val = select.value;
 
       if (val === "__NEW_BRANCH__") {
-        const newBranchName = prompt("Enter new branch name (e.g. feature/my-new-feature):");
+        const newBranchName = prompt("Enter new branch name (e.g. feature/persistent-chat):");
         if (!newBranchName) {
           select.value = currentBranch;
           return;
@@ -443,6 +632,7 @@
             currentBranch = data.active_branch;
             await loadStudioBranches();
             loadSidebarWorkspaces();
+            await refreshWorkspaceStatus();
           } else {
             alert('Branch creation failed: ' + data.message);
             select.value = currentBranch;
@@ -454,7 +644,6 @@
         return;
       }
 
-      // Switch to existing branch
       try {
         const res = await fetch('/api/workspace/switch_branch', {
           method: 'POST',
@@ -466,6 +655,7 @@
           currentBranch = data.active_branch;
           loadSidebarWorkspaces();
           await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
         } else {
           alert('Switch branch failed: ' + data.message);
           select.value = currentBranch;
@@ -473,6 +663,27 @@
       } catch(e) {
         alert('Error: ' + e.message);
         select.value = currentBranch;
+      }
+    }
+
+    async function pullUpstreamChanges() {
+      if (!currentWorkspaceDir) return alert('Select an active project first.');
+      try {
+        const res = await fetch('/api/workspace/pull', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert(`Pull Result:\n\n${data.message}`);
+          await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
+        } else {
+          alert('Pull failed: ' + data.message);
+        }
+      } catch(e) {
+        alert('Error: ' + e.message);
       }
     }
 
@@ -528,6 +739,7 @@
         const data = await res.json();
         if (res.ok) {
           await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
           alert(`Created file: ${data.file_path}`);
         } else {
           alert('Error: ' + data.message);
@@ -537,7 +749,7 @@
       }
     }
 
-    // ---------------- Studio Chat & Interactive Review/Commit ----------------
+    // ---------------- Studio Chat Execution & Staging ----------------
 
     async function executeStudioTask() {
       const promptInput = document.getElementById('studioPromptInput');
@@ -551,12 +763,12 @@
       const checkedBoxes = document.querySelectorAll('#filesCheckboxList input[type="checkbox"]:checked');
       const selectedFiles = Array.from(checkedBoxes).map(cb => cb.value);
 
-      // Append User message
+      // User Message
       const userMsgDiv = document.createElement('div');
       userMsgDiv.className = 'bg-slate-800 p-4 rounded-lg border border-slate-700 text-xs text-slate-100 space-y-1';
       userMsgDiv.innerHTML = `
         <div class="font-bold text-sky-300 flex items-center justify-between">
-          <span>You (Branch: ${currentBranch})</span>
+          <span>You</span>
           <span class="text-[10px] text-slate-400 font-normal">${selectedFiles.length > 0 ? selectedFiles.join(', ') : 'No files selected'}</span>
         </div>
         <p class="whitespace-pre-wrap font-mono mt-1">${instruction}</p>
@@ -567,7 +779,7 @@
       sendBtn.disabled = true;
       sendBtn.textContent = '⏳ Thinking...';
 
-      // Loading bubble
+      // AI Response Bubble
       const cardId = `action-card-${Date.now()}`;
       const aiMsgDiv = document.createElement('div');
       aiMsgDiv.id = cardId;
@@ -583,12 +795,13 @@
           body: JSON.stringify({
             repo_dir_name: currentWorkspaceDir,
             target_files: selectedFiles,
-            instruction: instruction
+            instruction: instruction,
+            thread_id: activeThreadId
           })
         });
         const data = await res.json();
         if (res.ok) {
-          const modFiles = data.modified_files || [];
+          const modFiles = data.message.modified_files || [];
           const modFilesJson = encodeURIComponent(JSON.stringify(modFiles));
 
           let commitReviewBox = '';
@@ -602,12 +815,12 @@
                 
                 <details class="bg-slate-950 p-2 rounded border border-slate-800 text-xs">
                   <summary class="cursor-pointer font-bold text-sky-400">View Git Diff</summary>
-                  <pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">${data.diff || 'No diff available'}</pre>
+                  <pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">${data.git_status.diff || 'No diff available'}</pre>
                 </details>
 
                 <div>
                   <label class="block text-[11px] text-slate-400 mb-1">Commit Message:</label>
-                  <input type="text" id="commit-msg-${cardId}" value="${data.proposed_commit_msg.replace(/"/g, '&quot;')}" 
+                  <input type="text" id="commit-msg-${cardId}" value="${data.message.proposed_commit_msg.replace(/"/g, '&quot;')}" 
                          class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-sky-500 focus:outline-none">
                 </div>
 
@@ -616,9 +829,9 @@
                           class="bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1 rounded text-xs text-rose-300 transition">
                     ✕ Discard
                   </button>
-                  <button onclick="commitProposedChanges('${cardId}', '${modFilesJson}')" 
+                  <button onclick="commitProposedChanges('${cardId}', '${modFilesJson}', '${encodeURIComponent(instruction)}')" 
                           class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1 rounded text-xs transition flex items-center gap-1">
-                    ✓ Commit to '${currentBranch}'
+                    ✓ Commit & Append CHANGELOG
                   </button>
                 </div>
               </div>
@@ -628,12 +841,14 @@
           aiMsgDiv.innerHTML = `
             <div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">
               <span>🤖 Local AI Agent</span>
-              <span class="text-[10px] text-slate-400 font-normal">${modFiles.length > 0 ? 'Changes Staged' : 'Advisory Response'}</span>
+              <span class="text-[10px] text-slate-400 font-normal">${modFiles.length > 0 ? 'Changes Staged on Disk' : 'Advisory Response'}</span>
             </div>
-            <div class="text-slate-200 whitespace-pre-wrap mt-2">${data.ai_response.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+            <div class="text-slate-200 whitespace-pre-wrap mt-2">${data.message.ai_response.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
             ${commitReviewBox}
           `;
           await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
+          await loadWorkspaceHistoryAndRender();
         } else {
           aiMsgDiv.innerHTML = `<span class="text-rose-400">❌ Error: ${data.message}</span>`;
         }
@@ -646,10 +861,11 @@
       chatWindow.scrollTop = chatWindow.scrollHeight;
     }
 
-    async function commitProposedChanges(cardId, modFilesJson) {
+    async function commitProposedChanges(cardId, modFilesJson, instructionEnc) {
       const commitInput = document.getElementById(`commit-msg-${cardId}`);
       const commitMsg = commitInput ? commitInput.value.trim() : "AI Update";
       const modFiles = JSON.parse(decodeURIComponent(modFilesJson));
+      const instruction = decodeURIComponent(instructionEnc);
       const card = document.getElementById(cardId);
 
       try {
@@ -659,21 +875,22 @@
           body: JSON.stringify({
             repo_dir_name: currentWorkspaceDir,
             commit_message: commitMsg,
-            target_files: modFiles
+            target_files: modFiles,
+            instruction_summary: instruction
           })
         });
         const data = await res.json();
         if (res.ok) {
           card.querySelector('.bg-slate-900').innerHTML = `
             <div class="flex justify-between items-center text-xs">
-              <span class="text-emerald-400 font-bold">✓ Committed: "${commitMsg}" to branch '${data.branch}'</span>
+              <span class="text-emerald-400 font-bold">✓ Committed to '${data.branch}' & Updated CHANGELOG.md</span>
               <button onclick="pushCurrentBranch()" class="bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded text-xs font-semibold transition flex items-center gap-1">
                 🚀 Push to GitHub
               </button>
             </div>
           `;
           loadSidebarWorkspaces();
-          await loadStudioBranches();
+          await refreshWorkspaceStatus();
         } else {
           alert('Commit failed: ' + data.message);
         }
@@ -698,15 +915,61 @@
         });
         const data = await res.json();
         if (res.ok) {
-          card.querySelector('.bg-slate-900').innerHTML = `
-            <span class="text-rose-400 font-bold">✕ Changes discarded.</span>
-          `;
+          card.querySelector('.bg-slate-900').innerHTML = `<span class="text-rose-400 font-bold">✕ Changes discarded.</span>`;
           await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
         } else {
           alert('Discard failed: ' + data.message);
         }
       } catch(e) {
         alert('Communication Error: ' + e.message);
+      }
+    }
+
+    async function showPendingDiffModal() {
+      const promptMsg = prompt("Enter commit message for currently pending changes:");
+      if (!promptMsg) return;
+
+      try {
+        const res = await fetch('/api/workspace/commit', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            repo_dir_name: currentWorkspaceDir,
+            commit_message: promptMsg,
+            target_files: [],
+            instruction_summary: "Manual workspace commit"
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert(`Committed successfully to branch '${data.branch}'!`);
+          loadSidebarWorkspaces();
+          await refreshWorkspaceStatus();
+          await loadWorkspaceHistoryAndRender();
+        } else {
+          alert('Commit failed: ' + data.message);
+        }
+      } catch(e) {
+        alert('Error: ' + e.message);
+      }
+    }
+
+    async function discardAllWorkingChanges() {
+      if (!confirm("Discard all pending uncommitted working tree changes?")) return;
+      try {
+        const res = await fetch('/api/workspace/discard', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, target_files: []})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
+        }
+      } catch(e) {
+        alert('Error: ' + e.message);
       }
     }
 
@@ -730,6 +993,7 @@
         const data = await res.json();
         if (res.ok) {
           pushDiv.innerHTML = `<div class="font-bold text-emerald-400">✓ Push Successful</div><p class="mt-1">${data.message}</p>`;
+          await refreshWorkspaceStatus();
         } else {
           pushDiv.innerHTML = `<div class="font-bold text-rose-400">❌ Push Failed</div><p class="mt-1">${data.message}</p>`;
         }
@@ -818,7 +1082,6 @@
           <option value="${a.username}">${a.label} (@${a.username})</option>
         `).join('');
       } catch(e) {
-        console.error("Load Accounts Error:", e);
         container.innerHTML = '<p class="text-xs text-rose-400">Error loading accounts.</p>';
       }
     }
@@ -1275,6 +1538,7 @@
     setInterval(updateTasks, 1000);
     setInterval(initHardwareInfo, 5000);
     setInterval(fetchLocalModels, 4000);
+    setInterval(() => { if (currentWorkspaceDir) refreshWorkspaceStatus(); }, 3000);
   </script>
 </body>
 </html>

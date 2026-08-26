@@ -1,6 +1,6 @@
 """
 LM Studio Server Entrypoint Router
-Dispatches API requests to modular core submodules.
+Dispatches API requests to modular core submodules with full chat persistence and upstream pull sync.
 """
 
 import os
@@ -36,7 +36,11 @@ from core.github_vault import (
     save_accounts_data,
     get_token_for_user,
     get_active_workspaces,
-    get_workspace_branches
+    get_workspace_branches,
+    get_workspace_git_status,
+    load_workspace_history,
+    save_workspace_history,
+    append_to_changelog
 )
 from core.agent_engine import process_agent_task
 
@@ -84,16 +88,26 @@ class CreateFileRequest(BaseModel):
     file_path: str
     initial_content: str = ""
 
+class CreateThreadRequest(BaseModel):
+    repo_dir_name: str
+    title: str = "New Chat Thread"
+
+class SwitchThreadRequest(BaseModel):
+    repo_dir_name: str
+    thread_id: str
+
 class AgentTaskRequest(BaseModel):
     repo_dir_name: str
     target_files: list[str] = []
     instruction: str
+    thread_id: str = ""
     model_identifier: str = ""
 
 class CommitRequest(BaseModel):
     repo_dir_name: str
     commit_message: str
     target_files: list[str] = []
+    instruction_summary: str = ""
 
 class DiscardRequest(BaseModel):
     repo_dir_name: str
@@ -236,16 +250,11 @@ def api_load_model(req: LoadRequest):
             in_llm_section = False
             for line in ls_res.stdout.splitlines():
                 l_str = line.strip()
-                if "LLM" in l_str:
-                    in_llm_section = True
-                    continue
-                if "EMBEDDING" in l_str or l_str.startswith("---"):
-                    in_llm_section = False
-                    continue
+                if "LLM" in l_str: in_llm_section = True; continue
+                if "EMBEDDING" in l_str or l_str.startswith("---"): in_llm_section = False; continue
                 if in_llm_section and l_str:
                     parts = l_str.split()
-                    if parts:
-                        registered_keys.append(parts[0])
+                    if parts: registered_keys.append(parts[0])
     except Exception: pass
 
     matched_target = None
@@ -267,13 +276,7 @@ def api_load_model(req: LoadRequest):
     last_error = ""
     for target in dedup_targets:
         try:
-            cmd = [
-                lms, "load", target,
-                f"--gpu={req.gpu_offload}",
-                f"--context-length={req.context_length}",
-                f"--ttl={req.ttl}",
-                "--yes"
-            ]
+            cmd = [lms, "load", target, f"--gpu={req.gpu_offload}", f"--context-length={req.context_length}", f"--ttl={req.ttl}", "--yes"]
             res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=30)
             if res.returncode == 0:
                 return {"status": "success", "loaded_target": target, "output": res.stdout or f"Loaded {target} into GPU VRAM."}
@@ -394,11 +397,41 @@ def api_list_branches(account_username: str, repo_full_name: str):
     except Exception: pass
     return ["main", "dev", "master"]
 
-# ---------------- Workspace & Branch Endpoints ----------------
+# ---------------- Workspace, Multi-Thread & Status Endpoints ----------------
 
 @app.get("/api/workspaces/active")
 def api_get_workspaces():
     return get_active_workspaces()
+
+@app.get("/api/workspace/status")
+def api_get_status(repo_dir_name: str):
+    return get_workspace_git_status(repo_dir_name)
+
+@app.get("/api/workspace/history")
+def api_get_history(repo_dir_name: str):
+    return load_workspace_history(repo_dir_name)
+
+@app.post("/api/workspace/create_thread")
+def api_create_thread(req: CreateThreadRequest):
+    hist = load_workspace_history(req.repo_dir_name)
+    new_id = f"thread-{int(os.times().elapsed * 1000)}"
+    new_thread = {
+        "id": new_id,
+        "title": req.title.strip() or "Untitled Thread",
+        "created_at": str(os.times().elapsed),
+        "messages": []
+    }
+    hist.setdefault("threads", []).insert(0, new_thread)
+    hist["active_thread_id"] = new_id
+    save_workspace_history(req.repo_dir_name, hist)
+    return {"status": "success", "thread": new_thread, "history": hist}
+
+@app.post("/api/workspace/switch_thread")
+def api_switch_thread(req: SwitchThreadRequest):
+    hist = load_workspace_history(req.repo_dir_name)
+    hist["active_thread_id"] = req.thread_id
+    save_workspace_history(req.repo_dir_name, hist)
+    return {"status": "success", "history": hist}
 
 @app.get("/api/workspace/branches")
 def api_get_workspace_branches(repo_dir_name: str):
@@ -428,6 +461,19 @@ def api_create_branch(req: CreateBranchRequest):
         if res.returncode == 0:
             return {"status": "success", "active_branch": clean_b}
         return JSONResponse(status_code=400, content={"status": "error", "message": res.stderr or res.stdout})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+@app.post("/api/workspace/pull")
+def api_pull_upstream(req: WorkspaceActionRequest):
+    w_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
+    if not os.path.exists(w_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+    try:
+        res = subprocess.run(["git", "-C", w_path, "pull", "origin", req.branch], capture_output=True, text=True, timeout=25)
+        if res.returncode == 0:
+            return {"status": "success", "message": res.stdout or f"Branch '{req.branch}' is up to date."}
+        return JSONResponse(status_code=500, content={"status": "error", "message": res.stderr or res.stdout})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
@@ -465,7 +511,9 @@ def api_workspace_files(repo_dir_name: str):
     fl = []
     for root, dirs, files in os.walk(w_path):
         if ".git" in root or "__pycache__" in root: continue
-        for f in files: fl.append(os.path.relpath(os.path.join(root, f), w_path))
+        for f in files:
+            if f == ".lmstudio_history.json": continue
+            fl.append(os.path.relpath(os.path.join(root, f), w_path))
     fl.sort()
     return fl
 
@@ -484,7 +532,7 @@ def api_create_file(req: CreateFileRequest):
 
 @app.post("/api/agent/execute")
 def api_agent_execute(req: AgentTaskRequest):
-    res = process_agent_task(req.repo_dir_name, req.target_files, req.instruction, req.model_identifier)
+    res = process_agent_task(req.repo_dir_name, req.target_files, req.instruction, req.thread_id, req.model_identifier)
     if res.get("status") == "error": return JSONResponse(status_code=500, content=res)
     return res
 
@@ -494,7 +542,13 @@ def api_commit(req: CommitRequest):
     if not os.path.exists(w_path):
         return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
     try:
-        # Add specified files or all
+        b_res = subprocess.run(["git", "-C", w_path, "branch", "--show-current"], capture_output=True, text=True)
+        active_branch = b_res.stdout.strip() or "main"
+
+        # 1. Update and stage CHANGELOG.md automatically
+        append_to_changelog(w_path, active_branch, req.commit_message, req.target_files, req.instruction_summary)
+
+        # 2. Add files
         if req.target_files:
             for f in req.target_files:
                 subprocess.run(["git", "-C", w_path, "add", f], capture_output=True)
@@ -503,10 +557,8 @@ def api_commit(req: CommitRequest):
 
         res = subprocess.run(["git", "-C", w_path, "commit", "-m", req.commit_message], capture_output=True, text=True)
         if res.returncode == 0 or "nothing to commit" in res.stdout:
-            # Get current active branch
-            b_res = subprocess.run(["git", "-C", w_path, "branch", "--show-current"], capture_output=True, text=True)
-            active_branch = b_res.stdout.strip() or "main"
-            return {"status": "success", "message": f"Committed to branch '{active_branch}'", "branch": active_branch}
+            git_status = get_workspace_git_status(req.repo_dir_name)
+            return {"status": "success", "message": f"Committed to branch '{active_branch}'", "branch": active_branch, "git_status": git_status}
         return JSONResponse(status_code=400, content={"status": "error", "message": res.stderr or res.stdout})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
@@ -524,7 +576,8 @@ def api_discard(req: DiscardRequest):
         else:
             subprocess.run(["git", "-C", w_path, "checkout", "--", "."], capture_output=True)
             subprocess.run(["git", "-C", w_path, "clean", "-fd"], capture_output=True)
-        return {"status": "success", "message": "Changes discarded."}
+        git_status = get_workspace_git_status(req.repo_dir_name)
+        return {"status": "success", "message": "Changes discarded.", "git_status": git_status}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
@@ -551,7 +604,9 @@ def api_push(req: WorkspaceActionRequest):
     if not os.path.exists(w_path): return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
     try:
         res = subprocess.run(["git", "-C", w_path, "push", "origin", req.branch], capture_output=True, text=True, timeout=25)
-        if res.returncode == 0: return {"status": "success", "message": f"Pushed to origin/{req.branch}!"}
+        if res.returncode == 0:
+            git_status = get_workspace_git_status(req.repo_dir_name)
+            return {"status": "success", "message": f"Pushed to origin/{req.branch}!", "git_status": git_status}
         return JSONResponse(status_code=500, content={"status": "error", "message": res.stderr or res.stdout})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})

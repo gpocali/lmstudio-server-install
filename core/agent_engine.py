@@ -1,8 +1,14 @@
 import os
 import re
+import datetime
 import requests
 import subprocess
-from core.github_vault import WORKSPACES_ROOT
+from core.github_vault import (
+    WORKSPACES_ROOT,
+    load_workspace_history,
+    save_workspace_history,
+    get_workspace_git_status
+)
 from core.hardware import get_loaded_models
 
 def get_active_model_for_agent():
@@ -11,11 +17,12 @@ def get_active_model_for_agent():
         return models[0]
     return "default"
 
-def process_agent_task(repo_dir_name: str, target_files: list[str], instruction: str, model_id: str = ""):
+def process_agent_task(repo_dir_name: str, target_files: list[str], instruction: str, thread_id: str = "", model_id: str = ""):
     workspace_path = os.path.join(WORKSPACES_ROOT, repo_dir_name)
     if not os.path.exists(workspace_path):
         return {"status": "error", "message": "Workspace not found"}
 
+    # 1. Package selected files into prompt context
     context_blocks = []
     for rel_file in target_files:
         full_p = os.path.join(workspace_path, rel_file)
@@ -63,6 +70,7 @@ def process_agent_task(repo_dir_name: str, target_files: list[str], instruction:
 
         ai_response = resp.json()["choices"][0]["message"]["content"]
         
+        # 2. Extract and write files to disk
         file_pattern = re.compile(r'###\s*File:\s*([^\n\r]+)[\r\n]+\x60\x60\x60(?:[a-zA-Z0-9_\-]+)?[\r\n]+([\s\S]*?)[\r\n]+\x60\x60\x60', re.MULTILINE)
         matches = file_pattern.findall(ai_response)
         
@@ -85,22 +93,47 @@ def process_agent_task(repo_dir_name: str, target_files: list[str], instruction:
                     f.write(code_match.group(1))
                 modified_files.append(single_rel)
 
-        # Get working tree diff (unstaged/uncommitted changes)
-        diff_res = subprocess.run(["git", "-C", workspace_path, "diff"], capture_output=True, text=True)
-        diff_text = diff_res.stdout or ""
-        
-        # If diff is empty (e.g. newly created untracked files), check status
-        if not diff_text and modified_files:
-            diff_text = f"New file(s) staged on disk:\n" + "\n".join([f"+ {f}" for f in modified_files])
-
+        # 3. Retrieve working tree status
+        git_status = get_workspace_git_status(repo_dir_name)
         proposed_commit_msg = f"Update {', '.join(modified_files[:3])}: {instruction[:50]}" if modified_files else "Code update"
+
+        # 4. Save persistently to .lmstudio_history.json
+        hist = load_workspace_history(repo_dir_name)
+        t_id = thread_id or hist.get("active_thread_id", "thread-default")
+        
+        target_thread = None
+        for t in hist.get("threads", []):
+            if t["id"] == t_id:
+                target_thread = t
+                break
+        
+        if not target_thread:
+            target_thread = {
+                "id": t_id,
+                "title": f"Thread: {instruction[:25]}...",
+                "created_at": datetime.datetime.utcnow().isoformat(),
+                "messages": []
+            }
+            hist.setdefault("threads", []).append(target_thread)
+
+        msg_payload = {
+            "id": f"msg-{int(datetime.datetime.utcnow().timestamp()*1000)}",
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "instruction": instruction,
+            "target_files": target_files,
+            "modified_files": modified_files,
+            "ai_response": ai_response,
+            "diff": git_status["diff"],
+            "proposed_commit_msg": proposed_commit_msg
+        }
+        target_thread["messages"].append(msg_payload)
+        save_workspace_history(repo_dir_name, hist)
 
         return {
             "status": "success",
-            "modified_files": modified_files,
-            "proposed_commit_msg": proposed_commit_msg,
-            "diff": diff_text[:5000],
-            "ai_response": ai_response
+            "thread_id": t_id,
+            "message": msg_payload,
+            "git_status": git_status
         }
     except Exception as e:
         return {"status": "error", "message": f"Execution error: {str(e)}"}
