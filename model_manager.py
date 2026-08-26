@@ -25,8 +25,47 @@ class DownloadRequest(BaseModel):
 class DeleteRequest(BaseModel):
     filename: str
 
+# Comprehensive dictionary explaining GGUF quantizations
+QUANT_DESCRIPTIONS = {
+    "Q4_K_M": "Recommended standard. Medium 4-bit quantization with optimal balance between low memory and high quality.",
+    "Q4_K_S": "Small 4-bit quantization. Uses slightly less memory than Q4_K_M with minor quality trade-off.",
+    "Q5_K_M": "High quality 5-bit quantization. Near-original quality with modest memory footprint.",
+    "Q5_K_S": "Compact 5-bit quantization. Higher precision than 4-bit with slightly lower memory than Q5_K_M.",
+    "Q8_0": "Extremely high precision (8-bit). Virtually zero quality loss; requires high VRAM.",
+    "Q6_K": "Very high quality 6-bit quantization. Perceptually indistinguishable from 16-bit float for most tasks.",
+    "Q3_K_L": "Large 3-bit quantization. Lower memory footprint; noticeable quality reduction on small models.",
+    "Q3_K_M": "Medium 3-bit quantization. Aggressive compression for fitting very large models into limited VRAM.",
+    "Q3_K_S": "Small 3-bit quantization. Minimal memory usage; high perplexity loss.",
+    "Q2_K": "2-bit quantization. Maximum compression; significant loss in reasoning and grammar.",
+    "IQ4_XS": "Importance Matrix 4-bit extra small. Better quality than legacy Q4_0 with smaller file size.",
+    "IQ4_NL": "Importance Matrix 4-bit non-linear. High quality preservation for modern architectures.",
+    "IQ3_M": "Importance Matrix 3-bit medium. Outperforms traditional Q3_K quantizations in quality.",
+    "IQ3_S": "Importance Matrix 3-bit small. Optimized for fitting into tight memory boundaries.",
+    "IQ2_M": "Importance Matrix 2-bit medium. State-of-the-art 2-bit compression using importance matrix.",
+    "IQ1_S": "Extreme 1-bit quantization. Fits massive architectures into minimum memory; severe degradation.",
+    "FP16": "Full 16-bit unquantized float. Maximum quality and fidelity; highest memory and compute requirements.",
+    "BF16": "Bfloat16 unquantized format. Native training precision with full dynamic range."
+}
+
+def get_quant_description(variant: str):
+    """Returns a friendly description for a given quantization string."""
+    v_upper = variant.upper().replace("-", "_")
+    for key, desc in QUANT_DESCRIPTIONS.items():
+        if key == v_upper:
+            return desc
+    if "Q4" in v_upper:
+        return "4-bit quantization (Balanced everyday performance and memory efficiency)."
+    elif "Q5" in v_upper:
+        return "5-bit quantization (High fidelity with moderate memory overhead)."
+    elif "Q8" in v_upper:
+        return "8-bit quantization (Near-lossless precision with high memory requirements)."
+    elif "Q3" in v_upper or "IQ3" in v_upper:
+        return "3-bit quantization (Compact memory profile with some quality compromise)."
+    elif "Q2" in v_upper or "IQ2" in v_upper:
+        return "2-bit quantization (Ultra-compressed for resource-constrained hardware)."
+    return "Standard GGUF model quantization variant."
+
 def get_storage_usage():
-    """Calculates disk space for the models storage partition."""
     target_path = MODELS_PATH if os.path.exists(MODELS_PATH) else STORAGE_PATH
     try:
         total, used, free = shutil.disk_usage(target_path)
@@ -40,7 +79,6 @@ def get_storage_usage():
         return {"total_gb": 0.0, "used_gb": 0.0, "free_gb": 0.0, "percent_used": 0.0}
 
 def get_system_hardware_info():
-    """Detects System RAM, Dedicated GPU VRAM, and Storage Disk Usage."""
     sys_ram_total_gb = 0.0
     sys_ram_avail_gb = 0.0
     try:
@@ -151,7 +189,6 @@ def get_system_hardware_info():
     }
 
 def parse_model_metadata(filename: str, repo_id: str):
-    """Parse Weight, Quantization, and Format details."""
     weight_match = re.search(r'(\d+(\.\d+)?(?:x\d+)?[bB])', f"{repo_id} {filename}")
     weight = weight_match.group(1).upper() if weight_match else "Unknown"
 
@@ -171,22 +208,52 @@ def fetch_single_file_size(repo_id: str, filename: str):
     return 0
 
 def run_download_job(repo_id: str, filename: str):
-    DOWNLOAD_JOBS[filename] = {"status": "downloading", "progress": "In Progress"}
+    """Streams file download with live byte and percentage calculation."""
+    DOWNLOAD_JOBS[filename] = {
+        "status": "downloading",
+        "downloaded_bytes": 0,
+        "total_bytes": 0,
+        "progress_str": "Connecting...",
+        "percent": 0.0
+    }
     url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
     dest_dir = os.path.join(MODELS_PATH, repo_id.replace('/', '_'))
     os.makedirs(dest_dir, exist_ok=True)
     dest_file = os.path.join(dest_dir, filename)
 
     try:
-        cmd = ["curl", "-L", "-C", "-", "-o", dest_file, url]
-        process = subprocess.run(cmd, capture_output=True, text=True)
-        if process.returncode == 0:
-            DOWNLOAD_JOBS[filename] = {"status": "completed", "progress": "100%"}
-            subprocess.run(["/usr/local/bin/lms", "import", dest_file], capture_output=True)
-        else:
-            DOWNLOAD_JOBS[filename] = {"status": "failed", "progress": process.stderr}
+        with requests.get(url, stream=True, timeout=30) as r:
+            r.raise_for_status()
+            total_size = int(r.headers.get('content-length', 0))
+            downloaded = 0
+            DOWNLOAD_JOBS[filename]["total_bytes"] = total_size
+
+            with open(dest_file, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=4 * 1024 * 1024):  # 4MB chunks
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        dl_gb = round(downloaded / (1024**3), 2)
+                        tot_gb = round(total_size / (1024**3), 2) if total_size > 0 else 0
+                        pct = round((downloaded / total_size) * 100, 1) if total_size > 0 else 0.0
+
+                        DOWNLOAD_JOBS[filename].update({
+                            "downloaded_bytes": downloaded,
+                            "progress_str": f"{dl_gb} GB / {tot_gb} GB ({pct}%)",
+                            "percent": pct
+                        })
+
+        DOWNLOAD_JOBS[filename]["status"] = "completed"
+        DOWNLOAD_JOBS[filename]["progress_str"] = "100% (Complete)"
+        DOWNLOAD_JOBS[filename]["percent"] = 100.0
+        subprocess.run(["/usr/local/bin/lms", "import", dest_file], capture_output=True)
     except Exception as e:
-        DOWNLOAD_JOBS[filename] = {"status": "failed", "progress": str(e)}
+        DOWNLOAD_JOBS[filename] = {
+            "status": "failed",
+            "progress_str": f"Error: {str(e)}",
+            "percent": 0.0
+        }
 
 @app.get("/api/system_info")
 def get_sys_info():
@@ -305,6 +372,7 @@ def get_model_files(repo_id: str):
     parsed_files = []
     for fname, size_bytes in raw_files.items():
         weight, variant = parse_model_metadata(fname, repo_id)
+        description = get_quant_description(variant)
         
         size_gb = round(size_bytes / (1024**3), 2) if size_bytes > 0 else 0.0
         est_mem_req = round(size_gb * 1.2, 2) if size_gb > 0 else 0.0
@@ -334,6 +402,7 @@ def get_model_files(repo_id: str):
             "filename": fname,
             "weight": weight,
             "variant": variant,
+            "description": description,
             "size_gb": size_label,
             "raw_size_gb": size_gb,
             "est_vram": est_vram_label,
@@ -357,7 +426,6 @@ def start_download(req: DownloadRequest, background_tasks: BackgroundTasks):
 
 @app.post("/api/delete")
 def delete_local_model(req: DeleteRequest):
-    """Deletes a model file from disk and clears any related download job."""
     deleted = False
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH):
@@ -366,13 +434,11 @@ def delete_local_model(req: DeleteRequest):
                 try:
                     os.remove(file_path)
                     deleted = True
-                    # Clean up empty directories
                     if not os.listdir(root):
                         os.rmdir(root)
                 except Exception as e:
                     return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
-    # Clear task tracker entry if present
     if req.filename in DOWNLOAD_JOBS:
         del DOWNLOAD_JOBS[req.filename]
 
@@ -422,19 +488,16 @@ def get_ui():
           </div>
           
           <div class="flex flex-wrap items-center gap-3 text-xs">
-            <!-- Dedicated GPU VRAM Badge -->
             <div id="gpuCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
               <span class="text-slate-400">Dedicated VRAM:</span>
               <span id="vramStat" class="font-semibold text-emerald-400">Probing NVML...</span>
             </div>
             
-            <!-- System RAM Badge -->
             <div id="ramCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
               <span class="text-slate-400">System RAM:</span>
               <span id="ramStat" class="font-semibold text-sky-300">Probing memory...</span>
             </div>
 
-            <!-- Storage Partition Usage Badge -->
             <div id="storageCard" class="bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2">
               <span class="text-slate-400">Disk Storage:</span>
               <span id="storageStat" class="font-semibold text-amber-400">Checking disk...</span>
@@ -489,7 +552,7 @@ def get_ui():
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <section class="bg-slate-800 p-6 rounded-lg">
             <h2 class="text-lg font-semibold mb-4">Download Tasks</h2>
-            <div id="tasksList" class="space-y-2 text-sm text-slate-300">No active downloads</div>
+            <div id="tasksList" class="space-y-3 text-sm text-slate-300">No active downloads</div>
           </section>
 
           <section class="bg-slate-800 p-6 rounded-lg">
@@ -606,7 +669,6 @@ def get_ui():
           const parent = btn.parentElement;
           const fileContainer = parent.querySelector('.file-container');
           
-          // Minimize / Toggle behavior
           if (!fileContainer.classList.contains('hidden')) {
             fileContainer.classList.add('hidden');
             btn.textContent = 'Inspect Quantizations & Memory Fit';
@@ -629,7 +691,7 @@ def get_ui():
           }
 
           const table = document.createElement('div');
-          table.className = 'space-y-1.5';
+          table.className = 'space-y-2';
 
           data.files.forEach(f => {
             let fitBadge = '';
@@ -651,25 +713,25 @@ def get_ui():
 
             if (isDownloaded) {
               btnHtml = `
-                <button id="${btnId}" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">
+                <button id="${btnId}" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">
                   ✓ Downloaded
                 </button>`;
             } else if (isDownloading) {
               btnHtml = `
-                <button id="${btnId}" disabled class="bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1">
+                <button id="${btnId}" disabled class="bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1">
                   ⏳ Downloading...
                 </button>`;
             } else {
               btnHtml = `
-                <button id="${btnId}" onclick="triggerDownload('${repoId}', '${f.filename}', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1 rounded text-xs shrink-0 transition">
+                <button id="${btnId}" onclick="triggerDownload('${repoId}', '${f.filename}', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition">
                   Download
                 </button>`;
             }
 
             const row = document.createElement('div');
-            row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2 rounded border border-slate-800 text-xs gap-2';
+            row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
             row.innerHTML = `
-              <div class="space-y-0.5 overflow-hidden">
+              <div class="space-y-1 overflow-hidden pr-2">
                 <div class="font-medium text-sky-200 truncate" title="${f.filename}">${f.filename}</div>
                 <div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">
                   <span>Weight: <strong class="text-slate-200">${f.weight}</strong></span>
@@ -679,6 +741,9 @@ def get_ui():
                   <span>Size: <strong class="text-emerald-400">${f.size_gb}</strong></span>
                   <span>(${f.est_vram} Req)</span>
                   ${fitBadge}
+                </div>
+                <div class="text-[11px] text-slate-400 italic bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/80">
+                  ℹ ${f.description}
                 </div>
               </div>
               ${btnHtml}
@@ -690,7 +755,7 @@ def get_ui():
 
         async function triggerDownload(repoId, filename, btn) {
           btn.disabled = true;
-          btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
+          btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
           btn.innerHTML = "⏳ Downloading...";
 
           await fetch('/api/download', {
@@ -712,15 +777,13 @@ def get_ui():
             });
             const data = await res.json();
             
-            // Remove from local memory set
             localModelSet.delete(filename);
 
-            // Re-enable download button in catalog if present
             const btnId = `btn-${btoa(filename).replace(/=/g, '')}`;
             const targetBtn = document.getElementById(btnId);
             if (targetBtn) {
               targetBtn.disabled = false;
-              targetBtn.className = "bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1 rounded text-xs shrink-0 transition";
+              targetBtn.className = "bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition";
               targetBtn.textContent = "Download";
             }
 
@@ -753,21 +816,30 @@ def get_ui():
               localModelSet.add(file);
               if (targetBtn) {
                 targetBtn.disabled = true;
-                targetBtn.className = "bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1";
+                targetBtn.className = "bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1";
                 targetBtn.innerHTML = "✓ Downloaded";
               }
             } else if (info.status === 'downloading') {
               if (targetBtn) {
                 targetBtn.disabled = true;
-                targetBtn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
-                targetBtn.innerHTML = "⏳ Downloading...";
+                targetBtn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
+                targetBtn.innerHTML = `⏳ ${info.percent || 0}%`;
               }
             }
 
+            const pct = info.percent || 0;
+            const isDone = info.status === 'completed';
+            const barColor = isDone ? 'bg-emerald-500' : 'bg-sky-500';
+
             return `
-              <div class="bg-slate-950 p-2 rounded border border-slate-700">
-                <div class="font-medium truncate">${file}</div>
-                <div class="text-xs text-sky-400 mt-1">${info.status.toUpperCase()}: ${info.progress}</div>
+              <div class="bg-slate-950 p-3 rounded border border-slate-700 space-y-2">
+                <div class="flex justify-between items-center text-xs">
+                  <div class="font-medium truncate pr-2">${file}</div>
+                  <div class="text-sky-300 font-mono shrink-0">${info.progress_str || info.status}</div>
+                </div>
+                <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                  <div class="${barColor} h-1.5 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
+                </div>
               </div>
             `;
           }).join('');
@@ -806,12 +878,11 @@ def get_ui():
           `).join('');
         }
 
-        // Initialize on load
         initHardwareInfo();
         fetchLocalModels().then(() => {
           searchModels();
         });
-        setInterval(updateTasks, 2500);
+        setInterval(updateTasks, 1000);
         setInterval(fetchLocalModels, 6000);
       </script>
     </body>
