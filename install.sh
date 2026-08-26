@@ -56,15 +56,15 @@ echo "[+] Installing system packages and Python runtime..."
 apt-get update -y
 apt-get install -y curl ca-certificates jq gnupg git python3 python3-pip python3-venv python3-uvicorn python3-fastapi python3-requests
 
-# Configure Aider inside a dedicated, isolated venv
+# Configure Aider inside a dedicated venv with modern wheel pre-seeding
 echo "[+] Configuring Aider AI Agent in dedicated virtual environment..."
 VENV_AIDER="${APP_DIR}/venv_aider"
-if [ ! -d "$VENV_AIDER" ] || [ ! -f "${VENV_AIDER}/bin/aider" ]; then
-  python3 -m venv "$VENV_AIDER"
-  "${VENV_AIDER}/bin/pip" install --upgrade pip setuptools wheel
-  "${VENV_AIDER}/bin/pip" install aider-chat
-  ln -sf "${VENV_AIDER}/bin/aider" /usr/local/bin/aider
-fi
+rm -rf "$VENV_AIDER"
+python3 -m venv "$VENV_AIDER"
+"${VENV_AIDER}/bin/pip" install --upgrade pip setuptools wheel
+"${VENV_AIDER}/bin/pip" install --only-binary :all: numpy aiohttp || true
+"${VENV_AIDER}/bin/pip" install --no-build-isolation aider-chat || "${VENV_AIDER}/bin/pip" install aider-chat || true
+ln -sf "${VENV_AIDER}/bin/aider" /usr/local/bin/aider
 
 # 4. Install / Update LM Studio CLI & llmster Daemon
 echo ""
