@@ -30,7 +30,7 @@ This repository allows you to host local LLMs on a dedicated server mount (`/sto
 
 ## Prerequisites
 
-- **Operating System:** Ubuntu Server 22.04 LTS or 24.04 LTS
+- **Operating System:** Ubuntu Server 22.04 LTS, 24.04 LTS or 26.04 LTS
 - **Mount Point:** A mounted storage drive available at `/storage` (or edit `BASE_STORAGE` in `install.sh`)
 - **Privileges:** `sudo` / root administrative access
 
@@ -40,7 +40,7 @@ This repository allows you to host local LLMs on a dedicated server mount (`/sto
 
 ### 1. Clone the Repository
 ```bash
-git clone [https://github.com/gpocali/lmstudio-server-install.git](https://github.com/gpocali/lmstudio-server-install.git)
+git clone https://github.com/gpocali/lmstudio-server-install.git
 cd lmstudio-server-install
 
 ```
