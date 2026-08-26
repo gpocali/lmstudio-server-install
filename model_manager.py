@@ -17,6 +17,7 @@ app = FastAPI(title="LM Studio Headless Model Manager")
 DOWNLOAD_JOBS = {}
 STORAGE_PATH = "/storage/lmstudio"
 MODELS_PATH = os.path.join(STORAGE_PATH, "models")
+LMS_ENV = {**os.environ, "HOME": STORAGE_PATH, "PATH": f"/usr/local/bin:{STORAGE_PATH}/.cache/lm-studio/bin:{STORAGE_PATH}/.lmstudio/bin:/usr/sbin:/usr/bin:/bin"}
 
 VERIFIED_CREATORS = {
     "bartowski", "unsloth", "TheBloke", "MaziyarPanahi", "mradermacher",
@@ -57,18 +58,26 @@ class LoadRequest(BaseModel):
     model_path: str
     identifier: str = ""
     gpu_offload: str = "max"
-    context_length: int = 32768  # Set default context to 32k
+    context_length: int = 32768
     ttl: int = 600
 
+def get_lms_bin():
+    for p in ["/usr/local/bin/lms", f"{STORAGE_PATH}/.lmstudio/bin/lms", f"{STORAGE_PATH}/.cache/lm-studio/bin/lms"]:
+        if os.path.exists(p) and os.access(p, os.X_OK):
+            return p
+    return shutil.which("lms") or "lms"
+
 def get_loaded_models():
-    """Queries `lms ps` to determine which models are currently in VRAM/RAM."""
+    """Queries `lms ps` to find all active models in memory."""
     loaded = []
     try:
-        cmd = ["sudo", "-u", "lmstudio", "HOME=/storage/lmstudio", "/usr/local/bin/lms", "ps"]
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        cmd = [get_lms_bin(), "ps"]
+        res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True)
         if res.returncode == 0:
             lines = res.stdout.strip().split("\n")
-            for line in lines[1:]:
+            for line in lines:
+                if not line.strip() or "IDENTIFIER" in line or "---" in line:
+                    continue
                 parts = line.split()
                 if parts:
                     loaded.append(parts[0])
@@ -236,22 +245,18 @@ def run_download_job(repo_id: str, group_name: str, file_paths: list[str]):
         DOWNLOAD_JOBS[group_name]["percent"] = 100.0
         
         # Link into LM Studio internal cache and register
-        lms_cache = "/storage/lmstudio/.cache/lm-studio/models"
+        lms_cache = os.path.join(STORAGE_PATH, ".cache", "lm-studio", "models")
         os.makedirs(lms_cache, exist_ok=True)
         dest_folder_name = repo_id.replace('/', '_')
         link_target = os.path.join(lms_cache, dest_folder_name)
         if not os.path.exists(link_target):
-            os.symlink(dest_dir, link_target)
+            try:
+                os.symlink(dest_dir, link_target)
+            except Exception:
+                pass
 
-        # Non-blocking import of downloaded model / first shard
         if first_shard_file:
-            subprocess.run([
-                "sudo", "-u", "lmstudio", 
-                "HOME=/storage/lmstudio", 
-                "/usr/local/bin/lms", "import", 
-                "--yes", "--symbolic-link", 
-                first_shard_file
-            ], capture_output=True)
+            subprocess.run([get_lms_bin(), "import", "--yes", "--symbolic-link", first_shard_file], env=LMS_ENV, capture_output=True)
 
     except Exception as e:
         DOWNLOAD_JOBS[group_name] = {"status": "failed", "progress_str": f"Error: {str(e)}", "percent": 0.0}
@@ -370,40 +375,38 @@ def get_model_files(repo_id: str):
 
 @app.post("/api/load_model")
 def load_model(req: LoadRequest):
+    """Unloads active models and loads the target model into GPU VRAM with high context."""
+    lms = get_lms_bin()
     try:
-        subprocess.run([
-            "sudo", "-u", "lmstudio", 
-            "HOME=/storage/lmstudio", 
-            "/usr/local/bin/lms", "unload", "--all"
-        ], capture_output=True)
-
+        # 1. Unload all models first
+        subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True)
+        
+        # 2. Derive identifier from filename
         ident = req.identifier or os.path.basename(req.model_path).replace(".gguf", "")
 
+        # 3. Load target model
         cmd = [
-            "sudo", "-u", "lmstudio", 
-            "HOME=/storage/lmstudio", 
-            "/usr/local/bin/lms", "load", 
-            req.model_path, 
+            lms, "load", req.model_path,
             f"--gpu={req.gpu_offload}",
             f"--context-length={req.context_length}",
             f"--ttl={req.ttl}",
             f"--identifier={ident}",
             "--yes"
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        return {
-            "status": "success" if res.returncode == 0 else "error",
-            "output": res.stdout or res.stderr,
-            "identifier": ident
-        }
+        res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True)
+        if res.returncode == 0:
+            return {"status": "success", "output": res.stdout, "identifier": ident}
+        else:
+            return JSONResponse(status_code=500, content={"status": "error", "message": res.stderr or res.stdout})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 @app.post("/api/unload_model")
 def unload_model():
-    """Unloads all running models from VRAM/RAM."""
+    """Unloads all running models from memory."""
+    lms = get_lms_bin()
     try:
-        res = subprocess.run(["sudo", "-u", "lmstudio", "HOME=/storage/lmstudio", "/usr/local/bin/lms", "unload", "--all"], capture_output=True, text=True)
+        res = subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, text=True)
         return {"status": "success", "output": res.stdout}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
@@ -552,7 +555,7 @@ def get_ui():
                 <h2 class="text-lg font-semibold">Installed Models on Server</h2>
                 <span id="diskSubStat" class="text-xs text-slate-400">-- / -- GB</span>
               </div>
-              <button onclick="unloadActiveModel()" class="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-xs px-3 py-1.5 rounded transition">
+              <button onclick="unloadActiveModel(this)" class="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-xs px-3 py-1.5 rounded transition">
                 ⏹ Unload All
               </button>
             </div>
@@ -786,21 +789,32 @@ def get_ui():
 
         async function loadModelIntoGPU(modelPath, btn) {
           btn.disabled = true;
-          btn.textContent = '⏳ Loading...';
+          btn.textContent = '⏳ Loading (32k ctx)...';
           btn.className = 'bg-sky-950 text-sky-300 border border-sky-800 px-2.5 py-1 rounded text-xs animate-pulse';
 
-          const res = await fetch('/api/load_model', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({model_path: modelPath, gpu_offload: 'max'})
-          });
-          const data = await res.json();
-          fetchLocalModels();
+          try {
+            const res = await fetch('/api/load_model', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({model_path: modelPath, gpu_offload: 'max', context_length: 32768, ttl: 600})
+            });
+            const data = await res.json();
+            if (data.status !== 'success') {
+              alert('Load error: ' + (data.message || JSON.stringify(data)));
+            }
+          } catch(e) {
+            alert('Error communicating with server: ' + e.message);
+          }
+          await fetchLocalModels();
         }
 
-        async function unloadActiveModel() {
-          await fetch('/api/unload_model', {method: 'POST'});
-          fetchLocalModels();
+        async function unloadActiveModel(btn) {
+          if (btn) btn.textContent = '⏳ Unloading...';
+          try {
+            await fetch('/api/unload_model', {method: 'POST'});
+          } catch(e) {}
+          if (btn) btn.textContent = '⏹ Unload All';
+          await fetchLocalModels();
         }
 
         async function deleteModel(filename) {
@@ -863,15 +877,23 @@ def get_ui():
           data.files.forEach(m => localModelSet.add(m.filename));
 
           list.innerHTML = data.files.map(m => {
-            // Check if this model is currently loaded in memory
-            const isLoaded = loadedModelsList.some(loaded => m.filename.includes(loaded) || loaded.includes(m.filename.replace('.gguf', '')));
+            const isLoaded = loadedModelsList.some(loaded => 
+              m.filename.includes(loaded) || 
+              loaded.includes(m.filename.replace('.gguf', '')) ||
+              m.path.includes(loaded)
+            );
             
             let actionBtn = '';
             if (isLoaded) {
               actionBtn = `
-                <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">
-                  ⚡ Loaded in GPU
-                </span>`;
+                <div class="flex items-center gap-1.5">
+                  <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">
+                    ⚡ Loaded (32k)
+                  </span>
+                  <button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">
+                    ⏹
+                  </button>
+                </div>`;
             } else {
               actionBtn = `
                 <button onclick="loadModelIntoGPU('${m.path}', this)" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1">
