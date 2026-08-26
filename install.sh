@@ -36,7 +36,10 @@ else
   usermod -d "$APP_DIR" -s /bin/bash "$SERVICE_USER"
 fi
 
+# Ensure correct base permissions regardless of useradd defaults
 mkdir -p "$APP_DIR" "$MODELS_DIR" "${APP_DIR}/.cache" "${APP_DIR}/.lmstudio"
+chmod 755 "$APP_DIR"
+chmod -R u+rwX,go+rX "$APP_DIR"
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$APP_DIR"
 
 # 3. Install System & Python Dependencies
