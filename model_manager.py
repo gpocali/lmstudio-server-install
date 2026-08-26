@@ -22,12 +22,7 @@ class DownloadRequest(BaseModel):
     filename: str
 
 def get_system_hardware_info():
-    """
-    Detects System RAM and Dedicated GPU VRAM using:
-    1. Direct NVML C-Library bindings (same method as nvtop).
-    2. nvidia-smi CLI.
-    3. sysfs / PCI bus inspection specifically filtering for dedicated GPUs.
-    """
+    """Detects System RAM and Dedicated GPU VRAM."""
     # 1. System RAM Detection
     sys_ram_total_gb = 0.0
     sys_ram_avail_gb = 0.0
@@ -127,7 +122,7 @@ def get_system_hardware_info():
             except Exception:
                 pass
 
-    # Method C: Dedicated PCI Inspection (Prioritizing Vendor 0x10de)
+    # Method C: Dedicated PCI Inspection
     if not gpu_found:
         pci_devices = sorted(glob.glob('/sys/bus/pci/devices/*'))
         for dev in pci_devices:
@@ -173,7 +168,7 @@ def get_system_hardware_info():
     }
 
 def parse_model_metadata(filename: str, repo_id: str):
-    """Parse Weight, Quantization, and Format details from repo and filename."""
+    """Parse Weight, Quantization, and Format details."""
     weight_match = re.search(r'(\d+(\.\d+)?(?:x\d+)?[bB])', f"{repo_id} {filename}")
     weight = weight_match.group(1).upper() if weight_match else "Unknown"
 
@@ -208,34 +203,32 @@ def get_sys_info():
 def search_hf(q: str = "", sort_by: str = "downloads"):
     """
     Search Hugging Face with selectable sorting:
-    - 'downloads': Most downloaded (default)
-    - 'likes': Most liked / starred
-    - 'lastModified': Most recently updated / released
-    - 'alphabetical': Alphabetical by repo ID (A-Z)
+    - 'downloads': Most downloaded
+    - 'likes': Most liked
+    - 'lastModified': Most recently updated
+    - 'alphabetical': Sorted by model name after the slash
     """
-    direction = "-1"
+    # Always pull with valid Hugging Face sort parameters
     hf_sort = "downloads"
-
     if sort_by == "likes":
         hf_sort = "likes"
-        direction = "-1"
     elif sort_by == "lastModified":
         hf_sort = "lastModified"
-        direction = "-1"
-    elif sort_by == "alphabetical":
-        hf_sort = "author"
-        direction = "1"
-    else:
-        hf_sort = "downloads"
-        direction = "-1"
 
-    if not q or q.strip() == "":
-        url = f"https://huggingface.co/api/models?filter=gguf&sort={hf_sort}&direction={direction}&limit=30"
-    else:
-        url = f"https://huggingface.co/api/models?search={q.strip()}&filter=gguf&sort={hf_sort}&direction={direction}&limit=30"
-        
+    params = {
+        "filter": "gguf",
+        "sort": hf_sort,
+        "direction": "-1",
+        "limit": 50
+    }
+    
+    clean_q = q.strip() if q else ""
+    if clean_q:
+        params["search"] = clean_q
+
     try:
-        res = requests.get(url, timeout=10).json()
+        resp = requests.get("https://huggingface.co/api/models", params=params, timeout=10)
+        res = resp.json() if resp.status_code == 200 else []
     except Exception:
         res = []
 
@@ -243,18 +236,28 @@ def search_hf(q: str = "", sort_by: str = "downloads"):
     if isinstance(res, list):
         for m in res:
             repo_id = m.get("id", "")
-            maker = repo_id.split('/')[0] if '/' in repo_id else "Community"
-            model_name = repo_id.split('/')[1] if '/' in repo_id else repo_id
+            if not repo_id:
+                continue
+            
+            # Extract Maker (before slash) and Model Name (after slash)
+            if '/' in repo_id:
+                parts = repo_id.split('/', 1)
+                maker = parts[0]
+                model_name = parts[1]
+            else:
+                maker = "Community"
+                model_name = repo_id
+
             results.append({
                 "id": repo_id,
                 "maker": maker,
                 "model_name": model_name,
-                "downloads": m.get("downloads", 0),
-                "likes": m.get("likes", 0),
-                "lastModified": m.get("lastModified", "")[:10]
+                "downloads": m.get("downloads", 0) or 0,
+                "likes": m.get("likes", 0) or 0,
+                "lastModified": (m.get("lastModified") or "")[:10]
             })
 
-    # Client-side fallback sorting if alphabetical
+    # Sort strictly by the model name after the slash (case-insensitive)
     if sort_by == "alphabetical":
         results.sort(key=lambda x: x["model_name"].lower())
 
@@ -268,7 +271,7 @@ def get_model_files(repo_id: str):
     except Exception:
         res = {}
         
-    siblings = res.get("siblings", [])
+    siblings = res.get("siblings", []) if isinstance(res, dict) else []
     hw = get_system_hardware_info()
     vram_total = hw["gpu"]["total_vram_gb"]
     ram_total = hw["system_ram"]["total_gb"]
@@ -396,7 +399,7 @@ def get_ui():
           </div>
           
           <div class="flex flex-col md:flex-row gap-3">
-            <input id="searchInput" type="text" placeholder="Search by model or creator (e.g. Llama-3.1, bartowski, Qwen2.5, DeepSeek)..." 
+            <input id="searchInput" type="text" placeholder="Search by model or creator (leave empty to view all)..." 
                    onkeydown="if(event.key === 'Enter') searchModels()"
                    class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500 text-sm">
             
@@ -407,16 +410,16 @@ def get_ui():
                 <option value="downloads">Most Downloads</option>
                 <option value="likes">Most Likes / Stars</option>
                 <option value="lastModified">Recent Release Date</option>
-                <option value="alphabetical">Alphabetical (A-Z)</option>
+                <option value="alphabetical">Alphabetical by Name (A-Z)</option>
               </select>
             </div>
 
             <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm transition">Search</button>
-            <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition" title="Reset to Trending">Reset</button>
+            <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition" title="Reset Search">Reset</button>
           </div>
           
           <div id="searchResults" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            <p class="text-slate-400">Loading popular Hugging Face models...</p>
+            <p class="text-slate-400">Loading models...</p>
           </div>
         </section>
 
@@ -469,45 +472,56 @@ def get_ui():
           const sortBy = document.getElementById('sortSelect').value;
           const container = document.getElementById('searchResults');
           const header = document.getElementById('catalogHeader');
+          const sortLabel = document.getElementById('sortSelect').selectedOptions[0].text;
           
           if (q === "") {
-            header.textContent = `Available Models (${document.getElementById('sortSelect').selectedOptions[0].text})`;
+            header.textContent = `All Available Models (${sortLabel})`;
           } else {
-            header.textContent = `Search Results for "${q}" (${document.getElementById('sortSelect').selectedOptions[0].text})`;
+            header.textContent = `Search Results for "${q}" (${sortLabel})`;
           }
 
-          container.innerHTML = '<p class="text-slate-400">Querying Hugging Face API...</p>';
-          const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort_by=${encodeURIComponent(sortBy)}`);
-          const models = await res.json();
-          container.innerHTML = '';
+          container.innerHTML = '<p class="text-slate-400">Loading catalog from Hugging Face...</p>';
           
-          if (!models || models.length === 0) {
-            container.innerHTML = '<p class="text-slate-400">No GGUF models found matching your criteria.</p>';
-            return;
-          }
+          try {
+            const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort_by=${encodeURIComponent(sortBy)}`);
+            let models = await res.json();
+            container.innerHTML = '';
+            
+            if (!models || models.length === 0) {
+              container.innerHTML = '<p class="text-slate-400">No GGUF models found.</p>';
+              return;
+            }
 
-          models.forEach(m => {
-            const card = document.createElement('div');
-            card.className = 'bg-slate-950 p-4 rounded border border-slate-700 space-y-3';
-            card.innerHTML = `
-              <div class="flex justify-between items-start">
-                <div class="overflow-hidden pr-2">
-                  <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800">${m.maker}</span>
-                  <h3 class="font-bold text-slate-100 text-base mt-1 truncate" title="${m.model_name}">${m.model_name}</h3>
-                  <div class="text-[11px] text-slate-400 mt-0.5">Updated: ${m.lastModified || 'Recent'}</div>
+            // Frontend alphabetical fallback sorting strictly after the slash
+            if (sortBy === 'alphabetical') {
+              models.sort((a, b) => (a.model_name || '').localeCompare(b.model_name || '', undefined, { sensitivity: 'base' }));
+            }
+
+            models.forEach(m => {
+              const card = document.createElement('div');
+              card.className = 'bg-slate-950 p-4 rounded border border-slate-700 space-y-3';
+              card.innerHTML = `
+                <div class="flex justify-between items-start">
+                  <div class="overflow-hidden pr-2">
+                    <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800">${m.maker}</span>
+                    <h3 class="font-bold text-slate-100 text-base mt-1 truncate" title="${m.model_name}">${m.model_name}</h3>
+                    <div class="text-[11px] text-slate-400 mt-0.5">Updated: ${m.lastModified || 'Recent'}</div>
+                  </div>
+                  <div class="text-right text-xs text-slate-400 shrink-0">
+                    <div>⬇ ${(m.downloads || 0).toLocaleString()}</div>
+                    <div>❤ ${(m.likes || 0).toLocaleString()}</div>
+                  </div>
                 </div>
-                <div class="text-right text-xs text-slate-400 shrink-0">
-                  <div>⬇ ${m.downloads.toLocaleString()}</div>
-                  <div>❤ ${m.likes.toLocaleString()}</div>
-                </div>
-              </div>
-              <button onclick="fetchFiles('${m.id}', this)" class="w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">
-                Inspect Quantizations & Memory Fit
-              </button>
-              <div class="file-container mt-3 hidden space-y-2"></div>
-            `;
-            container.appendChild(card);
-          });
+                <button onclick="fetchFiles('${m.id}', this)" class="w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">
+                  Inspect Quantizations & Memory Fit
+                </button>
+                <div class="file-container mt-3 hidden space-y-2"></div>
+              `;
+              container.appendChild(card);
+            });
+          } catch(err) {
+            container.innerHTML = '<p class="text-rose-400">Error retrieving models from Hugging Face.</p>';
+          }
         }
 
         async function fetchFiles(repoId, btn) {
