@@ -381,42 +381,67 @@ def get_model_files(repo_id: str):
 
 @app.post("/api/load_model")
 def load_model(req: LoadRequest):
-    """Unloads active models and loads the target model into GPU VRAM."""
+    """
+    Robust multi-strategy model loader.
+    Auto-imports the file, extracts indexed candidates, and executes lms load.
+    """
     lms = get_lms_bin()
     fname = os.path.basename(req.model_path)
-    ident = req.identifier or fname.replace(".gguf", "")
+    parent_dir = os.path.basename(os.path.dirname(req.model_path))
 
-    # 1. Unload running models first
+    # 1. Ensure model is imported/indexed non-interactively
+    subprocess.run([lms, "import", "--yes", "--symbolic-link", req.model_path], env=LMS_ENV, capture_output=True)
+
+    # 2. Unload active models
     subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True)
 
-    # 2. Try loading by absolute file path
-    cmd = [
-        lms, "load", req.model_path,
-        f"--gpu={req.gpu_offload}",
-        f"--context-length={req.context_length}",
-        f"--ttl={req.ttl}",
-        "--yes"
-    ]
-    res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True)
+    # 3. Generate candidate keys to attempt
+    # e.g., "gemma-4-26B-A4B-it", "unsloth/gemma-4-26b-a4b-it", raw filename, etc.
+    candidates = []
+    
+    # Try directory/slug name
+    if "_" in parent_dir:
+        candidates.append(parent_dir.replace("_", "/"))
+    candidates.append(parent_dir)
 
-    # 3. Fallback to model filename if needed
-    if res.returncode != 0:
-        cmd_fallback = [
-            lms, "load", fname,
+    # Clean name derived from filename
+    clean_base = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname)
+    candidates.append(clean_base)
+    candidates.append(fname)
+    candidates.append(req.model_path)
+
+    # Also parse `lms ls` output for direct matches
+    try:
+        ls_res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=3)
+        if ls_res.returncode == 0:
+            for line in ls_res.stdout.split("\n"):
+                parts = line.split()
+                if parts and not parts[0].startswith("---") and parts[0] != "LLM" and parts[0] != "EMBEDDING":
+                    key = parts[0]
+                    # Check if key matches filename base
+                    k_clean = re.sub(r'[^a-zA-Z0-9]', '', key).lower()
+                    f_clean = re.sub(r'[^a-zA-Z0-9]', '', fname).lower()
+                    if k_clean in f_clean or f_clean in k_clean:
+                        candidates.insert(0, key)
+    except Exception:
+        pass
+
+    last_error = ""
+    for target in candidates:
+        cmd = [
+            lms, "load", target,
             f"--gpu={req.gpu_offload}",
             f"--context-length={req.context_length}",
             f"--ttl={req.ttl}",
             "--yes"
         ]
-        res_fallback = subprocess.run(cmd_fallback, env=LMS_ENV, capture_output=True, text=True)
-        if res_fallback.returncode == 0:
-            return {"status": "success", "output": res_fallback.stdout, "identifier": ident}
+        res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True)
+        if res.returncode == 0:
+            return {"status": "success", "loaded_target": target, "output": res.stdout}
+        else:
+            last_error = res.stderr or res.stdout
 
-    if res.returncode == 0:
-        return {"status": "success", "output": res.stdout, "identifier": ident}
-    else:
-        err_msg = (res.stderr or res.stdout or "Command returned non-zero exit status").strip()
-        return JSONResponse(status_code=500, content={"status": "error", "message": err_msg})
+    return JSONResponse(status_code=500, content={"status": "error", "message": last_error or "Unable to load model candidate"})
 
 @app.post("/api/unload_model")
 def unload_model():
@@ -684,7 +709,7 @@ def get_ui():
               </div>
             </div>
             <button onclick="toggleFiles('${m.id}', this)" class="toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">
-              Inspect Quantizations & Memory Fit
+                  Inspect Quantizations & Memory Fit
             </button>
             <div class="file-container mt-3 hidden space-y-2"></div>
           `;
