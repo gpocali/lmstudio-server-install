@@ -1,11 +1,12 @@
 """
 LM Studio Server Entrypoint Router
-Dispatches API requests with workspace timeline tracking and AI commit summarization.
+Dispatches API requests with General Chat Bot, Model Tuning, and Workspace Timeline.
 """
 
 import os
 import re
 import glob
+import json
 import datetime
 import requests
 import subprocess
@@ -45,7 +46,9 @@ from core.github_vault import (
 )
 from core.agent_engine import process_agent_task, generate_commit_msg_from_diff
 
-app = FastAPI(title="LM Studio Modular Code & Model Studio")
+app = FastAPI(title="LM Studio Code, Chat & Model Studio")
+
+CHAT_SESSIONS_FILE = os.path.join(STORAGE_PATH, ".chat_sessions.json")
 
 # ---------------- Pydantic Request Models ----------------
 
@@ -63,6 +66,21 @@ class LoadRequest(BaseModel):
     gpu_offload: str = "max"
     context_length: int = 32768
     ttl: int = 3600
+
+class ChatCompletionRequest(BaseModel):
+    messages: list[dict]
+    model_identifier: str = ""
+    temperature: float = 0.7
+    max_tokens: int = 4096
+    top_p: float = 0.95
+
+class SaveChatSessionRequest(BaseModel):
+    session_id: str
+    title: str = "Chat Conversation"
+    messages: list[dict] = []
+
+class DeleteChatSessionRequest(BaseModel):
+    session_id: str
 
 class AddAccountRequest(BaseModel):
     token: str
@@ -132,6 +150,85 @@ def serve_ui():
         with open(html_file, "r", encoding="utf-8") as f:
             return f.read()
     return HTMLResponse("<h2>Error: /storage/lmstudio/web/index.html not found</h2>", status_code=404)
+
+# ---------------- General Chat Bot API ----------------
+
+def load_chat_sessions():
+    if os.path.exists(CHAT_SESSIONS_FILE):
+        try:
+            with open(CHAT_SESSIONS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {"sessions": []}
+    return {"sessions": []}
+
+def save_chat_sessions(data):
+    try:
+        with open(CHAT_SESSIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+@app.get("/api/chat/sessions")
+def api_get_chat_sessions():
+    return load_chat_sessions()
+
+@app.post("/api/chat/sessions/save")
+def api_save_chat_session(req: SaveChatSessionRequest):
+    data = load_chat_sessions()
+    sessions = data.get("sessions", [])
+    
+    found = False
+    for s in sessions:
+        if s["id"] == req.session_id:
+            s["title"] = req.title
+            s["messages"] = req.messages
+            s["updated_at"] = datetime.datetime.utcnow().isoformat()
+            found = True
+            break
+    
+    if not found:
+        sessions.insert(0, {
+            "id": req.session_id,
+            "title": req.title,
+            "created_at": datetime.datetime.utcnow().isoformat(),
+            "updated_at": datetime.datetime.utcnow().isoformat(),
+            "messages": req.messages
+        })
+    
+    data["sessions"] = sessions
+    save_chat_sessions(data)
+    return {"status": "success", "session_id": req.session_id}
+
+@app.post("/api/chat/sessions/delete")
+def api_delete_chat_session(req: DeleteChatSessionRequest):
+    data = load_chat_sessions()
+    data["sessions"] = [s for s in data.get("sessions", []) if s.get("id") != req.session_id]
+    save_chat_sessions(data)
+    return {"status": "success"}
+
+@app.post("/api/chat/completions")
+def api_chat_completion(req: ChatCompletionRequest):
+    model_id = req.model_identifier
+    if not model_id:
+        loaded = get_loaded_models()
+        model_id = loaded[0] if loaded else "default"
+
+    try:
+        payload = {
+            "model": model_id,
+            "messages": req.messages,
+            "temperature": req.temperature,
+            "max_tokens": req.max_tokens,
+            "top_p": req.top_p
+        }
+        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=180)
+        if resp.status_code != 200:
+            return JSONResponse(status_code=500, content={"status": "error", "message": f"LM Studio API Error: {resp.text}"})
+        
+        return resp.json()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 # ---------------- Hardware & Model Endpoints ----------------
 
@@ -227,12 +324,16 @@ def api_model_files(repo_id: str):
         is_dling = gname in DOWNLOAD_JOBS and DOWNLOAD_JOBS[gname].get("status") == "downloading"
         shard_info = f" ({len(gdata['paths'])} Shards)" if len(gdata['paths']) > 1 else ""
 
+        # Model max context capacity estimation based on architecture name
+        max_cap_ctx = 131072 if ("llama-3" in gname.lower() or "qwen" in gname.lower() or "nemotron" in gname.lower()) else 32768
+
         parsed.append({
             "group_name": gname, "display_name": gname + shard_info, "paths": gdata["paths"],
             "is_sharded": len(gdata["paths"]) > 1, "shard_count": len(gdata["paths"]),
             "weight": weight, "variant": variant, "description": get_quant_description(variant),
             "size_gb": f"{size_gb} GB" if size_gb > 0 else "Pending...", "raw_size_gb": size_gb,
             "est_vram": f"~{est_mem} GB" if est_mem > 0 else "N/A",
+            "max_context": max_cap_ctx,
             "fit_status": fit, "is_downloaded": is_dl, "is_downloading": is_dling
         })
 
@@ -282,10 +383,16 @@ def api_load_model(req: LoadRequest):
     last_error = ""
     for target in dedup_targets:
         try:
-            cmd = [lms, "load", target, f"--gpu={req.gpu_offload}", f"--context-length={req.context_length}", f"--ttl={req.ttl}", "--yes"]
+            cmd = [
+                lms, "load", target,
+                f"--gpu={req.gpu_offload}",
+                f"--context-length={req.context_length}",
+                f"--ttl={req.ttl}",
+                "--yes"
+            ]
             res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=30)
             if res.returncode == 0:
-                return {"status": "success", "loaded_target": target, "output": res.stdout or f"Loaded {target} into GPU VRAM."}
+                return {"status": "success", "loaded_target": target, "context_length": req.context_length, "output": res.stdout or f"Loaded {target} into GPU VRAM."}
             else:
                 last_error = (res.stderr or res.stdout or "").strip()
         except Exception as err:
@@ -340,7 +447,16 @@ def api_local_models():
                     try: size_gb = round(os.path.getsize(path) / (1024**3), 2)
                     except Exception: size_gb = 0.0
                     weight, variant = parse_model_metadata(f, root)
-                    files.append({"filename": f, "weight": weight, "variant": variant, "size_gb": f"{size_gb} GB", "path": path})
+                    max_cap_ctx = 131072 if ("llama-3" in f.lower() or "qwen" in f.lower() or "nemotron" in f.lower()) else 32768
+                    files.append({
+                        "filename": f,
+                        "weight": weight,
+                        "variant": variant,
+                        "size_gb": f"{size_gb} GB",
+                        "raw_size_gb": size_gb,
+                        "max_context": max_cap_ctx,
+                        "path": path
+                    })
     return {"files": files, "storage": get_storage_usage(), "loaded_models": get_loaded_models()}
 
 # ---------------- GitHub Multi-Account Endpoints ----------------

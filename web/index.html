@@ -2,41 +2,27 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>LM Studio Remote Code & Model Studio</title>
+  <title>LM Studio Remote Code, Chat & Model Studio</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Markdown & Syntax Highlighting -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.2/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.2/highlight.min.js"></script>
   <style>
-    /* Custom Resizer Styling */
-    .gutter-h {
-      width: 4px;
-      cursor: col-resize;
-      transition: background-color 0.2s;
-    }
-    .gutter-h:hover, .gutter-h.resizing {
-      background-color: #38bdf8;
-    }
-    .gutter-v {
-      height: 4px;
-      cursor: row-resize;
-      transition: background-color 0.2s;
-    }
-    .gutter-v:hover, .gutter-v.resizing {
-      background-color: #38bdf8;
-    }
-    /* Sleek Dark Scrollbar */
-    ::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-    ::-webkit-scrollbar-track {
-      background: #090d16;
-    }
-    ::-webkit-scrollbar-thumb {
-      background: #1e293b;
-      border-radius: 3px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: #334155;
-    }
+    .gutter-h { width: 4px; cursor: col-resize; transition: background-color 0.2s; }
+    .gutter-h:hover, .gutter-h.resizing { background-color: #38bdf8; }
+    .gutter-v { height: 4px; cursor: row-resize; transition: background-color 0.2s; }
+    .gutter-v:hover, .gutter-v.resizing { background-color: #38bdf8; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #090d16; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    .markdown-body pre { background: #020617; border: 1px solid #1e293b; border-radius: 0.5rem; padding: 0.75rem; margin-top: 0.5rem; margin-bottom: 0.5rem; overflow-x: auto; }
+    .markdown-body code { font-family: monospace; }
+    .markdown-body p { margin-bottom: 0.5rem; }
+    .markdown-body ul { list-style-type: disc; margin-left: 1.25rem; margin-bottom: 0.5rem; }
+    .markdown-body ol { list-style-type: decimal; margin-left: 1.25rem; margin-bottom: 0.5rem; }
+    .markdown-body h1, .markdown-body h2, .markdown-body h3 { font-weight: bold; margin-top: 0.75rem; margin-bottom: 0.25rem; color: #38bdf8; }
   </style>
 </head>
 <body class="bg-slate-900 text-slate-100 h-screen w-screen flex flex-col font-sans overflow-hidden select-none">
@@ -45,16 +31,19 @@
   <header class="bg-slate-950 border-b border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-4 shrink-0 z-20">
     <div class="flex items-center gap-3">
       <h1 class="text-lg font-bold text-sky-400">LM Studio Studio</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">v2.2 IDE Edition</span>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">v2.3 Standalone</span>
     </div>
 
     <!-- Navigation Page Buttons -->
     <div class="flex items-center gap-2">
-      <button onclick="switchView('studio')" id="navBtnStudio" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5">
-        💻 Studio
+      <button onclick="switchView('chat')" id="navBtnChat" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5">
+        💬 Chat Bot
+      </button>
+      <button onclick="switchView('studio')" id="navBtnStudio" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
+        💻 Code Studio
       </button>
       <button onclick="switchView('history')" id="navBtnHistory" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
-        📜 History Timeline
+        📜 Timeline
       </button>
       <button onclick="switchView('github')" id="navBtnGithub" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
         🔑 Accounts
@@ -75,11 +64,79 @@
     </div>
   </header>
 
-  <!-- ==================== VIEW 1: PROJECT STUDIO ==================== -->
-  <main id="viewStudio" class="flex-1 flex overflow-hidden relative">
+  <!-- ==================== VIEW 1: GENERAL CHAT BOT ==================== -->
+  <main id="viewChat" class="flex-1 flex overflow-hidden relative select-text">
     
-    <!-- Left Sidebar: Resizable & Self-Contained Scrolling -->
-    <aside id="studioSidebar" class="w-80 min-w-[200px] max-w-[500px] bg-slate-950 flex flex-col shrink-0 overflow-hidden select-text">
+    <!-- Left Sidebar: Chat Sessions -->
+    <aside class="w-72 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0 overflow-hidden">
+      <div class="p-3.5 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Conversations</h2>
+        <button onclick="createNewChatSession()" class="text-xs bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded font-medium transition">
+          + New Chat
+        </button>
+      </div>
+      <div id="generalChatSessionsList" class="flex-1 overflow-y-auto p-2.5 space-y-1.5 text-xs">
+        <p class="text-slate-500">Loading chats...</p>
+      </div>
+      
+      <!-- System Prompt Toggle -->
+      <div class="p-3 border-t border-slate-800 bg-slate-950/60 shrink-0 space-y-1.5">
+        <label class="text-[11px] font-bold text-slate-400 block">System Persona:</label>
+        <textarea id="generalChatSystemPrompt" rows="2" 
+                  placeholder="You are a helpful, knowledgeable AI assistant..."
+                  class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs focus:border-sky-500 focus:outline-none resize-none font-mono text-slate-300"></textarea>
+      </div>
+    </aside>
+
+    <!-- Main Chat Feed & Input -->
+    <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
+      
+      <!-- Chat Header -->
+      <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex justify-between items-center shrink-0 z-10">
+        <div>
+          <h2 class="text-sm font-bold text-slate-100" id="currentChatSessionTitle">General Conversation</h2>
+          <span class="text-[11px] text-slate-400" id="currentChatModelIndicator">Model: Auto</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="clearCurrentChatMessages()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded border border-slate-700 transition">
+            🧹 Clear Chat
+          </button>
+        </div>
+      </div>
+
+      <!-- Messages Window -->
+      <div id="generalChatMessagesWindow" class="flex-1 overflow-y-auto p-6 space-y-4">
+        <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">
+          <div class="font-bold text-sky-400 mb-1">💬 LM Studio General Assistant</div>
+          Ask questions, draft content, brainstorm, or explore topics. Markdown formatting, code highlighting, and formulas are fully rendered.
+        </div>
+      </div>
+
+      <!-- Chat Input Bar -->
+      <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
+        <div class="max-w-4xl mx-auto space-y-2">
+          <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
+            <span>Model: <strong class="generalChatModelBadge text-sky-400 font-mono">Scanning...</strong></span>
+            <span class="text-slate-500 italic">Press Enter to send, Shift+Enter for new line</span>
+          </div>
+          <div class="flex gap-2">
+            <textarea id="generalChatInput" rows="2" 
+                      onkeydown="handleGeneralChatKeyDown(event)"
+                      placeholder="Type a message to your local LLM..."
+                      class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none resize-none text-slate-100"></textarea>
+            <button id="generalChatSendBtn" onclick="executeGeneralChatSend()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
+              Send
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==================== VIEW 2: PROJECT STUDIO ==================== -->
+  <main id="viewStudio" class="hidden flex-1 flex overflow-hidden relative select-text">
+    
+    <aside id="studioSidebar" class="w-80 min-w-[200px] max-w-[500px] bg-slate-950 flex flex-col shrink-0 overflow-hidden">
       
       <!-- Section 1: Workspaces -->
       <div id="sectionWorkspaces" class="flex flex-col h-44 min-h-[90px] overflow-hidden">
@@ -92,7 +149,6 @@
         </div>
       </div>
 
-      <!-- Vertical Resizer 1 -->
       <div id="resizerV1" class="gutter-v bg-slate-800 shrink-0 hidden"></div>
 
       <!-- Section 2: Multi-Chat Threads -->
@@ -108,7 +164,6 @@
         </div>
       </div>
 
-      <!-- Vertical Resizer 2 -->
       <div id="resizerV2" class="gutter-v bg-slate-800 shrink-0 hidden"></div>
 
       <!-- Section 3: Context Files -->
@@ -126,13 +181,11 @@
 
     </aside>
 
-    <!-- Horizontal Sidebar Resizer -->
     <div id="resizerH" class="gutter-h bg-slate-800 shrink-0"></div>
 
-    <!-- Main Front & Center Chat / Code Studio -->
-    <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0 select-text">
+    <!-- Main Front & Center Code Studio -->
+    <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
       
-      <!-- Studio Top Action Header (Pinned) -->
       <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex flex-wrap justify-between items-center gap-3 shrink-0 z-10">
         <div>
           <div class="flex items-center gap-3">
@@ -148,7 +201,6 @@
           <span class="text-[11px] text-slate-400 truncate" id="studioAccountSubtitle">--</span>
         </div>
 
-        <!-- Git Actions: Pull, Validate, Push -->
         <div id="studioActionsGroup" class="hidden flex items-center gap-2">
           <button onclick="pullUpstreamChanges()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs px-3 py-1.5 rounded text-sky-300 transition flex items-center gap-1" title="Pull remote changes into local branch">
             ⬇ Pull
@@ -162,7 +214,6 @@
         </div>
       </div>
 
-      <!-- Persistent Pending Changes Alert Banner -->
       <div id="pendingChangesBanner" class="hidden bg-amber-950/40 border-b border-amber-800/80 px-6 py-2 flex justify-between items-center text-xs shrink-0 z-10">
         <div class="flex items-center gap-2 overflow-hidden">
           <span class="text-amber-400 font-bold">⚠️ Pending Changes on Disk:</span>
@@ -178,7 +229,6 @@
         </div>
       </div>
 
-      <!-- Chat / Content Window (Only this scrolls) -->
       <div id="chatHistoryWindow" class="flex-1 overflow-y-auto p-6 space-y-4">
         <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">
           <div class="font-bold text-sky-400 mb-1">🤖 Local AI Software Engineer Ready</div>
@@ -186,17 +236,16 @@
         </div>
       </div>
 
-      <!-- Instruction Input Bar (Permanently Locked to Bottom) -->
       <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto space-y-2">
           <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
-            <span>Model: <strong id="agentModelBadge" class="text-sky-400 font-mono">Scanning...</strong></span>
+            <span>Model: <strong class="generalChatModelBadge text-sky-400 font-mono">Scanning...</strong></span>
             <span id="selectedFilesSummary" class="text-slate-400 italic">0 files selected for context</span>
           </div>
           <div class="flex gap-2">
             <textarea id="studioPromptInput" rows="2" 
-                      onkeydown="handleChatKeyDown(event)"
-                      placeholder="e.g. Add an endpoint to export history as JSON and update CHANGELOG.md... (Enter to Send, Shift+Enter for New Line)"
+                      onkeydown="handleStudioKeyDown(event)"
+                      placeholder="e.g. In install.sh and model_manager.py, add dynamic context sliders and tune params... (Enter to Send, Shift+Enter for New Line)"
                       class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none font-mono resize-none"></textarea>
             <button id="studioSendBtn" onclick="executeStudioTask()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
               ⚡ Run
@@ -207,7 +256,7 @@
     </section>
   </main>
 
-  <!-- ==================== VIEW 2: WORKSPACE HISTORY & TIMELINE ==================== -->
+  <!-- ==================== VIEW 3: WORKSPACE HISTORY & TIMELINE ==================== -->
   <main id="viewHistory" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-5xl mx-auto w-full select-text">
     <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-slate-700 pb-4">
       <div>
@@ -222,13 +271,12 @@
       </button>
     </div>
 
-    <!-- Timeline Event Stream -->
     <div id="timelineEventsContainer" class="space-y-6 relative before:absolute before:inset-0 before:left-3.5 before:w-0.5 before:bg-slate-800">
       <p class="text-xs text-slate-500">Select a project in Studio to inspect its history timeline.</p>
     </div>
   </main>
 
-  <!-- ==================== VIEW 3: GITHUB ACCOUNTS & REPOS ==================== -->
+  <!-- ==================== VIEW 4: GITHUB ACCOUNTS & REPOS ==================== -->
   <main id="viewGithub" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-6xl mx-auto w-full select-text">
     <section class="bg-slate-800 p-5 rounded-lg border border-slate-700 space-y-3">
       <div class="flex justify-between items-center cursor-pointer" onclick="togglePatGuide()">
@@ -324,7 +372,7 @@
     </section>
   </main>
 
-  <!-- ==================== VIEW 4: MODEL MANAGER ==================== -->
+  <!-- ==================== VIEW 5: MODEL MANAGER ==================== -->
   <main id="viewModels" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-7xl mx-auto w-full select-text">
     <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
       <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
@@ -394,6 +442,61 @@
     </div>
   </main>
 
+  <!-- ==================== MODEL TUNER MODAL ==================== -->
+  <div id="modelTunerModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 select-text">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl p-6 max-w-lg w-full shadow-2xl space-y-5">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <div>
+          <h3 class="font-bold text-slate-100 text-base" id="tunerModelName">Tune Model Settings</h3>
+          <p class="text-xs text-slate-400" id="tunerModelFilename">filename.gguf</p>
+        </div>
+        <button onclick="closeModelTuner()" class="text-slate-400 hover:text-slate-200 text-sm">✕</button>
+      </div>
+
+      <!-- Context Slider -->
+      <div class="space-y-2">
+        <div class="flex justify-between items-center text-xs">
+          <label class="font-bold text-slate-300">Context Length (Tokens):</label>
+          <span id="tunerContextVal" class="font-mono text-sky-400 font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">32768 (32K)</span>
+        </div>
+        <input type="range" id="tunerContextSlider" min="2048" max="131072" step="2048" value="32768" 
+               oninput="updateTunerContextDisplay()"
+               class="w-full accent-sky-500 bg-slate-950 cursor-pointer">
+        <div class="flex justify-between text-[10px] text-slate-500 font-mono">
+          <span id="tunerMinContext">2K (2048)</span>
+          <span id="tunerMaxContext">131K (131072 Max Capacity)</span>
+        </div>
+      </div>
+
+      <!-- GPU Offload & TTL Grid -->
+      <div class="grid grid-cols-2 gap-3 text-xs">
+        <div>
+          <label class="block font-bold text-slate-300 mb-1">GPU Offload:</label>
+          <select id="tunerGpuOffload" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-slate-200">
+            <option value="max">Max (Full VRAM)</option>
+            <option value="off">Off (CPU Only)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block font-bold text-slate-300 mb-1">TTL (Keep-alive):</label>
+          <select id="tunerTtl" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-slate-200">
+            <option value="3600">1 Hour (3600s)</option>
+            <option value="86400">24 Hours</option>
+            <option value="-1">Indefinite (No Auto-unload)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <button onclick="closeModelTuner()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded text-xs text-slate-300 transition">Cancel</button>
+        <button id="tunerApplyBtn" onclick="applyTunerAndLoad()" class="px-5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold transition flex items-center gap-1.5">
+          🚀 Apply & Load into VRAM
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script>
     var localModelSet = new Set();
     var activeTasksMap = {};
@@ -403,6 +506,14 @@
     var currentDisplayName = "";
     var activeThreadId = "thread-default";
     var currentHistoryData = null;
+
+    // General Chat State
+    var generalChatSessions = [];
+    var activeChatSessionId = "session-" + Date.now();
+    var currentChatMessages = [];
+
+    // Model Tuner State
+    var currentTunerModel = null;
 
     function escapeHtml(text) {
       if (!text) return "";
@@ -415,28 +526,24 @@
     }
 
     function switchView(viewName) {
+      document.getElementById('viewChat').classList.toggle('hidden', viewName !== 'chat');
       document.getElementById('viewStudio').classList.toggle('hidden', viewName !== 'studio');
       document.getElementById('viewHistory').classList.toggle('hidden', viewName !== 'history');
       document.getElementById('viewGithub').classList.toggle('hidden', viewName !== 'github');
       document.getElementById('viewModels').classList.toggle('hidden', viewName !== 'models');
 
-      document.getElementById('navBtnStudio').className = (viewName === 'studio') 
-        ? 'px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
-        : 'px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
-      
-      document.getElementById('navBtnHistory').className = (viewName === 'history') 
-        ? 'px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
-        : 'px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
+      ['Chat', 'Studio', 'History', 'Github', 'Models'].forEach(v => {
+        const btn = document.getElementById('navBtn' + v);
+        if (btn) {
+          btn.className = (viewName.toLowerCase() === v.toLowerCase())
+            ? 'px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
+            : 'px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
+        }
+      });
 
-      document.getElementById('navBtnGithub').className = (viewName === 'github') 
-        ? 'px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
-        : 'px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
-
-      document.getElementById('navBtnModels').className = (viewName === 'models') 
-        ? 'px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
-        : 'px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
-
-      if (viewName === 'studio') {
+      if (viewName === 'chat') {
+        loadGeneralChatSessions();
+      } else if (viewName === 'studio') {
         loadSidebarWorkspaces();
         if (currentWorkspaceDir) refreshWorkspaceStatus();
       } else if (viewName === 'history') {
@@ -449,50 +556,326 @@
       }
     }
 
-    // ---------------- Keyboard Shortcuts ----------------
+    // ---------------- General Chat Engine ----------------
 
-    function handleChatKeyDown(event) {
+    function handleGeneralChatKeyDown(event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        executeGeneralChatSend();
+      }
+    }
+
+    function handleStudioKeyDown(event) {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
         executeStudioTask();
       }
     }
 
+    async function loadGeneralChatSessions() {
+      const container = document.getElementById('generalChatSessionsList');
+      try {
+        const res = await fetch('/api/chat/sessions');
+        const data = await res.json();
+        generalChatSessions = data.sessions || [];
+
+        if (generalChatSessions.length === 0) {
+          createNewChatSession();
+          return;
+        }
+
+        renderGeneralChatSidebar();
+        
+        // Load first session by default
+        const activeSess = generalChatSessions.find(s => s.id === activeChatSessionId) || generalChatSessions[0];
+        selectChatSession(activeSess.id);
+      } catch(e) {
+        container.innerHTML = '<p class="text-rose-400 p-2">Error loading chat sessions.</p>';
+      }
+    }
+
+    function renderGeneralChatSidebar() {
+      const container = document.getElementById('generalChatSessionsList');
+      container.innerHTML = generalChatSessions.map(s => {
+        const isSel = (s.id === activeChatSessionId);
+        const bg = isSel ? 'bg-sky-950/60 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700';
+        return '<div class="p-2 rounded border ' + bg + ' flex justify-between items-center cursor-pointer group">' +
+          '<span onclick="selectChatSession(\'' + s.id + '\')" class="truncate flex-1">💬 ' + escapeHtml(s.title) + '</span>' +
+          '<button onclick="deleteChatSession(\'' + s.id + '\')" class="text-slate-500 hover:text-rose-400 ml-1 text-xs opacity-0 group-hover:opacity-100 transition">✕</button>' +
+          '</div>';
+      }).join('');
+    }
+
+    function selectChatSession(sessionId) {
+      activeChatSessionId = sessionId;
+      const sess = generalChatSessions.find(s => s.id === sessionId);
+      if (!sess) return;
+
+      document.getElementById('currentChatSessionTitle').textContent = sess.title || "General Conversation";
+      currentChatMessages = sess.messages || [];
+      renderGeneralChatMessages();
+      renderGeneralChatSidebar();
+    }
+
+    function createNewChatSession() {
+      const newId = "session-" + Date.now();
+      const newSess = {
+        id: newId,
+        title: "New Conversation",
+        created_at: new Date().toISOString(),
+        messages: []
+      };
+      generalChatSessions.unshift(newSess);
+      activeChatSessionId = newId;
+      selectChatSession(newId);
+      saveCurrentChatSession();
+    }
+
+    async function deleteChatSession(sessionId) {
+      generalChatSessions = generalChatSessions.filter(s => s.id !== sessionId);
+      try {
+        await fetch('/api/chat/sessions/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({session_id: sessionId})
+        });
+      } catch(e) {}
+
+      if (generalChatSessions.length === 0) {
+        createNewChatSession();
+      } else {
+        selectChatSession(generalChatSessions[0].id);
+      }
+    }
+
+    function clearCurrentChatMessages() {
+      if (!confirm("Clear all messages in this conversation?")) return;
+      currentChatMessages = [];
+      renderGeneralChatMessages();
+      saveCurrentChatSession();
+    }
+
+    async function saveCurrentChatSession() {
+      const sess = generalChatSessions.find(s => s.id === activeChatSessionId);
+      if (!sess) return;
+
+      sess.messages = currentChatMessages;
+      if (currentChatMessages.length > 0 && sess.title === "New Conversation") {
+        sess.title = currentChatMessages[0].content.slice(0, 26) + "...";
+      }
+
+      try {
+        await fetch('/api/chat/sessions/save', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            session_id: sess.id,
+            title: sess.title,
+            messages: sess.messages
+          })
+        });
+        renderGeneralChatSidebar();
+      } catch(e) {}
+    }
+
+    function renderGeneralChatMessages() {
+      const windowEl = document.getElementById('generalChatMessagesWindow');
+      windowEl.innerHTML = '';
+
+      if (currentChatMessages.length === 0) {
+        windowEl.innerHTML = '<div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">' +
+          '<div class="font-bold text-sky-400 mb-1">💬 LM Studio General Assistant</div>' +
+          'Send a prompt to begin your conversation. Full Markdown formatting is supported.</div>';
+        return;
+      }
+
+      currentChatMessages.forEach(msg => {
+        const isUser = (msg.role === 'user');
+        const div = document.createElement('div');
+        div.className = isUser 
+          ? 'bg-slate-800 p-4 rounded-lg border border-slate-700 text-xs text-slate-100 max-w-3xl ml-auto' 
+          : 'bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-200 markdown-body max-w-3xl mr-auto';
+
+        if (isUser) {
+          div.innerHTML = '<div class="font-bold text-sky-300 text-[11px] mb-1">You</div><p class="whitespace-pre-wrap font-sans">' + escapeHtml(msg.content) + '</p>';
+        } else {
+          div.innerHTML = '<div class="font-bold text-emerald-400 text-[11px] mb-1.5 flex justify-between items-center border-b border-slate-800 pb-1">' +
+            '<span>🤖 Assistant</span><span class="text-[10px] text-slate-500 font-mono">LLM Output</span></div>' +
+            marked.parse(msg.content || '');
+        }
+        windowEl.appendChild(div);
+      });
+
+      // Highlight syntax on rendered code blocks
+      document.querySelectorAll('#generalChatMessagesWindow pre code').forEach((el) => {
+        hljs.highlightElement(el);
+      });
+
+      windowEl.scrollTop = windowEl.scrollHeight;
+    }
+
+    async function executeGeneralChatSend() {
+      const inputEl = document.getElementById('generalChatInput');
+      const text = inputEl.value.trim();
+      const sendBtn = document.getElementById('generalChatSendBtn');
+      const windowEl = document.getElementById('generalChatMessagesWindow');
+      const sysPrompt = document.getElementById('generalChatSystemPrompt').value.trim();
+
+      if (!text) return;
+
+      currentChatMessages.push({role: "user", content: text});
+      renderGeneralChatMessages();
+
+      inputEl.value = '';
+      sendBtn.disabled = true;
+      sendBtn.textContent = '...';
+
+      // Loading bubble
+      const aiDiv = document.createElement('div');
+      aiDiv.className = 'bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-emerald-400 max-w-3xl mr-auto animate-pulse';
+      aiDiv.innerHTML = '🤖 Generating response...';
+      windowEl.appendChild(aiDiv);
+      windowEl.scrollTop = windowEl.scrollHeight;
+
+      // Construct API payload
+      const apiMessages = [];
+      if (sysPrompt) {
+        apiMessages.push({role: "system", content: sysPrompt});
+      }
+      currentChatMessages.forEach(m => apiMessages.push({role: m.role, content: m.content}));
+
+      try {
+        const res = await fetch('/api/chat/completions', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            messages: apiMessages,
+            temperature: 0.7,
+            max_tokens: 4096
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.choices && data.choices.length > 0) {
+          const reply = data.choices[0].message.content;
+          currentChatMessages.push({role: "assistant", content: reply});
+          renderGeneralChatMessages();
+          saveCurrentChatSession();
+        } else {
+          aiDiv.className = 'bg-slate-950 p-4 rounded-lg border border-rose-800 text-xs text-rose-400 max-w-3xl mr-auto';
+          aiDiv.innerHTML = '❌ Error: ' + (data.message || 'Failed to generate response');
+        }
+      } catch(e) {
+        aiDiv.className = 'bg-slate-950 p-4 rounded-lg border border-rose-800 text-xs text-rose-400 max-w-3xl mr-auto';
+        aiDiv.innerHTML = '❌ Communication Error: ' + e.message;
+      }
+
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send';
+      windowEl.scrollTop = windowEl.scrollHeight;
+    }
+
+    // ---------------- Model Tuner Modal Engine ----------------
+
+    function openModelTuner(model) {
+      currentTunerModel = model;
+      document.getElementById('tunerModelName').textContent = "Tune & Load " + model.filename;
+      document.getElementById('tunerModelFilename').textContent = model.path;
+
+      const slider = document.getElementById('tunerContextSlider');
+      const maxCap = model.max_context || 131072;
+      slider.max = maxCap;
+      slider.value = Math.min(32768, maxCap);
+
+      document.getElementById('tunerMinContext').textContent = "2K (2048)";
+      document.getElementById('tunerMaxContext').textContent = Math.round(maxCap / 1024) + "K (" + maxCap + " Max Capacity)";
+
+      updateTunerContextDisplay();
+      document.getElementById('modelTunerModal').classList.remove('hidden');
+    }
+
+    function closeModelTuner() {
+      document.getElementById('modelTunerModal').classList.add('hidden');
+    }
+
+    function updateTunerContextDisplay() {
+      const val = parseInt(document.getElementById('tunerContextSlider').value);
+      const kVal = Math.round(val / 1024);
+      document.getElementById('tunerContextVal').textContent = val + " (" + kVal + "K Tokens)";
+    }
+
+    async function applyTunerAndLoad() {
+      if (!currentTunerModel) return;
+      const btn = document.getElementById('tunerApplyBtn');
+      const ctxLen = parseInt(document.getElementById('tunerContextSlider').value);
+      const gpuOffload = document.getElementById('tunerGpuOffload').value;
+      const ttl = parseInt(document.getElementById('tunerTtl').value);
+
+      btn.disabled = true;
+      btn.textContent = "⏳ Offloading & Loading...";
+
+      try {
+        const res = await fetch('/api/load_model', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            model_path: currentTunerModel.path,
+            context_length: ctxLen,
+            gpu_offload: gpuOffload,
+            ttl: ttl
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert(`Model loaded successfully with ${Math.round(ctxLen/1024)}K token context!`);
+          closeModelTuner();
+          await initHardwareInfo();
+          await fetchLocalModels();
+        } else {
+          alert('Load failure: ' + (data.message || JSON.stringify(data)));
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+
+      btn.disabled = false;
+      btn.textContent = "🚀 Apply & Load into VRAM";
+    }
+
     // ---------------- Resizable Panels Engine ----------------
 
     function initResizers() {
-      // 1. Horizontal Sidebar Resizer
       const resizerH = document.getElementById('resizerH');
       const sidebar = document.getElementById('studioSidebar');
       let isResizingH = false;
 
-      resizerH.addEventListener('mousedown', (e) => {
-        isResizingH = true;
-        resizerH.classList.add('resizing');
-        document.body.style.cursor = 'col-resize';
-      });
+      if (resizerH) {
+        resizerH.addEventListener('mousedown', () => {
+          isResizingH = true;
+          resizerH.classList.add('resizing');
+        });
+      }
 
-      // 2. Vertical Section Resizer 1 (Workspaces vs Threads)
       const resizerV1 = document.getElementById('resizerV1');
       const sectionW = document.getElementById('sectionWorkspaces');
       let isResizingV1 = false;
 
-      resizerV1.addEventListener('mousedown', (e) => {
-        isResizingV1 = true;
-        resizerV1.classList.add('resizing');
-        document.body.style.cursor = 'row-resize';
-      });
+      if (resizerV1) {
+        resizerV1.addEventListener('mousedown', () => {
+          isResizingV1 = true;
+          resizerV1.classList.add('resizing');
+        });
+      }
 
-      // 3. Vertical Section Resizer 2 (Threads vs Files)
       const resizerV2 = document.getElementById('resizerV2');
       const sectionF = document.getElementById('sectionFiles');
       let isResizingV2 = false;
 
-      resizerV2.addEventListener('mousedown', (e) => {
-        isResizingV2 = true;
-        resizerV2.classList.add('resizing');
-        document.body.style.cursor = 'row-resize';
-      });
+      if (resizerV2) {
+        resizerV2.addEventListener('mousedown', () => {
+          isResizingV2 = true;
+          resizerV2.classList.add('resizing');
+        });
+      }
 
       window.addEventListener('mousemove', (e) => {
         if (isResizingH) {
@@ -514,10 +897,9 @@
           isResizingH = false;
           isResizingV1 = false;
           isResizingV2 = false;
-          resizerH.classList.remove('resizing');
-          resizerV1.classList.remove('resizing');
-          resizerV2.classList.remove('resizing');
-          document.body.style.cursor = 'default';
+          if (resizerH) resizerH.classList.remove('resizing');
+          if (resizerV1) resizerV1.classList.remove('resizing');
+          if (resizerV2) resizerV2.classList.remove('resizing');
         }
       });
     }
@@ -539,10 +921,9 @@
 
         if (data.storage) renderStorageMetrics(data.storage);
 
-        const agentBadge = document.getElementById('agentModelBadge');
-        if (agentBadge) {
-          agentBadge.textContent = loadedModelsList.length > 0 ? loadedModelsList[0] : "Default (Auto-Load)";
-        }
+        const primaryModel = loadedModelsList.length > 0 ? loadedModelsList[0] : "Default (Auto)";
+        document.querySelectorAll('.generalChatModelBadge').forEach(el => el.textContent = primaryModel);
+        document.getElementById('currentChatModelIndicator').textContent = "Model: " + primaryModel;
       } catch(e) {}
     }
 
@@ -594,7 +975,6 @@
       document.getElementById('studioAccountSubtitle').textContent = 'Workspace Path: /storage/lmstudio/workspaces/' + dirName;
       document.getElementById('studioActionsGroup').classList.remove('hidden');
 
-      // Unhide sections & resizers
       document.getElementById('sectionThreads').classList.remove('hidden');
       document.getElementById('sectionFiles').classList.remove('hidden');
       document.getElementById('resizerV1').classList.remove('hidden');
@@ -1195,7 +1575,7 @@
       chatWindow.scrollTop = chatWindow.scrollHeight;
     }
 
-    // ---------------- View 2: Workspace Timeline Page ----------------
+    // ---------------- View 3: Workspace Timeline Page ----------------
 
     async function loadWorkspaceTimeline() {
       const container = document.getElementById('timelineEventsContainer');
@@ -1258,7 +1638,7 @@
       }
     }
 
-    // ---------------- View 3: GitHub Accounts & Clone Management ----------------
+    // ---------------- View 4: GitHub Accounts & Clone Management ----------------
 
     function togglePatGuide() {
       const el = document.getElementById('patGuideContent');
@@ -1420,7 +1800,7 @@
       }
     }
 
-    // ---------------- View 4: Model Manager Logic ----------------
+    // ---------------- View 5: Model Manager Logic ----------------
 
     function quickSearch(tag) {
       document.getElementById('searchInput').value = tag;
@@ -1582,28 +1962,6 @@
       updateTasks();
     }
 
-    async function loadModelIntoGPU(modelPath, btn) {
-      btn.disabled = true;
-      btn.textContent = '⏳ Loading (32k ctx)...';
-      btn.className = 'bg-sky-950 text-sky-300 border border-sky-800 px-2.5 py-1 rounded text-xs animate-pulse';
-
-      try {
-        const res = await fetch('/api/load_model', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({model_path: modelPath, gpu_offload: 'max', context_length: 32768, ttl: 3600})
-        });
-        const data = await res.json();
-        if (!res.ok || data.status !== 'success') {
-          alert('Load Failure Output from LMS:\n\n' + (data.message || JSON.stringify(data)));
-        }
-      } catch(e) {
-        alert('Communication Error: ' + e.message);
-      }
-      await initHardwareInfo();
-      await fetchLocalModels();
-    }
-
     async function unloadActiveModel(btn) {
       if (btn) btn.textContent = '⏳ Unloading...';
       try {
@@ -1692,13 +2050,18 @@
           });
           
           let actionBtn = '';
+          const modelJson = encodeURIComponent(JSON.stringify(m));
+
           if (isLoaded) {
             actionBtn = '<div class="flex items-center gap-1.5">' +
               '<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">⚡ Loaded</span>' +
+              '<button onclick="openModelTuner(JSON.parse(decodeURIComponent(\'' + modelJson + '\')))" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sky-300 px-2.5 py-1 rounded text-xs transition" title="Tune Context & Settings">🎛️ Tune</button>' +
               '<button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">⏹</button>' +
               '</div>';
           } else {
-            actionBtn = '<button onclick="loadModelIntoGPU(\'' + m.path + '\', this)" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1">🚀 Load to GPU</button>';
+            actionBtn = '<div class="flex items-center gap-1.5">' +
+              '<button onclick="openModelTuner(JSON.parse(decodeURIComponent(\'' + modelJson + '\')))" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1 font-medium">🚀 Load / Tune</button>' +
+              '</div>';
           }
 
           const borderClass = isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700';
@@ -1706,7 +2069,7 @@
           return '<div class="flex justify-between items-center bg-slate-950 p-3 rounded border ' + borderClass + ' text-xs gap-3">' +
             '<div class="truncate pr-2">' +
             '<div class="font-medium text-slate-200 truncate" title="' + escapeHtml(m.filename) + '">' + escapeHtml(m.filename) + '</div>' +
-            '<div class="text-slate-400 text-[10px] mt-0.5">Weight: ' + m.weight + ' | Variant: ' + m.variant + '</div>' +
+            '<div class="text-slate-400 text-[10px] mt-0.5">Weight: ' + m.weight + ' | Variant: ' + m.variant + ' | Cap: ' + Math.round((m.max_context || 32768)/1024) + 'K Ctx</div>' +
             '</div>' +
             '<div class="flex items-center gap-2 shrink-0">' +
             '<span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">' + m.size_gb + '</span>' +
@@ -1723,7 +2086,7 @@
     initHardwareInfo();
     initResizers();
     fetchLocalModels();
-    switchView('studio');
+    switchView('chat');
     setInterval(updateTasks, 1000);
     setInterval(initHardwareInfo, 5000);
     setInterval(fetchLocalModels, 4000);
