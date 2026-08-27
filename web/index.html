@@ -1873,28 +1873,30 @@
     }
 
     async function searchModels() {
-      const q = document.getElementById('searchInput').value.trim();
-      const sortBy = document.getElementById('sortSelect').value;
-      const verifiedOnly = document.getElementById('verifiedOnly').checked;
+      const qInput = document.getElementById('searchInput');
+      const sortEl = document.getElementById('sortSelect');
+      const verifiedEl = document.getElementById('verifiedOnly');
       const container = document.getElementById('searchResults');
       const header = document.getElementById('catalogHeader');
-      const sortLabel = document.getElementById('sortSelect').selectedOptions[0].text;
+
+      if (!container || !sortEl) return;
+
+      const q = qInput ? qInput.value.trim() : "";
+      const sortBy = sortEl.value;
+      const verifiedOnly = verifiedEl ? verifiedEl.checked : false;
+      const sortLabel = sortEl.selectedOptions[0].text;
       
       header.textContent = (q === "") ? ('All Available Models (' + sortLabel + ')') : ('Search Results for "' + q + '" (' + sortLabel + ')');
-      container.innerHTML = '<p class="text-slate-400">Loading catalog from Hugging Face...</p>';
+      container.innerHTML = '<p class="text-slate-400 p-2">Loading catalog from Hugging Face...</p>';
       
       try {
         const res = await fetch('/api/search?q=' + encodeURIComponent(q) + '&sort_by=' + encodeURIComponent(sortBy) + '&verified_only=' + verifiedOnly);
-        let models = await res.json();
+        const models = await res.json();
         container.innerHTML = '';
         
         if (!models || models.length === 0) {
-          container.innerHTML = '<p class="text-slate-400">No GGUF models found.</p>';
+          container.innerHTML = '<p class="text-slate-400 p-2">No GGUF models found.</p>';
           return;
-        }
-
-        if (sortBy === 'alphabetical') {
-          models.sort((a, b) => (a.model_name || '').localeCompare(b.model_name || '', undefined, { sensitivity: 'base' }));
         }
 
         models.forEach(m => {
@@ -1902,8 +1904,8 @@
           card.className = 'bg-slate-950 p-4 rounded-xl border border-slate-700 space-y-3 shadow-md';
           
           const verifiedBadge = m.is_verified 
-            ? '<button onclick="searchAuthor(\'' + m.maker + '\')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer">🛡️ ' + m.maker + '</button>'
-            : '<button onclick="searchAuthor(\'' + m.maker + '\')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition cursor-pointer">' + m.maker + '</button>';
+            ? '<button onclick="searchAuthor(\'' + escapeHtml(m.maker) + '\')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer">🛡️ ' + escapeHtml(m.maker) + '</button>'
+            : '<button onclick="searchAuthor(\'' + escapeHtml(m.maker) + '\')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition cursor-pointer">' + escapeHtml(m.maker) + '</button>';
 
           const trustBadge = '<span class="text-[10px] bg-slate-800 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono">⭐ ' + m.trust_score + '/100</span>';
 
@@ -1911,20 +1913,123 @@
             '<div class="overflow-hidden pr-2">' +
             '<div class="flex items-center gap-1.5">' + verifiedBadge + ' ' + trustBadge + '</div>' +
             '<h3 class="font-bold text-slate-100 text-base mt-1.5 truncate" title="' + escapeHtml(m.model_name) + '">' + escapeHtml(m.model_name) + '</h3>' +
-            '<div class="text-[11px] text-slate-400 mt-0.5">Author: <button onclick="searchAuthor(\'' + m.maker + '\')" class="font-semibold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer">' + m.maker + '</button> • Updated: ' + (m.lastModified || 'Recent') + '</div>' +
+            '<div class="text-[11px] text-slate-400 mt-0.5">Author: <button onclick="searchAuthor(\'' + escapeHtml(m.maker) + '\')" class="font-semibold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer">' + escapeHtml(m.maker) + '</button> • Updated: ' + (m.lastModified || 'Recent') + '</div>' +
             '</div>' +
             '<div class="text-right text-xs text-slate-400 shrink-0">' +
             '<div>⬇ ' + (m.downloads || 0).toLocaleString() + '</div>' +
             '<div>❤ ' + (m.likes || 0).toLocaleString() + '</div>' +
             '</div></div>' +
-            '<button onclick="toggleFiles(\'' + m.id + '\', this)" class="toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">Inspect Quantizations & Memory Fit</button>' +
+            '<button onclick="toggleFiles(\'' + encodeURIComponent(m.id) + '\', this)" class="toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">Inspect Quantizations & Memory Fit</button>' +
             '<div class="file-container mt-3 hidden space-y-2"></div>';
 
           container.appendChild(card);
         });
       } catch(err) {
-        container.innerHTML = '<p class="text-rose-400">Error retrieving models from Hugging Face.</p>';
+        container.innerHTML = '<p class="text-rose-400 p-2">Error retrieving models from Hugging Face.</p>';
       }
+    }
+
+    async function toggleFiles(repoIdEnc, btn) {
+      const repoId = decodeURIComponent(repoIdEnc);
+      const parent = btn.parentElement;
+      const fileContainer = parent.querySelector('.file-container');
+      
+      if (!fileContainer.classList.contains('hidden')) {
+        fileContainer.classList.add('hidden');
+        btn.textContent = 'Inspect Quantizations & Memory Fit';
+        btn.className = 'toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition';
+        return;
+      }
+
+      fileContainer.classList.remove('hidden');
+      btn.textContent = '▲ Minimize Quantizations';
+      btn.className = 'toggle-btn w-full text-xs bg-slate-700 hover:bg-slate-600 border border-slate-500 text-sky-300 px-3 py-1.5 rounded transition';
+      fileContainer.innerHTML = '<span class="text-xs text-slate-500">Fetching file metadata & calculating VRAM footprint...</span>';
+      
+      try {
+        const res = await fetch('/api/model_files?repo_id=' + encodeURIComponent(repoId));
+        const data = await res.json();
+        fileContainer.innerHTML = '';
+
+        if (!data.files || data.files.length === 0) {
+          fileContainer.innerHTML = '<span class="text-xs text-slate-500">No .gguf files found in repository.</span>';
+          return;
+        }
+
+        const table = document.createElement('div');
+        table.className = 'space-y-2';
+
+        data.files.forEach((f, idx) => {
+          let fitBadge = '';
+          if (f.fit_status === 'fits_gpu') {
+            fitBadge = '<span class="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded font-medium">Fits GPU VRAM</span>';
+          } else if (f.fit_status === 'split_gpu_ram') {
+            fitBadge = '<span class="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-1.5 py-0.5 rounded font-medium">Split GPU + RAM</span>';
+          } else if (f.fit_status === 'fits_ram') {
+            fitBadge = '<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded font-medium">Fits System RAM</span>';
+          } else if (f.fit_status === 'exceeds') {
+            fitBadge = '<span class="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-medium">Exceeds Memory</span>';
+          }
+
+          const isDownloaded = f.is_downloaded || localModelSet.has(f.group_name);
+          const isDownloading = f.is_downloading || (activeTasksMap[f.group_name] && activeTasksMap[f.group_name].status === 'downloading');
+
+          let btnHtml = '';
+          const btnId = 'btn-' + encodeURIComponent(f.group_name).replace(/[^a-zA-Z0-9]/g, '');
+          const filesPayload = encodeURIComponent(JSON.stringify(f.paths));
+          const groupNameEnc = encodeURIComponent(f.group_name);
+          const repoIdEncSafe = encodeURIComponent(repoId);
+
+          if (isDownloaded) {
+            btnHtml = '<button id="' + btnId + '" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">✓ Installed</button>';
+          } else if (isDownloading) {
+            btnHtml = '<button id="' + btnId + '" disabled class="bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1">⏳ Downloading...</button>';
+          } else {
+            btnHtml = '<button id="' + btnId + '" onclick="triggerDownloadSafe(\'' + repoIdEncSafe + '\', \'' + groupNameEnc + '\', \'' + filesPayload + '\', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition">Download</button>';
+          }
+
+          const shardBadge = f.is_sharded ? ('<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded ml-1 font-mono">' + f.shard_count + ' Shards</span>') : '';
+
+          const row = document.createElement('div');
+          row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
+          row.innerHTML = '<div class="space-y-1 overflow-hidden pr-2">' +
+            '<div class="font-medium text-sky-200 truncate flex items-center" title="' + escapeHtml(f.display_name) + '">' +
+            '<span class="truncate">' + escapeHtml(f.group_name) + '</span> ' + shardBadge +
+            '</div>' +
+            '<div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">' +
+            '<span>Weight: <strong class="text-slate-200">' + f.weight + '</strong></span>' +
+            '<span>•</span>' +
+            '<span>Variant: <strong class="text-slate-200">' + f.variant + '</strong></span>' +
+            '<span>•</span>' +
+            '<span>Size: <strong class="text-emerald-400">' + f.size_gb + '</strong></span>' +
+            '<span>(' + f.est_vram + ' Req)</span>' +
+            fitBadge +
+            '</div>' +
+            '<div class="text-[11px] text-slate-400 italic bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/80">ℹ ' + escapeHtml(f.description) + '</div>' +
+            '</div>' + btnHtml;
+
+          table.appendChild(row);
+        });
+        fileContainer.appendChild(table);
+      } catch(e) {
+        fileContainer.innerHTML = '<span class="text-xs text-rose-400">Error inspecting files.</span>';
+      }
+    }
+
+    async function triggerDownloadSafe(repoIdEnc, groupNameEnc, filesPayloadEncoded, btn) {
+      const repoId = decodeURIComponent(repoIdEnc);
+      const groupName = decodeURIComponent(groupNameEnc);
+      btn.disabled = true;
+      btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
+      btn.innerHTML = "⏳ Downloading...";
+
+      const filePaths = JSON.parse(decodeURIComponent(filesPayloadEncoded));
+      await fetch('/api/download', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({repo_id: repoId, group_name: groupName, files: filePaths})
+      });
+      updateTasks();
     }
 
     async function toggleFiles(repoId, btn) {
