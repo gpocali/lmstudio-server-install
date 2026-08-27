@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <title>LM Studio Remote Code, Chat & Model Studio</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
   <!-- Markdown & Syntax Highlighting -->
-  <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.2/styles/atom-one-dark.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.2/highlight.min.js"></script>
+  <script src="[https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js](https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js)"></script>
+  <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.2/styles/atom-one-dark.min.css](https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.2/styles/atom-one-dark.min.css)">
+  <script src="[https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.2/highlight.min.js](https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.2/highlight.min.js)"></script>
   <style>
     .gutter-h { width: 4px; cursor: col-resize; transition: background-color 0.2s; }
     .gutter-h:hover, .gutter-h.resizing { background-color: #38bdf8; }
@@ -17,12 +17,19 @@
     ::-webkit-scrollbar-track { background: #090d16; }
     ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    
+    /* Clean, readable Markdown inside bubbles */
     .markdown-body pre { background: #020617; border: 1px solid #1e293b; border-radius: 0.5rem; padding: 0.75rem; margin-top: 0.5rem; margin-bottom: 0.5rem; overflow-x: auto; }
-    .markdown-body code { font-family: monospace; }
-    .markdown-body p { margin-bottom: 0.5rem; }
+    .markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.85em; }
+    .markdown-body p { margin-bottom: 0.5rem; line-height: 1.5; }
+    .markdown-body p:last-child { margin-bottom: 0; }
     .markdown-body ul { list-style-type: disc; margin-left: 1.25rem; margin-bottom: 0.5rem; }
     .markdown-body ol { list-style-type: decimal; margin-left: 1.25rem; margin-bottom: 0.5rem; }
     .markdown-body h1, .markdown-body h2, .markdown-body h3 { font-weight: bold; margin-top: 0.75rem; margin-bottom: 0.25rem; color: #38bdf8; }
+    .markdown-body table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; font-size: 0.85em; }
+    .markdown-body th, .markdown-body td { border: 1px solid #334155; padding: 0.35rem 0.6rem; text-align: left; }
+    .markdown-body th { background: #0f172a; color: #38bdf8; }
+    .markdown-body blockquote { border-left: 3px solid #38bdf8; padding-left: 0.75rem; color: #94a3b8; font-style: italic; margin: 0.5rem 0; }
   </style>
 </head>
 <body class="bg-slate-900 text-slate-100 h-screen w-screen flex flex-col font-sans overflow-hidden select-none">
@@ -79,16 +86,15 @@
         <p class="text-slate-500">Loading chats...</p>
       </div>
       
-      <!-- System Prompt Toggle -->
+      <!-- System Prompt Toggle (Pre-filled with explicit markdown instructions) -->
       <div class="p-3 border-t border-slate-800 bg-slate-950/60 shrink-0 space-y-1.5">
-        <label class="text-[11px] font-bold text-slate-400 block">System Persona:</label>
-        <textarea id="generalChatSystemPrompt" rows="2" 
-                  placeholder="You are a helpful, knowledgeable AI assistant..."
-                  class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs focus:border-sky-500 focus:outline-none resize-none font-mono text-slate-300"></textarea>
+        <label class="text-[11px] font-bold text-slate-400 block">System Persona & Markdown Instructions:</label>
+        <textarea id="generalChatSystemPrompt" rows="3" 
+                  class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs focus:border-sky-500 focus:outline-none resize-none font-mono text-slate-300">You are a helpful, knowledgeable AI assistant. Respond in clear, clean GitHub-flavored Markdown. Use fenced code blocks with language identifiers (e.g. ```python) for source code, format tables where comparative data is helpful, and use bold/bulleted lists for readability.</textarea>
       </div>
     </aside>
 
-    <!-- Main Chat Feed & Input -->
+    <!-- Main Chat Feed & Input (Centered & Condensed) -->
     <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
       
       <!-- Chat Header -->
@@ -104,17 +110,19 @@
         </div>
       </div>
 
-      <!-- Messages Window -->
-      <div id="generalChatMessagesWindow" class="flex-1 overflow-y-auto p-6 space-y-4">
-        <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">
-          <div class="font-bold text-sky-400 mb-1">💬 LM Studio General Assistant</div>
-          Ask questions, draft content, brainstorm, or explore topics. Markdown formatting, code highlighting, and formulas are fully rendered.
+      <!-- Messages Window (Centered Container) -->
+      <div id="generalChatMessagesWindow" class="flex-1 overflow-y-auto p-4 md:p-6">
+        <div class="max-w-4xl mx-auto w-full space-y-3.5">
+          <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
+            <div class="font-bold text-sky-400 mb-1">💬 LM Studio General Assistant</div>
+            Ask questions, draft content, brainstorm, or explore topics. Markdown formatting, tables, and syntax-highlighted code blocks are fully supported.
+          </div>
         </div>
       </div>
 
-      <!-- Chat Input Bar -->
+      <!-- Chat Input Bar (Centered Container) -->
       <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
-        <div class="max-w-4xl mx-auto space-y-2">
+        <div class="max-w-4xl mx-auto w-full space-y-2">
           <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
             <span>Model: <strong class="generalChatModelBadge text-sky-400 font-mono">Scanning...</strong></span>
             <span class="text-slate-500 italic">Press Enter to send, Shift+Enter for new line</span>
@@ -122,7 +130,7 @@
           <div class="flex gap-2">
             <textarea id="generalChatInput" rows="2" 
                       onkeydown="handleGeneralChatKeyDown(event)"
-                      placeholder="Type a message to your local LLM..."
+                      placeholder="Type a message... (Markdown and code blocks supported)"
                       class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none resize-none text-slate-100"></textarea>
             <button id="generalChatSendBtn" onclick="executeGeneralChatSend()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
               Send
@@ -183,7 +191,7 @@
 
     <div id="resizerH" class="gutter-h bg-slate-800 shrink-0"></div>
 
-    <!-- Main Front & Center Code Studio -->
+    <!-- Main Front & Center Code Studio (Centered & Condensed) -->
     <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
       
       <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex flex-wrap justify-between items-center gap-3 shrink-0 z-10">
@@ -229,15 +237,18 @@
         </div>
       </div>
 
-      <div id="chatHistoryWindow" class="flex-1 overflow-y-auto p-6 space-y-4">
-        <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">
-          <div class="font-bold text-sky-400 mb-1">🤖 Local AI Software Engineer Ready</div>
-          Panels are resizable and locked to the frame. Press <kbd class="bg-slate-800 px-1 py-0.5 rounded text-sky-300">Enter</kbd> to submit, or <kbd class="bg-slate-800 px-1 py-0.5 rounded text-sky-300">Shift + Enter</kbd> for a new line.
+      <!-- Studio Chat History Window (Centered Container) -->
+      <div id="chatHistoryWindow" class="flex-1 overflow-y-auto p-4 md:p-6">
+        <div class="max-w-4xl mx-auto w-full space-y-3.5">
+          <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
+            <div class="font-bold text-sky-400 mb-1">🤖 Local AI Software Engineer Ready</div>
+            Panels are resizable and locked to the frame. Press <kbd class="bg-slate-800 px-1 py-0.5 rounded text-sky-300">Enter</kbd> to submit, or <kbd class="bg-slate-800 px-1 py-0.5 rounded text-sky-300">Shift + Enter</kbd> for a new line.
+          </div>
         </div>
       </div>
 
       <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
-        <div class="max-w-4xl mx-auto space-y-2">
+        <div class="max-w-4xl mx-auto w-full space-y-2">
           <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
             <span>Model: <strong class="generalChatModelBadge text-sky-400 font-mono">Scanning...</strong></span>
             <span id="selectedFilesSummary" class="text-slate-400 italic">0 files selected for context</span>
@@ -245,7 +256,7 @@
           <div class="flex gap-2">
             <textarea id="studioPromptInput" rows="2" 
                       onkeydown="handleStudioKeyDown(event)"
-                      placeholder="e.g. In install.sh and model_manager.py, add dynamic context sliders and tune params... (Enter to Send, Shift+Enter for New Line)"
+                      placeholder="e.g. In install.sh and model_manager.py, optimize layout constraints and markdown prompt... (Enter to Send, Shift+Enter for New Line)"
                       class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none font-mono resize-none"></textarea>
             <button id="studioSendBtn" onclick="executeStudioTask()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
               ⚡ Run
@@ -585,8 +596,6 @@
         }
 
         renderGeneralChatSidebar();
-        
-        // Load first session by default
         const activeSess = generalChatSessions.find(s => s.id === activeChatSessionId) || generalChatSessions[0];
         selectChatSession(activeSess.id);
       } catch(e) {
@@ -680,21 +689,23 @@
 
     function renderGeneralChatMessages() {
       const windowEl = document.getElementById('generalChatMessagesWindow');
-      windowEl.innerHTML = '';
-
+      
       if (currentChatMessages.length === 0) {
-        windowEl.innerHTML = '<div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">' +
+        windowEl.innerHTML = '<div class="max-w-4xl mx-auto w-full space-y-3.5"><div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">' +
           '<div class="font-bold text-sky-400 mb-1">💬 LM Studio General Assistant</div>' +
-          'Send a prompt to begin your conversation. Full Markdown formatting is supported.</div>';
+          'Send a prompt to begin your conversation. Full Markdown formatting, tables, and syntax-highlighted code blocks are supported.</div></div>';
         return;
       }
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
 
       currentChatMessages.forEach(msg => {
         const isUser = (msg.role === 'user');
         const div = document.createElement('div');
         div.className = isUser 
-          ? 'bg-slate-800 p-4 rounded-lg border border-slate-700 text-xs text-slate-100 max-w-3xl ml-auto' 
-          : 'bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-200 markdown-body max-w-3xl mr-auto';
+          ? 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md' 
+          : 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-200 markdown-body max-w-[95%] mr-auto shadow-md';
 
         if (isUser) {
           div.innerHTML = '<div class="font-bold text-sky-300 text-[11px] mb-1">You</div><p class="whitespace-pre-wrap font-sans">' + escapeHtml(msg.content) + '</p>';
@@ -703,10 +714,12 @@
             '<span>🤖 Assistant</span><span class="text-[10px] text-slate-500 font-mono">LLM Output</span></div>' +
             marked.parse(msg.content || '');
         }
-        windowEl.appendChild(div);
+        wrapper.appendChild(div);
       });
 
-      // Highlight syntax on rendered code blocks
+      windowEl.innerHTML = '';
+      windowEl.appendChild(wrapper);
+
       document.querySelectorAll('#generalChatMessagesWindow pre code').forEach((el) => {
         hljs.highlightElement(el);
       });
@@ -730,14 +743,20 @@
       sendBtn.disabled = true;
       sendBtn.textContent = '...';
 
-      // Loading bubble
+      let wrapper = windowEl.querySelector('.max-w-4xl');
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
+        windowEl.innerHTML = '';
+        windowEl.appendChild(wrapper);
+      }
+
       const aiDiv = document.createElement('div');
-      aiDiv.className = 'bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-emerald-400 max-w-3xl mr-auto animate-pulse';
+      aiDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-emerald-400 max-w-[95%] mr-auto animate-pulse';
       aiDiv.innerHTML = '🤖 Generating response...';
-      windowEl.appendChild(aiDiv);
+      wrapper.appendChild(aiDiv);
       windowEl.scrollTop = windowEl.scrollHeight;
 
-      // Construct API payload
       const apiMessages = [];
       if (sysPrompt) {
         apiMessages.push({role: "system", content: sysPrompt});
@@ -761,11 +780,11 @@
           renderGeneralChatMessages();
           saveCurrentChatSession();
         } else {
-          aiDiv.className = 'bg-slate-950 p-4 rounded-lg border border-rose-800 text-xs text-rose-400 max-w-3xl mr-auto';
+          aiDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto';
           aiDiv.innerHTML = '❌ Error: ' + (data.message || 'Failed to generate response');
         }
       } catch(e) {
-        aiDiv.className = 'bg-slate-950 p-4 rounded-lg border border-rose-800 text-xs text-rose-400 max-w-3xl mr-auto';
+        aiDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto';
         aiDiv.innerHTML = '❌ Communication Error: ' + e.message;
       }
 
@@ -1084,28 +1103,30 @@
 
     function renderActiveThreadChat() {
       const chatWindow = document.getElementById('chatHistoryWindow');
-      chatWindow.innerHTML = '';
-
+      
       const activeThread = (currentHistoryData && currentHistoryData.threads) ? currentHistoryData.threads.find(t => t.id === activeThreadId) : null;
       if (!activeThread || !activeThread.messages || activeThread.messages.length === 0) {
-        chatWindow.innerHTML = '<div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">' +
+        chatWindow.innerHTML = '<div class="max-w-4xl mx-auto w-full space-y-3.5"><div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">' +
           '<div class="font-bold text-sky-400 mb-1">💬 Thread: ' + escapeHtml(activeThread ? activeThread.title : 'New Thread') + '</div>' +
-          'Fresh context ready. Check your target files and run your next coding task.</div>';
+          'Fresh context ready. Check your target files and run your next coding task.</div></div>';
         return;
       }
 
+      const wrapper = document.createElement('div');
+      wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
+
       activeThread.messages.forEach(msg => {
         const userMsgDiv = document.createElement('div');
-        userMsgDiv.className = 'bg-slate-800 p-4 rounded-lg border border-slate-700 text-xs text-slate-100 space-y-1';
-        userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between">' +
+        userMsgDiv.className = 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md';
+        userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between text-[11px] mb-1">' +
           '<span>You</span>' +
           '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml((msg.target_files || []).join(', ') || 'No files selected') + '</span>' +
           '</div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(msg.instruction) + '</p>';
-        chatWindow.appendChild(userMsgDiv);
+        wrapper.appendChild(userMsgDiv);
 
         const modFiles = msg.modified_files || [];
         const aiMsgDiv = document.createElement('div');
-        aiMsgDiv.className = 'bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-emerald-300 space-y-3 font-mono';
+        aiMsgDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-emerald-300 space-y-3 font-mono max-w-[95%] mr-auto shadow-md';
         
         let reviewDiff = '';
         if (modFiles.length > 0 && msg.diff) {
@@ -1120,9 +1141,11 @@
           '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml(modText) + '</span>' +
           '</div><div class="text-slate-200 whitespace-pre-wrap mt-2">' + escapeHtml(msg.ai_response || '') + '</div>' + reviewDiff;
         
-        chatWindow.appendChild(aiMsgDiv);
+        wrapper.appendChild(aiMsgDiv);
       });
 
+      chatWindow.innerHTML = '';
+      chatWindow.appendChild(wrapper);
       chatWindow.scrollTop = chatWindow.scrollHeight;
     }
 
@@ -1320,24 +1343,32 @@
       const checkedBoxes = document.querySelectorAll('#filesCheckboxList input[type="checkbox"]:checked');
       const selectedFiles = Array.from(checkedBoxes).map(cb => cb.value);
 
+      let wrapper = chatWindow.querySelector('.max-w-4xl');
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
+        chatWindow.innerHTML = '';
+        chatWindow.appendChild(wrapper);
+      }
+
       const userMsgDiv = document.createElement('div');
-      userMsgDiv.className = 'bg-slate-800 p-4 rounded-lg border border-slate-700 text-xs text-slate-100 space-y-1';
-      userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between">' +
+      userMsgDiv.className = 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md space-y-1';
+      userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between text-[11px] mb-1">' +
         '<span>You</span>' +
         '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml(selectedFiles.length > 0 ? selectedFiles.join(', ') : 'No files selected') + '</span>' +
         '</div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(instruction) + '</p>';
-      chatWindow.appendChild(userMsgDiv);
+      wrapper.appendChild(userMsgDiv);
 
       promptInput.value = '';
       sendBtn.disabled = true;
-      sendBtn.textContent = '⏳ Thinking...';
+      sendBtn.textContent = '...';
 
       const cardId = 'action-card-' + Date.now();
       const aiMsgDiv = document.createElement('div');
       aiMsgDiv.id = cardId;
-      aiMsgDiv.className = 'bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-emerald-300 space-y-3 font-mono';
+      aiMsgDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-emerald-300 space-y-3 font-mono max-w-[95%] mr-auto shadow-md';
       aiMsgDiv.innerHTML = '<span class="animate-pulse">🤖 Analyzing context & generating file changes...</span>';
-      chatWindow.appendChild(aiMsgDiv);
+      wrapper.appendChild(aiMsgDiv);
       chatWindow.scrollTop = chatWindow.scrollHeight;
 
       try {
@@ -1523,10 +1554,18 @@
       if (!confirm("Push committed changes on branch '" + currentBranch + "' to GitHub origin/" + currentBranch + "?")) return;
       
       const chatWindow = document.getElementById('chatHistoryWindow');
+      let wrapper = chatWindow.querySelector('.max-w-4xl');
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
+        chatWindow.innerHTML = '';
+        chatWindow.appendChild(wrapper);
+      }
+
       const pushDiv = document.createElement('div');
-      pushDiv.className = 'bg-slate-950 p-4 rounded border border-slate-800 text-xs font-mono text-slate-300';
+      pushDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs font-mono text-slate-300 max-w-[95%] mr-auto shadow-md';
       pushDiv.innerHTML = '<span class="animate-pulse">🚀 Pushing commits to GitHub origin/' + currentBranch + '...</span>';
-      chatWindow.appendChild(pushDiv);
+      wrapper.appendChild(pushDiv);
       chatWindow.scrollTop = chatWindow.scrollHeight;
 
       try {
@@ -1551,10 +1590,18 @@
     async function runSyntaxValidation() {
       if (!currentWorkspaceDir) return alert('Select an active project first.');
       const chatWindow = document.getElementById('chatHistoryWindow');
+      let wrapper = chatWindow.querySelector('.max-w-4xl');
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
+        chatWindow.innerHTML = '';
+        chatWindow.appendChild(wrapper);
+      }
+
       const valDiv = document.createElement('div');
-      valDiv.className = 'bg-slate-950 p-4 rounded border border-slate-800 text-xs font-mono text-slate-300';
+      valDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs font-mono text-slate-300 max-w-[95%] mr-auto shadow-md';
       valDiv.innerHTML = '<span class="animate-pulse">🧪 Running Python & Shell script syntax validation...</span>';
-      chatWindow.appendChild(valDiv);
+      wrapper.appendChild(valDiv);
       chatWindow.scrollTop = chatWindow.scrollHeight;
 
       try {
@@ -1624,7 +1671,7 @@
 
           return '<div class="relative pl-8 space-y-1 text-xs">' +
             '<div class="absolute left-2 top-1 w-3 h-3 ' + dotColor + ' rounded-full ring-4"></div>' +
-            '<div class="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2">' +
+            '<div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2 shadow-md">' +
             '<div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800/80 pb-2">' +
             '<div class="flex items-center gap-2">' + typeBadge + '<span class="font-bold text-slate-200 text-sm">' + escapeHtml(titleText) + '</span></div>' +
             '<span class="text-[11px] text-slate-500 font-mono">' + timeStr + '</span>' +
@@ -1671,7 +1718,7 @@
         }
 
         container.innerHTML = accounts.map(a => {
-          return '<div class="bg-slate-950 p-3 rounded border border-slate-700 flex justify-between items-center text-xs">' +
+          return '<div class="bg-slate-950 p-3 rounded-lg border border-slate-700 flex justify-between items-center text-xs shadow-md">' +
             '<div class="flex items-center gap-2.5 overflow-hidden">' +
             '<img src="' + (a.avatar_url || 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png') + '" class="w-7 h-7 rounded-full border border-slate-700">' +
             '<div class="truncate">' +
@@ -1840,7 +1887,7 @@
 
         models.forEach(m => {
           const card = document.createElement('div');
-          card.className = 'bg-slate-950 p-4 rounded border border-slate-700 space-y-3';
+          card.className = 'bg-slate-950 p-4 rounded-xl border border-slate-700 space-y-3 shadow-md';
           
           const verifiedBadge = m.is_verified 
             ? '<button onclick="searchAuthor(\'' + m.maker + '\')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer">🛡️ ' + m.maker + '</button>'
@@ -1962,6 +2009,28 @@
       updateTasks();
     }
 
+    async function loadModelIntoGPU(modelPath, btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Loading (32k ctx)...';
+      btn.className = 'bg-sky-950 text-sky-300 border border-sky-800 px-2.5 py-1 rounded text-xs animate-pulse';
+
+      try {
+        const res = await fetch('/api/load_model', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({model_path: modelPath, gpu_offload: 'max', context_length: 32768, ttl: 3600})
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') {
+          alert('Load Failure Output from LMS:\n\n' + (data.message || JSON.stringify(data)));
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+      await initHardwareInfo();
+      await fetchLocalModels();
+    }
+
     async function unloadActiveModel(btn) {
       if (btn) btn.textContent = '⏳ Unloading...';
       try {
@@ -2005,7 +2074,7 @@
           const isDone = info.status === 'completed';
           const barColor = isDone ? 'bg-emerald-500' : 'bg-sky-500';
 
-          return '<div class="bg-slate-950 p-3 rounded border border-slate-700 space-y-2">' +
+          return '<div class="bg-slate-950 p-3 rounded-lg border border-slate-700 space-y-2 shadow-sm">' +
             '<div class="flex justify-between items-center text-xs">' +
             '<div class="font-medium truncate pr-2">' + escapeHtml(file) + '</div>' +
             '<div class="text-sky-300 font-mono shrink-0">' + (info.progress_str || info.status) + '</div>' +
@@ -2066,7 +2135,7 @@
 
           const borderClass = isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700';
 
-          return '<div class="flex justify-between items-center bg-slate-950 p-3 rounded border ' + borderClass + ' text-xs gap-3">' +
+          return '<div class="flex justify-between items-center bg-slate-950 p-3 rounded-lg border ' + borderClass + ' text-xs gap-3 shadow-sm">' +
             '<div class="truncate pr-2">' +
             '<div class="font-medium text-slate-200 truncate" title="' + escapeHtml(m.filename) + '">' + escapeHtml(m.filename) + '</div>' +
             '<div class="text-slate-400 text-[10px] mt-0.5">Weight: ' + m.weight + ' | Variant: ' + m.variant + ' | Cap: ' + Math.round((m.max_context || 32768)/1024) + 'K Ctx</div>' +
