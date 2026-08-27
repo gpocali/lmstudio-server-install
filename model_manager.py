@@ -1,6 +1,6 @@
 """
 LM Studio Server Entrypoint Router
-Dispatches API requests with General Chat Bot, Model Tuning, and Workspace Timeline.
+Dispatches API requests with Grounded Live Web Search, Markdown Chat Bot, Model Tuning, and Workspace Timeline.
 """
 
 import os
@@ -29,6 +29,7 @@ from core.models import (
     calculate_trust_score,
     get_quant_description,
     parse_model_metadata,
+    fetch_web_search_snippets,
     run_download_job,
     VERIFIED_CREATORS
 )
@@ -70,6 +71,7 @@ class LoadRequest(BaseModel):
 class ChatCompletionRequest(BaseModel):
     messages: list[dict]
     model_identifier: str = ""
+    enable_web_search: bool = False
     temperature: float = 0.7
     max_tokens: int = 4096
     top_p: float = 0.95
@@ -214,10 +216,43 @@ def api_chat_completion(req: ChatCompletionRequest):
         loaded = get_loaded_models()
         model_id = loaded[0] if loaded else "default"
 
+    messages = list(req.messages)
+    current_date_str = datetime.datetime.utcnow().strftime("%A, %B %d, %Y")
+
+    # 1. Inject temporal grounding header
+    grounding_system = (
+        f"Temporal System Information: Current real-world date is {current_date_str}.\n"
+        "You are a local language model running on private infrastructure."
+    )
+
+    # 2. Real-Time Web Search Augmentation
+    search_context = ""
+    if req.enable_web_search and messages:
+        user_query = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
+        if user_query:
+            snippets = fetch_web_search_snippets(user_query, max_results=5)
+            search_context = f"\n\n--- LIVE WEB SEARCH CONTEXT (Retrieved {current_date_str}) ---\n{snippets}\n--- END SEARCH CONTEXT ---\n"
+            grounding_system += (
+                f"{search_context}\n"
+                "Instructions: Incorporate the live web search context above to answer accurately and reference current facts. "
+                "Do not hallucinate that you ran a Google Search independently—state facts grounded in the provided search context."
+            )
+    else:
+        grounding_system += (
+            "\nNote: Live Web Search is currently DISABLED. Your internal training cutoff applies. "
+            "If asked about breaking events you do not know, candidly clarify that you operate on static training data."
+        )
+
+    # Prepend or update system message
+    if messages and messages[0].get("role") == "system":
+        messages[0]["content"] = f"{grounding_system}\n\n{messages[0]['content']}"
+    else:
+        messages.insert(0, {"role": "system", "content": grounding_system})
+
     try:
         payload = {
             "model": model_id,
-            "messages": req.messages,
+            "messages": messages,
             "temperature": req.temperature,
             "max_tokens": req.max_tokens,
             "top_p": req.top_p
@@ -226,7 +261,9 @@ def api_chat_completion(req: ChatCompletionRequest):
         if resp.status_code != 200:
             return JSONResponse(status_code=500, content={"status": "error", "message": f"LM Studio API Error: {resp.text}"})
         
-        return resp.json()
+        data = resp.json()
+        data["search_grounded"] = bool(search_context)
+        return data
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
@@ -324,7 +361,6 @@ def api_model_files(repo_id: str):
         is_dling = gname in DOWNLOAD_JOBS and DOWNLOAD_JOBS[gname].get("status") == "downloading"
         shard_info = f" ({len(gdata['paths'])} Shards)" if len(gdata['paths']) > 1 else ""
 
-        # Model max context capacity estimation based on architecture name
         max_cap_ctx = 131072 if ("llama-3" in gname.lower() or "qwen" in gname.lower() or "nemotron" in gname.lower()) else 32768
 
         parsed.append({

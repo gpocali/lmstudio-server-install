@@ -58,6 +58,34 @@ def fetch_single_file_size(repo_id: str, rel_path: str):
     except Exception: pass
     return 0
 
+def fetch_web_search_snippets(query: str, max_results: int = 5) -> str:
+    """Performs real-time web search via DuckDuckGo and formats snippets for prompt grounding."""
+    try:
+        from duckduckgo_search import DDGS
+        results = []
+        with DDGS() as ddgs:
+            raw = ddgs.text(query, max_results=max_results)
+            if raw:
+                for idx, r in enumerate(raw, 1):
+                    title = r.get("title", "")
+                    href = r.get("href", "")
+                    body = r.get("body", "")
+                    results.append(f"[{idx}] {title}\nURL: {href}\nSnippet: {body}")
+        if results:
+            return "\n\n".join(results)
+    except Exception as e:
+        # Fallback to direct HTTP search if package unavailable
+        try:
+            r = requests.get("https://html.duckduckgo.com/html/", params={"q": query}, headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
+            if r.status_code == 200:
+                snippets = re.findall(r'<a class="result__snippet[^>]*>(.*?)</a>', r.text)
+                clean_s = [re.sub(r'<[^>]+>', '', s).strip() for s in snippets[:4]]
+                if clean_s:
+                    return "\n\n".join([f"[{i+1}] {s}" for i, s in enumerate(clean_s)])
+        except Exception:
+            pass
+    return "No live search results found or web lookup timed out."
+
 def run_download_job(repo_id: str, group_name: str, file_paths: list[str]):
     DOWNLOAD_JOBS[group_name] = {
         "status": "downloading",
