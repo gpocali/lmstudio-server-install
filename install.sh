@@ -63,7 +63,10 @@ echo "[+] Installing system packages and runtime dependencies..."
 apt-get update -y
 apt-get install -y curl ca-certificates jq gnupg git python3 python3-pip python3-venv python3-uvicorn python3-fastapi python3-requests
 
-# 4. Install / Verify Docker Engine (for Open WebUI)
+# Install live search dependencies (with PEP 668 break-system-packages compatibility)
+pip3 install -U duckduckgo_search --break-system-packages 2>/dev/null || pip3 install -U duckduckgo_search || true
+
+# 4. Install / Verify Docker Engine (for Open WebUI if used)
 if ! command -v docker >/dev/null 2>&1; then
   echo "[+] Installing Docker Engine..."
   install -m 0755 -d /etc/apt/keyrings
@@ -151,6 +154,7 @@ curl -fsSL "${REPO_RAW_URL}/core/hardware.py" -o "${CORE_DIR}/hardware.py"
 curl -fsSL "${REPO_RAW_URL}/core/models.py" -o "${CORE_DIR}/models.py"
 curl -fsSL "${REPO_RAW_URL}/core/github_vault.py" -o "${CORE_DIR}/github_vault.py"
 curl -fsSL "${REPO_RAW_URL}/core/agent_engine.py" -o "${CORE_DIR}/agent_engine.py"
+curl -fsSL "${REPO_RAW_URL}/core/personas.py" -o "${CORE_DIR}/personas.py"
 
 # Frontend HTML/JS Studio UI
 curl -fsSL "${REPO_RAW_URL}/web/index.html" -o "${WEB_DIR}/index.html"
@@ -162,6 +166,7 @@ python3 -m py_compile "${CORE_DIR}/hardware.py"
 python3 -m py_compile "${CORE_DIR}/models.py"
 python3 -m py_compile "${CORE_DIR}/github_vault.py"
 python3 -m py_compile "${CORE_DIR}/agent_engine.py"
+python3 -m py_compile "${CORE_DIR}/personas.py"
 
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$APP_DIR"
 echo "[✓] All modular application files deployed and verified."
@@ -219,16 +224,12 @@ systemctl daemon-reload
 systemctl enable --now lmstudio.service modelmanager.service
 systemctl restart lmstudio.service modelmanager.service
 
-# 9. Open WebUI Container Management
-echo ""
-echo "--- [ Open WebUI Container Management ] ---"
-INSTALL_WEBUI="y"
-if [ "$IS_UPDATE" = true ]; then
-  if [ -f "$CONFIG_FILE" ]; then
-    # shellcheck disable=SC1090
-    source "$CONFIG_FILE"
-  fi
-  INSTALL_WEBUI="${ENABLE_OPEN_WEBUI:-y}"
+# 9. Open WebUI Container Management (Optional)
+INSTALL_WEBUI="n"
+if [ "$IS_UPDATE" = true ] && [ -f "$CONFIG_FILE" ]; then
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+  INSTALL_WEBUI="${ENABLE_OPEN_WEBUI:-n}"
 fi
 
 if [[ "$INSTALL_WEBUI" =~ ^[Yy]$ ]]; then
@@ -276,7 +277,9 @@ echo "================================================================="
 echo "                  MODULAR STACK READY                            "
 echo "================================================================="
 echo "• LM Studio API:          http://${SERVER_IP}:${LM_PORT}/v1"
-echo "• Code & Model Studio:    http://${SERVER_IP}:${MANAGER_PORT}"
-echo "• Open WebUI:             http://${SERVER_IP}:${WEBUI_PORT}"
+echo "• Grounded Code & Chat:   http://${SERVER_IP}:${MANAGER_PORT}"
+if [ "$ENABLE_WEBUI_CONF" = "true" ]; then
+  echo "• Open WebUI:             http://${SERVER_IP}:${WEBUI_PORT}"
+fi
 echo "• Workspaces Root:        ${WORKSPACES_DIR}"
 echo "================================================================="
