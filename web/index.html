@@ -4,14 +4,48 @@
   <meta charset="UTF-8">
   <title>LM Studio Remote Code & Model Studio</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Custom Resizer Styling */
+    .gutter-h {
+      width: 4px;
+      cursor: col-resize;
+      transition: background-color 0.2s;
+    }
+    .gutter-h:hover, .gutter-h.resizing {
+      background-color: #38bdf8;
+    }
+    .gutter-v {
+      height: 4px;
+      cursor: row-resize;
+      transition: background-color 0.2s;
+    }
+    .gutter-v:hover, .gutter-v.resizing {
+      background-color: #38bdf8;
+    }
+    /* Sleek Dark Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #090d16;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+  </style>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+<body class="bg-slate-900 text-slate-100 h-screen w-screen flex flex-col font-sans overflow-hidden select-none">
   
-  <!-- Global Top Navbar -->
-  <header class="bg-slate-950 border-b border-slate-800 px-6 py-3.5 flex flex-wrap justify-between items-center gap-4 shrink-0">
+  <!-- Global Top Navbar (Pinned) -->
+  <header class="bg-slate-950 border-b border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-4 shrink-0 z-20">
     <div class="flex items-center gap-3">
       <h1 class="text-lg font-bold text-sky-400">LM Studio Studio</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded border border-slate-700">v2.1 Timeline Edition</span>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">v2.2 IDE Edition</span>
     </div>
 
     <!-- Navigation Page Buttons -->
@@ -41,59 +75,69 @@
     </div>
   </header>
 
-  <!-- ==================== VIEW 1: PROJECT STUDIO (IDE & MULTI-THREAD CHAT) ==================== -->
-  <main id="viewStudio" class="flex-1 flex overflow-hidden">
+  <!-- ==================== VIEW 1: PROJECT STUDIO ==================== -->
+  <main id="viewStudio" class="flex-1 flex overflow-hidden relative">
     
-    <!-- Left Sidebar: Workspaces & Chat Threads -->
-    <aside class="w-80 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0">
+    <!-- Left Sidebar: Resizable & Self-Contained Scrolling -->
+    <aside id="studioSidebar" class="w-80 min-w-[200px] max-w-[500px] bg-slate-950 flex flex-col shrink-0 overflow-hidden select-text">
       
-      <!-- Top Section: Workspaces -->
-      <div class="p-4 border-b border-slate-800 flex justify-between items-center">
-        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Workspaces</h2>
-        <button onclick="switchView('github')" class="text-xs text-sky-400 hover:text-sky-300 hover:underline">+ Clone</button>
-      </div>
-      <div id="sidebarProjectList" class="max-h-48 overflow-y-auto p-3 space-y-2 text-xs border-b border-slate-800">
-        <p class="text-slate-500">Loading workspaces...</p>
+      <!-- Section 1: Workspaces -->
+      <div id="sectionWorkspaces" class="flex flex-col h-44 min-h-[90px] overflow-hidden">
+        <div class="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Workspaces</h2>
+          <button onclick="switchView('github')" class="text-xs text-sky-400 hover:text-sky-300 hover:underline">+ Clone</button>
+        </div>
+        <div id="sidebarProjectList" class="flex-1 overflow-y-auto p-2.5 space-y-2 text-xs">
+          <p class="text-slate-500">Loading workspaces...</p>
+        </div>
       </div>
 
-      <!-- Middle Section: Multi-Chat Threads for Active Workspace -->
-      <div id="sidebarThreadsBlock" class="hidden flex-1 flex flex-col p-4 overflow-hidden border-b border-slate-800">
-        <div class="flex justify-between items-center mb-2">
+      <!-- Vertical Resizer 1 -->
+      <div id="resizerV1" class="gutter-v bg-slate-800 shrink-0 hidden"></div>
+
+      <!-- Section 2: Multi-Chat Threads -->
+      <div id="sectionThreads" class="flex-1 flex flex-col min-h-[100px] overflow-hidden hidden">
+        <div class="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
           <h3 class="text-xs font-bold text-slate-300">Chat Threads</h3>
           <button onclick="createNewThreadDialog()" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-sky-300 px-2 py-0.5 rounded border border-slate-700">
             + New Thread
           </button>
         </div>
-        <div id="threadsList" class="flex-1 overflow-y-auto space-y-1.5 text-xs pr-1">
+        <div id="threadsList" class="flex-1 overflow-y-auto p-2.5 space-y-1.5 text-xs">
           <p class="text-slate-500">No threads created</p>
         </div>
       </div>
 
-      <!-- Bottom Section: Context Files -->
-      <div id="sidebarFilesBlock" class="hidden p-4 bg-slate-950/80 flex flex-col space-y-2 shrink-0">
-        <div class="flex justify-between items-center">
+      <!-- Vertical Resizer 2 -->
+      <div id="resizerV2" class="gutter-v bg-slate-800 shrink-0 hidden"></div>
+
+      <!-- Section 3: Context Files -->
+      <div id="sectionFiles" class="flex flex-col h-48 min-h-[100px] bg-slate-950 overflow-hidden hidden">
+        <div class="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
           <h3 class="text-xs font-bold text-slate-300">Context Files</h3>
           <button onclick="openNewFileDialog()" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-sky-300 px-2 py-0.5 rounded border border-slate-700">
             + New File
           </button>
         </div>
-        <div id="filesCheckboxList" class="max-h-36 overflow-y-auto space-y-1.5 pr-1 font-mono text-[11px] text-slate-300">
+        <div id="filesCheckboxList" class="flex-1 overflow-y-auto p-2.5 space-y-1.5 font-mono text-[11px] text-slate-300">
           <p class="text-slate-500">Select a project</p>
         </div>
       </div>
 
     </aside>
 
+    <!-- Horizontal Sidebar Resizer -->
+    <div id="resizerH" class="gutter-h bg-slate-800 shrink-0"></div>
+
     <!-- Main Front & Center Chat / Code Studio -->
-    <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden">
+    <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0 select-text">
       
-      <!-- Studio Top Action Header -->
-      <div class="bg-slate-950/70 border-b border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-3 shrink-0">
+      <!-- Studio Top Action Header (Pinned) -->
+      <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex flex-wrap justify-between items-center gap-3 shrink-0 z-10">
         <div>
           <div class="flex items-center gap-3">
-            <span class="text-base font-bold text-slate-100" id="studioProjectHeader">Select a Project from Left Pane</span>
+            <span class="text-base font-bold text-slate-100 truncate" id="studioProjectHeader">Select a Project from Left Pane</span>
             
-            <!-- Branch Selector -->
             <div id="studioBranchContainer" class="hidden flex items-center gap-1.5">
               <span class="text-xs text-slate-400">🌿 Branch:</span>
               <select id="studioBranchSelect" onchange="onStudioBranchChanged()" class="bg-slate-900 border border-slate-700 text-sky-300 px-2.5 py-1 rounded text-xs font-mono focus:border-sky-500 focus:outline-none">
@@ -101,7 +145,7 @@
               </select>
             </div>
           </div>
-          <span class="text-[11px] text-slate-400" id="studioAccountSubtitle">--</span>
+          <span class="text-[11px] text-slate-400 truncate" id="studioAccountSubtitle">--</span>
         </div>
 
         <!-- Git Actions: Pull, Validate, Push -->
@@ -119,7 +163,7 @@
       </div>
 
       <!-- Persistent Pending Changes Alert Banner -->
-      <div id="pendingChangesBanner" class="hidden bg-amber-950/40 border-b border-amber-800/80 px-6 py-2.5 flex justify-between items-center text-xs shrink-0">
+      <div id="pendingChangesBanner" class="hidden bg-amber-950/40 border-b border-amber-800/80 px-6 py-2 flex justify-between items-center text-xs shrink-0 z-10">
         <div class="flex items-center gap-2 overflow-hidden">
           <span class="text-amber-400 font-bold">⚠️ Pending Changes on Disk:</span>
           <span id="pendingFilesCount" class="text-slate-300 truncate">0 files</span>
@@ -134,16 +178,16 @@
         </div>
       </div>
 
-      <!-- Chat / Execution History Window -->
+      <!-- Chat / Content Window (Only this scrolls) -->
       <div id="chatHistoryWindow" class="flex-1 overflow-y-auto p-6 space-y-4">
         <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-300 leading-relaxed max-w-3xl">
           <div class="font-bold text-sky-400 mb-1">🤖 Local AI Software Engineer Ready</div>
-          Prompts, generated summaries, and diffs are tracked persistently. Press <kbd class="bg-slate-800 px-1 py-0.5 rounded text-sky-300">Enter</kbd> to submit, or <kbd class="bg-slate-800 px-1 py-0.5 rounded text-sky-300">Shift + Enter</kbd> for a new line.
+          Panels are resizable and locked to the frame. Press <kbd class="bg-slate-800 px-1 py-0.5 rounded text-sky-300">Enter</kbd> to submit, or <kbd class="bg-slate-800 px-1 py-0.5 rounded text-sky-300">Shift + Enter</kbd> for a new line.
         </div>
       </div>
 
-      <!-- Instruction Input Bar -->
-      <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0">
+      <!-- Instruction Input Bar (Permanently Locked to Bottom) -->
+      <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto space-y-2">
           <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
             <span>Model: <strong id="agentModelBadge" class="text-sky-400 font-mono">Scanning...</strong></span>
@@ -153,7 +197,7 @@
             <textarea id="studioPromptInput" rows="2" 
                       onkeydown="handleChatKeyDown(event)"
                       placeholder="e.g. Add an endpoint to export history as JSON and update CHANGELOG.md... (Enter to Send, Shift+Enter for New Line)"
-                      class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none font-mono"></textarea>
+                      class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none font-mono resize-none"></textarea>
             <button id="studioSendBtn" onclick="executeStudioTask()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
               ⚡ Run
             </button>
@@ -164,7 +208,7 @@
   </main>
 
   <!-- ==================== VIEW 2: WORKSPACE HISTORY & TIMELINE ==================== -->
-  <main id="viewHistory" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-5xl mx-auto w-full">
+  <main id="viewHistory" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-5xl mx-auto w-full select-text">
     <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-slate-700 pb-4">
       <div>
         <h2 class="text-lg font-bold text-slate-100 flex items-center gap-2">
@@ -185,7 +229,7 @@
   </main>
 
   <!-- ==================== VIEW 3: GITHUB ACCOUNTS & REPOS ==================== -->
-  <main id="viewGithub" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-6xl mx-auto w-full">
+  <main id="viewGithub" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-6xl mx-auto w-full select-text">
     <section class="bg-slate-800 p-5 rounded-lg border border-slate-700 space-y-3">
       <div class="flex justify-between items-center cursor-pointer" onclick="togglePatGuide()">
         <div class="flex items-center gap-2">
@@ -281,7 +325,7 @@
   </main>
 
   <!-- ==================== VIEW 4: MODEL MANAGER ==================== -->
-  <main id="viewModels" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-7xl mx-auto w-full">
+  <main id="viewModels" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-7xl mx-auto w-full select-text">
     <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
       <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
         <h2 id="catalogHeader" class="text-lg font-semibold">Available Models (Top GGUFs on Hugging Face)</h2>
@@ -414,6 +458,70 @@
       }
     }
 
+    // ---------------- Resizable Panels Engine ----------------
+
+    function initResizers() {
+      // 1. Horizontal Sidebar Resizer
+      const resizerH = document.getElementById('resizerH');
+      const sidebar = document.getElementById('studioSidebar');
+      let isResizingH = false;
+
+      resizerH.addEventListener('mousedown', (e) => {
+        isResizingH = true;
+        resizerH.classList.add('resizing');
+        document.body.style.cursor = 'col-resize';
+      });
+
+      // 2. Vertical Section Resizer 1 (Workspaces vs Threads)
+      const resizerV1 = document.getElementById('resizerV1');
+      const sectionW = document.getElementById('sectionWorkspaces');
+      let isResizingV1 = false;
+
+      resizerV1.addEventListener('mousedown', (e) => {
+        isResizingV1 = true;
+        resizerV1.classList.add('resizing');
+        document.body.style.cursor = 'row-resize';
+      });
+
+      // 3. Vertical Section Resizer 2 (Threads vs Files)
+      const resizerV2 = document.getElementById('resizerV2');
+      const sectionF = document.getElementById('sectionFiles');
+      let isResizingV2 = false;
+
+      resizerV2.addEventListener('mousedown', (e) => {
+        isResizingV2 = true;
+        resizerV2.classList.add('resizing');
+        document.body.style.cursor = 'row-resize';
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (isResizingH) {
+          const newW = Math.max(200, Math.min(600, e.clientX));
+          sidebar.style.width = newW + 'px';
+        } else if (isResizingV1) {
+          const topOffset = sidebar.getBoundingClientRect().top;
+          const newH = Math.max(80, Math.min(400, e.clientY - topOffset));
+          sectionW.style.height = newH + 'px';
+        } else if (isResizingV2) {
+          const bottomOffset = sidebar.getBoundingClientRect().bottom;
+          const newH = Math.max(80, Math.min(350, bottomOffset - e.clientY));
+          sectionF.style.height = newH + 'px';
+        }
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isResizingH || isResizingV1 || isResizingV2) {
+          isResizingH = false;
+          isResizingV1 = false;
+          isResizingV2 = false;
+          resizerH.classList.remove('resizing');
+          resizerV1.classList.remove('resizing');
+          resizerV2.classList.remove('resizing');
+          document.body.style.cursor = 'default';
+        }
+      });
+    }
+
     // ---------------- Hardware & Stats ----------------
 
     async function initHardwareInfo() {
@@ -464,7 +572,7 @@
           const pendingBadge = w.has_pending_changes ? '<span class="bg-amber-950 text-amber-300 border border-amber-800 px-1 py-0.2 rounded font-mono text-[9px]">Pending</span>' : '';
           const pushBadge = w.unpushed_commits > 0 ? ('<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-1 py-0.2 rounded font-mono text-[9px]">' + w.unpushed_commits + ' Unpushed</span>') : '';
 
-          return '<div onclick="selectStudioProject(\'' + w.dir_name + '\', \'' + escapeHtml(w.display_name) + '\', \'' + w.branch + '\')" class="p-2.5 rounded-lg border ' + bgClass + ' cursor-pointer transition">' +
+          return '<div onclick="selectStudioProject(\'' + w.dir_name + '\', \'' + escapeHtml(w.display_name) + '\', \'' + w.branch + '\')" class="p-2 rounded-lg border ' + bgClass + ' cursor-pointer transition">' +
                  '<div class="font-bold truncate">' + escapeHtml(w.display_name) + '</div>' +
                  '<div class="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400 mt-1">' +
                  '<span class="bg-slate-800 px-1.5 py-0.5 rounded font-mono">' + w.branch + '</span> ' +
@@ -485,8 +593,12 @@
       document.getElementById('studioBranchContainer').classList.remove('hidden');
       document.getElementById('studioAccountSubtitle').textContent = 'Workspace Path: /storage/lmstudio/workspaces/' + dirName;
       document.getElementById('studioActionsGroup').classList.remove('hidden');
-      document.getElementById('sidebarFilesBlock').classList.remove('hidden');
-      document.getElementById('sidebarThreadsBlock').classList.remove('hidden');
+
+      // Unhide sections & resizers
+      document.getElementById('sectionThreads').classList.remove('hidden');
+      document.getElementById('sectionFiles').classList.remove('hidden');
+      document.getElementById('resizerV1').classList.remove('hidden');
+      document.getElementById('resizerV2').classList.remove('hidden');
 
       loadSidebarWorkspaces();
       await loadStudioBranches();
@@ -1609,6 +1721,7 @@
 
     // Startup Initialization & Schedulers
     initHardwareInfo();
+    initResizers();
     fetchLocalModels();
     switchView('studio');
     setInterval(updateTasks, 1000);
