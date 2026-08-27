@@ -1,6 +1,6 @@
 """
 LM Studio Server Entrypoint Router
-Dispatches API requests with Grounded Live Web Search, Markdown Chat Bot, Model Tuning, and Workspace Timeline.
+Dispatches API requests with Persona Vaults, Live Web Search, and History Timelines.
 """
 
 import os
@@ -46,6 +46,7 @@ from core.github_vault import (
     append_to_changelog
 )
 from core.agent_engine import process_agent_task, generate_commit_msg_from_diff
+from core.personas import load_all_personas, get_persona_prompt
 
 app = FastAPI(title="LM Studio Code, Chat & Model Studio")
 
@@ -71,6 +72,8 @@ class LoadRequest(BaseModel):
 class ChatCompletionRequest(BaseModel):
     messages: list[dict]
     model_identifier: str = ""
+    persona_id: str = "chat"
+    custom_system_prompt: str = ""
     enable_web_search: bool = False
     temperature: float = 0.7
     max_tokens: int = 4096
@@ -79,6 +82,8 @@ class ChatCompletionRequest(BaseModel):
 class SaveChatSessionRequest(BaseModel):
     session_id: str
     title: str = "Chat Conversation"
+    persona_id: str = "chat"
+    custom_system_prompt: str = ""
     messages: list[dict] = []
 
 class DeleteChatSessionRequest(BaseModel):
@@ -122,6 +127,8 @@ class AgentTaskRequest(BaseModel):
     target_files: list[str] = []
     instruction: str
     thread_id: str = ""
+    persona_id: str = "coding"
+    custom_system_prompt: str = ""
     model_identifier: str = ""
 
 class GenCommitMsgRequest(BaseModel):
@@ -152,6 +159,12 @@ def serve_ui():
         with open(html_file, "r", encoding="utf-8") as f:
             return f.read()
     return HTMLResponse("<h2>Error: /storage/lmstudio/web/index.html not found</h2>", status_code=404)
+
+# ---------------- Persona Templates API ----------------
+
+@app.get("/api/personas")
+def api_get_personas():
+    return load_all_personas()
 
 # ---------------- General Chat Bot API ----------------
 
@@ -184,6 +197,8 @@ def api_save_chat_session(req: SaveChatSessionRequest):
     for s in sessions:
         if s["id"] == req.session_id:
             s["title"] = req.title
+            s["persona_id"] = req.persona_id
+            s["custom_system_prompt"] = req.custom_system_prompt
             s["messages"] = req.messages
             s["updated_at"] = datetime.datetime.utcnow().isoformat()
             found = True
@@ -193,6 +208,8 @@ def api_save_chat_session(req: SaveChatSessionRequest):
         sessions.insert(0, {
             "id": req.session_id,
             "title": req.title,
+            "persona_id": req.persona_id,
+            "custom_system_prompt": req.custom_system_prompt,
             "created_at": datetime.datetime.utcnow().isoformat(),
             "updated_at": datetime.datetime.utcnow().isoformat(),
             "messages": req.messages
@@ -219,31 +236,22 @@ def api_chat_completion(req: ChatCompletionRequest):
     messages = list(req.messages)
     current_date_str = datetime.datetime.utcnow().strftime("%A, %B %d, %Y")
 
-    # 1. Inject temporal grounding header
-    grounding_system = (
-        f"Temporal System Information: Current real-world date is {current_date_str}.\n"
-        "You are a local language model running on private infrastructure."
-    )
+    # Resolve base system prompt from persona vault
+    base_system = get_persona_prompt(req.persona_id, req.custom_system_prompt, domain="chat")
+    grounding_system = f"{base_system}\n\n[System Info: Current real-world date is {current_date_str}]"
 
-    # 2. Real-Time Web Search Augmentation
+    # Real-Time Web Search Augmentation
     search_context = ""
     if req.enable_web_search and messages:
         user_query = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
         if user_query:
             snippets = fetch_web_search_snippets(user_query, max_results=5)
             search_context = f"\n\n--- LIVE WEB SEARCH CONTEXT (Retrieved {current_date_str}) ---\n{snippets}\n--- END SEARCH CONTEXT ---\n"
-            grounding_system += (
-                f"{search_context}\n"
-                "Instructions: Incorporate the live web search context above to answer accurately and reference current facts. "
-                "Do not hallucinate that you ran a Google Search independently—state facts grounded in the provided search context."
-            )
+            grounding_system += f"{search_context}\nIncorporate the search context above into your response. Reference sources accurately."
     else:
-        grounding_system += (
-            "\nNote: Live Web Search is currently DISABLED. Your internal training cutoff applies. "
-            "If asked about breaking events you do not know, candidly clarify that you operate on static training data."
-        )
+        grounding_system += "\n[Web Search: DISABLED. Rely on static knowledge base.]"
 
-    # Prepend or update system message
+    # Insert or replace system message
     if messages and messages[0].get("role") == "system":
         messages[0]["content"] = f"{grounding_system}\n\n{messages[0]['content']}"
     else:
@@ -257,7 +265,7 @@ def api_chat_completion(req: ChatCompletionRequest):
             "max_tokens": req.max_tokens,
             "top_p": req.top_p
         }
-        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=180)
+        resp = requests.post("[http://127.0.0.1:1234/v1/chat/completions](http://127.0.0.1:1234/v1/chat/completions)", json=payload, timeout=180)
         if resp.status_code != 200:
             return JSONResponse(status_code=500, content={"status": "error", "message": f"LM Studio API Error: {resp.text}"})
         
@@ -279,7 +287,7 @@ def api_search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool =
     params = {"filter": "gguf", "sort": hf_sort, "direction": "-1", "limit": 60}
     if q.strip(): params["search"] = q.strip()
     try:
-        resp = requests.get("https://huggingface.co/api/models", params=params, timeout=10)
+        resp = requests.get("[https://huggingface.co/api/models](https://huggingface.co/api/models)", params=params, timeout=10)
         res = resp.json() if resp.status_code == 200 else []
     except Exception: res = []
 
@@ -307,7 +315,7 @@ def api_search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool =
 def api_model_files(repo_id: str):
     raw_files = {}
     try:
-        resp = requests.get(f"https://huggingface.co/api/models/{repo_id}/tree/main?recursive=true", timeout=8)
+        resp = requests.get(f"[https://huggingface.co/api/models/](https://huggingface.co/api/models/){repo_id}/tree/main?recursive=true", timeout=8)
         if resp.status_code == 200:
             for item in resp.json():
                 path = item.get("path", "")
@@ -318,7 +326,7 @@ def api_model_files(repo_id: str):
 
     if not raw_files:
         try:
-            res = requests.get(f"https://huggingface.co/api/models/{repo_id}", timeout=8).json()
+            res = requests.get(f"[https://huggingface.co/api/models/](https://huggingface.co/api/models/){repo_id}", timeout=8).json()
             for s in res.get("siblings", []):
                 fname = s.get("rfilename", "")
                 if fname.endswith(".gguf"): raw_files[fname] = s.get("size", 0)
@@ -512,7 +520,7 @@ def api_add_account(req: AddAccountRequest):
     token = req.token.strip()
     if not token: return JSONResponse(status_code=400, content={"status": "error", "message": "Token cannot be empty"})
     try:
-        r = requests.get("https://api.github.com/user", headers={"Authorization": f"Bearer {token}"}, timeout=6)
+        r = requests.get("[https://api.github.com/user](https://api.github.com/user)", headers={"Authorization": f"Bearer {token}"}, timeout=6)
         if r.status_code != 200: return JSONResponse(status_code=401, content={"status": "error", "message": "Invalid GitHub Token"})
         u = r.json()
         data = load_accounts_data()
@@ -538,7 +546,7 @@ def api_list_repos(account_username: str):
     token = get_token_for_user(account_username)
     if not token: return JSONResponse(status_code=401, content={"status": "error", "message": "No active token"})
     try:
-        r = requests.get("https://api.github.com/user/repos?per_page=100&sort=updated", headers={"Authorization": f"Bearer {token}"}, timeout=8)
+        r = requests.get("[https://api.github.com/user/repos?per_page=100&sort=updated](https://api.github.com/user/repos?per_page=100&sort=updated)", headers={"Authorization": f"Bearer {token}"}, timeout=8)
         if r.status_code == 200:
             return [{"full_name": item.get("full_name"), "name": item.get("name"), "owner": item.get("owner", {}).get("login"), "default_branch": item.get("default_branch", "main"), "is_private": item.get("private", False)} for item in r.json()]
     except Exception as e:
@@ -550,7 +558,7 @@ def api_list_branches(account_username: str, repo_full_name: str):
     token = get_token_for_user(account_username)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
-        r = requests.get(f"https://api.github.com/repos/{repo_full_name}/branches", headers=headers, timeout=6)
+        r = requests.get(f"[https://api.github.com/repos/](https://api.github.com/repos/){repo_full_name}/branches", headers=headers, timeout=6)
         if r.status_code == 200: return [b.get("name") for b in r.json()]
     except Exception: pass
     return ["main", "dev", "master"]
@@ -670,7 +678,7 @@ def api_clone_project(req: GithubCloneRequest):
     if not token: return JSONResponse(status_code=401, content={"status": "error", "message": "Auth required"})
     dir_name = req.repo_full_name.replace("/", "_")
     dest_path = os.path.join(WORKSPACES_ROOT, dir_name)
-    auth_url = f"https://oauth2:{token}@github.com/{req.repo_full_name}.git"
+    auth_url = f"https://oauth2:{token}@[github.com/](https://github.com/){req.repo_full_name}.git"
 
     try:
         if os.path.exists(dest_path):
@@ -719,7 +727,15 @@ def api_create_file(req: CreateFileRequest):
 
 @app.post("/api/agent/execute")
 def api_agent_execute(req: AgentTaskRequest):
-    res = process_agent_task(req.repo_dir_name, req.target_files, req.instruction, req.thread_id, req.model_identifier)
+    res = process_agent_task(
+        req.repo_dir_name, 
+        req.target_files, 
+        req.instruction, 
+        thread_id=req.thread_id, 
+        persona_id=req.persona_id, 
+        custom_system_prompt=req.custom_system_prompt, 
+        model_id=req.model_identifier
+    )
     if res.get("status") == "error": return JSONResponse(status_code=500, content=res)
     return res
 
