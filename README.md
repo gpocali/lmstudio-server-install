@@ -1,113 +1,124 @@
-# LM Studio Headless Server & Remote Model Manager
+# Madison AI Workstation
 
-An automated deployment script and standalone web manager for running [LM Studio](https://lmstudio.ai/) headlessly on Ubuntu Server 24.04 LTS (and compatible versions). 
-
-This setup runs LM Studio on a dedicated mount (`/storage`), allows remote access and management across your LAN, provides a browser-based Hugging Face GGUF search and downloader, and optionally deploys Open WebUI with live web search.
+**Madison** is a self-hosted, lightweight AI workstation and development studio engineered on top of LM Studio's local engine. It combines an asynchronous multi-session chat assistant, an autonomous local coding environment, and a Hugging Face model manager into a single interface.
 
 ---
 
-## Quickstart (One-Liner Installation)
+## Key Features
 
-You do not need to clone the repository manually. Run this command directly on your Ubuntu server:
+### 💬 Grounded Chat Bot
+* **Full Markdown & Code Highlighting:** Render GitHub-flavored markdown, structured data tables, blockquotes, and language-tagged code blocks via Highlight.js.
+* **Live Web Search (RAG):** Toggle real-time search context injection powered by DuckDuckGo without external API keys.
+* **Temporal Grounding:** Anchors offline models with real-world temporal awareness to prevent hallucinated search claims.
+* **Copy & Export Controls:** Message-level one-click clipboard copying and full conversation exports to Markdown (`.md`) or JSON (`.json`).
 
-```bash
-wget -qO- https://raw.githubusercontent.com/gpocali/lmstudio-server-install/main/install.sh | sudo bash
+### 💻 Autonomous Code Studio
+* **Workspace Management:** Clone repositories across multiple GitHub accounts, switch branches, create feature branches, and delete local workspaces with one click.
+* **Multi-Threaded Workflows:** Manage multiple isolated conversation threads per repository to track separate features or refactoring tasks.
+* **Disk Staging & Review:** Review unified Git diffs directly inside chat bubbles before committing.
+* **Auto-Commit & Changelog:** Automatically generate Conventional Commit messages from staged diffs and append summaries directly to `CHANGELOG.md`.
 
-```
+### ⚡ Background Agent Queue & Model Optimization
+* **Asynchronous Task Processing:** Continue working across different workspaces or chat sessions while tasks execute in the background.
+* **Model Grouping Optimization:** Minimizes VRAM reloads by prioritizing queued tasks that share the currently loaded model.
+* **Activity & Unread Indicators:** Live SVG spinners on tabs and sub-threads show active background jobs, and pulsing notification dots flag unread results.
+* **Automatic Fallback Loading:** Automatically detects and loads available local models when prompts are submitted with no model active in VRAM.
 
----
+### 🎭 Modular Persona Vault (`core/personas.py`)
+* **Domain-Specific Templates:** Pre-configured system prompts for general assistance, systems architecture, autonomous engineering, and security review.
+* **Runtime Overrides:** Live-edit prompts directly from the UI or restore defaults with a single click.
 
-## Features
+### 📦 Model Management & Dynamic Tuner
+* **GGUF Catalog Explorer:** Search, filter, and inspect top quantization variants directly from Hugging Face with creator verification and trust scores.
+* **Interactive Model Tuner:** Dynamically configure context lengths (from 2K up to 131K tokens), GPU offload layers, and keep-alive (TTL) timers.
+* **Hardware Telemetry:** Live GPU VRAM allocation, system RAM, and storage utilization readouts.
 
-* **Dedicated Service User:** Runs under an isolated system account (`lmstudio`) rather than a physical user profile.
-* **Dedicated Storage Mount:** Isolates application binaries, cache, and downloaded GGUF weights to `/storage/lmstudio`.
-* **Systemd Background Daemons:** Automatically starts `lmstudio.service` and `modelmanager.service` at boot with automatic recovery.
-* **Standalone Web Model Manager:** Web UI on port `8080` to search Hugging Face GGUF repositories, view quantizations (`Q4_K_M`, `Q8_0`, etc.), and execute asynchronous background downloads.
-* **Native LM Link Integration:** Pairs with the LM Studio desktop client across your network via encrypted mesh networking.
-* **Optional Open WebUI Stack:** Docker-based web chat interface on port `3000` with DuckDuckGo search and URL scraping pre-configured.
-* **Idempotent / Upgrade Safe:** Re-run the command at any time to pull updates, refresh dependencies, or reconfigure network parameters.
-
----
-
-## Port Allocation
-
-| Service | Port | Endpoint / Description |
-| --- | --- | --- |
-| **LM Studio API** | `1234` | `http://<SERVER_IP>:1234/v1` (OpenAI-compatible REST API) |
-| **Model Manager UI** | `8080` | `http://<SERVER_IP>:8080` (Hugging Face GGUF browser & downloader) |
-| **Open WebUI (Optional)** | `3000` | `http://<SERVER_IP>:3000` (Multi-user web chat + RAG search) |
-
----
-
-## Prerequisites
-
-* **OS:** Ubuntu Server 22.04 LTS / 24.04 LTS / 26.04 LTS
-* **Mount Point:** A mounted storage drive at `/storage` (or modify `BASE_STORAGE` in `install.sh`)
-* **Privileges:** `sudo` / root administrative access
+### 🖥️ Responsive IDE Layout
+* **Elastic Textarea:** Inputs auto-expand up to ~12 lines before scrolling to preserve visibility on long prompts.
+* **Resizable Panels:** Horizontal and vertical splitters let you customize panel dimensions.
+* **Centered Viewport:** Prompts and responses are constrained to a readable column on ultra-wide displays.
 
 ---
 
-## Interactive Installation Prompts
-
-When running the installer, you will be prompted for:
-
-1. **LM Link Authentication:** Provides a browser URL to pair the server with your LM Studio account if not already authenticated.
-2. **Device Display Name:** Sets the name for this node in the LM Studio desktop client (defaults to hostname).
-3. **Open WebUI Deployment:** Asks whether to deploy the Dockerized Open WebUI container (`y/n`).
-
----
-
-## Usage & Management
-
-### 1. Web Model Manager
-
-Navigate to **`http://<SERVER_IP>:8080`** in any browser:
-
-1. Search for a model name or organization (e.g., `Meta-Llama-3.1-8B`, `Qwen2.5-Coder`, `bartowski`).
-2. Click **View Quantizations** to expand the list of available `.gguf` files.
-3. Click **Download** to stream the model to `/storage/lmstudio/models` in the background.
-
-### 2. Service Management
-
-Both components run as systemd units:
-
-```bash
-# LM Studio Core Daemon
-sudo systemctl status lmstudio.service
-sudo systemctl restart lmstudio.service
-journalctl -u lmstudio.service -f
-
-# Model Manager Web UI
-sudo systemctl status modelmanager.service
-sudo systemctl restart modelmanager.service
-journalctl -u modelmanager.service -f
-
-```
-
-### 3. Command Line Interface (`lms`)
-
-The `lms` command is symlinked globally to `/usr/local/bin/lms`:
-
-```bash
-# View active server state and loaded models
-lms status
-
-# Load a downloaded model into memory
-lms load
-
-# Unload all active models from memory
-lms unload --all
-
-```
-
----
-
-## Repository Structure
+## Architecture Overview
 
 ```text
-lmstudio-server-install/
-├── install.sh             # Master installer and update script
-├── model_manager.py       # FastAPI backend + Hugging Face downloader UI
-└── README.md              # Documentation
+/storage/lmstudio/
+├── model_manager.py          # FastAPI server, REST API router & static UI host
+├── core/
+│   ├── hardware.py          # Hardware detection (VRAM, RAM, Disk) & LMS CLI wrapper
+│   ├── models.py            # Hugging Face GGUF indexer & download engine
+│   ├── github_vault.py      # Git workspace controller & multi-account token manager
+│   ├── agent_engine.py      # Multi-file patch parser & commit message generator
+│   ├── personas.py          # Persona templates and prompt construction
+│   └── task_queue.py        # Asynchronous job queue with model-batching optimization
+└── web/
+    └── index.html           # Single-page interface (Tailwind CSS, Marked, Highlight.js)
+
+```
+
+---
+
+## Installation & Deployment
+
+### Prerequisites
+
+* Ubuntu / Debian Linux
+* Storage volume mounted at `/storage`
+* Python 3.10+ with `pip`
+
+### Quick Install / Update
+
+Run the automated installation script with cache-busting enabled:
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/gpocali/lmstudio-server-install/main/install.sh?t=$(date +%s)" | sudo bash
+
+```
+
+### Manual Dependency Installation
+
+If configuring manually, install the required packages:
+
+```bash
+sudo apt-get update -y
+sudo apt-get install -y curl jq git python3 python3-pip python3-uvicorn python3-fastapi python3-requests
+sudo pip3 install -U duckduckgo_search --break-system-packages
+
+```
+
+---
+
+## Service Management
+
+Madison runs as two systemd services:
+
+| Service | Description | Port |
+| --- | --- | --- |
+| `lmstudio.service` | Headless LM Studio Engine & Link Daemon | `1234` |
+| `modelmanager.service` | Madison Workstation Web Application | `8080` |
+
+### Common Commands
+
+```bash
+# Restart the Madison UI service
+sudo systemctl restart modelmanager.service
+
+# View live service logs
+sudo journalctl -u modelmanager.service -f
+
+# Check LM Studio daemon status
+sudo systemctl status lmstudio.service
+
+```
+
+---
+
+## Accessing the Interface
+
+Open your browser and navigate to:
+
+```text
+http://<SERVER_IP>:8080
 
 ```
