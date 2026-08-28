@@ -30,6 +30,15 @@
     .markdown-body th { background: #0f172a; color: #38bdf8; }
     .markdown-body blockquote { border-left: 3px solid #38bdf8; padding-left: 0.75rem; color: #94a3b8; font-style: italic; margin: 0.5rem 0; }
 
+    /* Elastic Textarea constraints */
+    .auto-expand-textarea {
+      min-height: 48px;
+      max-height: 240px;
+      overflow-y: auto;
+      resize: none;
+      line-height: 1.45;
+    }
+
     @keyframes pulse-green {
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.4; transform: scale(1.15); }
@@ -44,10 +53,10 @@
     <div class="flex items-center gap-3">
       <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-black text-sm text-white shadow">M</div>
       <h1 class="text-lg font-bold bg-gradient-to-r from-sky-400 to-indigo-300 bg-clip-text text-transparent">Madison</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.1</span>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.2</span>
     </div>
 
-    <!-- Navigation Page Buttons with Activity & Unread Indicators -->
+    <!-- Navigation Page Buttons -->
     <div class="flex items-center gap-2">
       <!-- Chat Tab -->
       <button onclick="switchView('chat')" id="navBtnChat" class="relative px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5">
@@ -167,24 +176,25 @@
         <div class="max-w-4xl mx-auto w-full space-y-3.5">
           <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
             <div class="font-bold text-sky-400 mb-1">💬 Grounded Madison Assistant</div>
-            Background agent queue, temporal grounding, and auto-model loading are active.
+            Elastic auto-expanding text box, background agent queue, temporal grounding, and auto-model loading are active.
           </div>
         </div>
       </div>
 
-      <!-- Chat Input Bar -->
-      <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
+      <!-- Chat Input Bar (Elastic Auto-Expanding) -->
+      <div class="p-4 md:px-6 md:pb-6 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
           <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
             <span>Engine: <strong class="generalChatModelBadge text-sky-400 font-mono">Auto (Auto-Load on demand)</strong></span>
             <span class="text-slate-500 italic">Press Enter to send, Shift+Enter for new line</span>
           </div>
-          <div class="flex gap-2">
-            <textarea id="generalChatInput" rows="2" 
+          <div class="flex items-end gap-2 bg-slate-900 border border-slate-700 rounded-xl p-2 focus-within:border-sky-500 transition shadow-inner">
+            <textarea id="generalChatInput" rows="1" 
+                      oninput="autoResizeTextarea(this)"
                       onkeydown="handleGeneralChatKeyDown(event)"
-                      placeholder="Type a message or inquiry... (You can switch tabs freely while it runs)"
-                      class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none resize-none text-slate-100"></textarea>
-            <button id="generalChatSendBtn" onclick="executeGeneralChatSend()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
+                      placeholder="Type a message or inquiry... (Auto-expands as you type)"
+                      class="auto-expand-textarea flex-1 bg-transparent px-3 py-2 text-sm focus:outline-none text-slate-100 placeholder-slate-500"></textarea>
+            <button id="generalChatSendBtn" onclick="executeGeneralChatSend()" class="bg-sky-600 hover:bg-sky-500 px-5 py-2.5 rounded-lg font-bold text-xs transition shrink-0 flex items-center justify-center self-end shadow">
               Send
             </button>
           </div>
@@ -299,18 +309,20 @@
         </div>
       </div>
 
-      <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
+      <!-- Studio Input Bar (Elastic Auto-Expanding) -->
+      <div class="p-4 md:px-6 md:pb-6 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
           <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
             <span>Engine: <strong class="generalChatModelBadge text-sky-400 font-mono">Auto (Auto-Load on demand)</strong></span>
             <span id="selectedFilesSummary" class="text-slate-400 italic">0 files selected for context</span>
           </div>
-          <div class="flex gap-2">
-            <textarea id="studioPromptInput" rows="2" 
+          <div class="flex items-end gap-2 bg-slate-900 border border-slate-700 rounded-xl p-2 focus-within:border-sky-500 transition shadow-inner">
+            <textarea id="studioPromptInput" rows="1" 
+                      oninput="autoResizeTextarea(this)"
                       onkeydown="handleStudioKeyDown(event)"
-                      placeholder="e.g. Implement background task monitoring with unread badges in web/index.html... (Enter to Run)"
-                      class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none font-mono resize-none"></textarea>
-            <button id="studioSendBtn" onclick="executeStudioTask()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
+                      placeholder="e.g. Implement background task monitoring with unread badges... (Auto-expands as you type)"
+                      class="auto-expand-textarea flex-1 bg-transparent px-3 py-2 text-sm focus:outline-none font-mono text-slate-100 placeholder-slate-500"></textarea>
+            <button id="studioSendBtn" onclick="executeStudioTask()" class="bg-sky-600 hover:bg-sky-500 px-5 py-2.5 rounded-lg font-bold text-xs transition shrink-0 flex items-center justify-center self-end shadow">
               ⚡ Run
             </button>
           </div>
@@ -589,6 +601,14 @@
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
+    }
+
+    // Dynamic Elastic Textarea Auto-Resizer
+    function autoResizeTextarea(el) {
+      if (!el) return;
+      el.style.height = 'auto';
+      const newHeight = Math.min(Math.max(el.scrollHeight, 48), 240);
+      el.style.height = newHeight + 'px';
     }
 
     function switchView(viewName) {
@@ -890,7 +910,7 @@
       if (currentChatMessages.length === 0) {
         windowEl.innerHTML = '<div class="max-w-4xl mx-auto w-full space-y-3.5"><div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">' +
           '<div class="font-bold text-sky-400 mb-1">💬 Grounded Madison Assistant</div>' +
-          'Live Web Search, temporal grounding, and automated background execution are enabled.</div></div>';
+          'Elastic auto-expanding text box, background agent queue, temporal grounding, and auto-model loading are active.</div></div>';
         return;
       }
 
@@ -931,7 +951,6 @@
     async function executeGeneralChatSend() {
       const inputEl = document.getElementById('generalChatInput');
       const text = inputEl.value.trim();
-      const sendBtn = document.getElementById('generalChatSendBtn');
       const personaId = document.getElementById('chatPersonaSelect').value;
       const sysPrompt = document.getElementById('generalChatSystemPrompt').value.trim();
       const isWebSearchEnabled = document.getElementById('enableWebSearchToggle').checked;
@@ -944,6 +963,7 @@
 
       const targetSessionId = activeChatSessionId;
       inputEl.value = '';
+      autoResizeTextarea(inputEl);
 
       try {
         const res = await fetch('/api/queue/submit_chat', {
@@ -982,6 +1002,7 @@
       const targetRepoDir = currentWorkspaceDir;
 
       promptInput.value = '';
+      autoResizeTextarea(promptInput);
 
       try {
         const res = await fetch('/api/queue/submit_agent', {
@@ -2121,7 +2142,7 @@
           row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
           row.innerHTML = '<div class="space-y-1 overflow-hidden pr-2">' +
             '<div class="font-medium text-sky-200 truncate flex items-center" title="' + escapeHtml(f.display_name) + '">' +
-            '<span class="truncate">' + escapeHtml(f.group_name) + '</span> ' + shardBadge +
+            '<span class="truncate">${f.group_name}</span> ' + shardBadge +
             '</div>' +
             '<div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">' +
             '<span>Weight: <strong class="text-slate-200">' + f.weight + '</strong></span>' +
