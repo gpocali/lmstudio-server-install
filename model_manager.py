@@ -57,35 +57,100 @@ HF_HEADERS = {
 
 # ---------------- Auto-Load Model Helper ----------------
 
+def load_model_by_path_or_key(target_path: str = "", context_length: int = 32768, gpu_offload: str = "max") -> str:
+    """Robustly attempts to load a model using registered keys, slugs, and paths."""
+    lms = get_lms_bin()
+    
+    # 1. Fetch all registered keys from `lms ls`
+    registered_keys = []
+    try:
+        ls_res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=8)
+        if ls_res.returncode == 0:
+            in_llm = False
+            for line in ls_res.stdout.splitlines():
+                l_str = line.strip()
+                if "LLM" in l_str:
+                    in_llm = True
+                    continue
+                if "EMBEDDING" in l_str or l_str.startswith("---"):
+                    in_llm = False
+                    continue
+                if in_llm and l_str:
+                    parts = l_str.split()
+                    if parts:
+                        registered_keys.append(parts[0])
+    except Exception:
+        pass
+
+    candidates = []
+    if target_path:
+        fname = os.path.basename(target_path)
+        clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname).lower()
+        f_strip = re.sub(r'[^a-z0-9]', '', clean_fname)
+
+        for key in registered_keys:
+            k_strip = re.sub(r'[^a-z0-9]', '', key.lower())
+            if k_strip in f_strip or f_strip in k_strip:
+                candidates.append(key)
+                break
+        candidates.extend([clean_fname, fname, target_path])
+
+    # Append any available registered keys as fallbacks
+    candidates.extend(registered_keys)
+
+    # Deduplicate candidates while preserving order
+    seen = set()
+    dedup = [c for c in candidates if c and not (c in seen or seen.add(c))]
+
+    for candidate in dedup:
+        try:
+            cmd = [
+                lms, "load", candidate,
+                f"--gpu={gpu_offload}",
+                f"--context-length={context_length}",
+                "--ttl=3600",
+                "--yes"
+            ]
+            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=60)
+            if res.returncode == 0:
+                loaded = get_loaded_models()
+                if loaded:
+                    return loaded[0]
+                return candidate
+        except Exception:
+            continue
+
+    loaded_now = get_loaded_models()
+    return loaded_now[0] if loaded_now else ""
+
 def ensure_active_model(model_identifier: str = "") -> str:
-    """Returns an active model identifier; if none loaded, loads the first available local GGUF."""
+    """Returns an active model identifier; if none loaded, automatically discovers and loads a local model."""
     loaded = get_loaded_models()
     if loaded and not model_identifier:
         return loaded[0]
-    if model_identifier and model_identifier != "default" and model_identifier != "auto":
+    if model_identifier and model_identifier not in ("default", "auto"):
+        # If user explicitly requested a specific model that isn't loaded yet
+        if not loaded or not any(model_identifier.lower() in l.lower() for l in loaded):
+            loaded_key = load_model_by_path_or_key(model_identifier)
+            if loaded_key:
+                return loaded_key
         return model_identifier
     if loaded:
         return loaded[0]
 
-    # Find first locally installed model
+    # Find the first locally installed GGUF file
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
-            for f in filenames:
+            for f in sorted(filenames):
                 if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
-                    path = os.path.join(root, f)
-                    lms = get_lms_bin()
-                    clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', f).lower()
-                    try:
-                        # Attempt to load model into GPU automatically
-                        cmd = [lms, "load", path, "--gpu=max", "--context-length=32768", "--ttl=3600", "--yes"]
-                        res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=35)
-                        if res.returncode == 0:
-                            recheck = get_loaded_models()
-                            return recheck[0] if recheck else clean_fname
-                    except Exception:
-                        pass
-                    return clean_fname
-    return "default"
+                    first_model_path = os.path.join(root, f)
+                    loaded_key = load_model_by_path_or_key(first_model_path)
+                    if loaded_key:
+                        return loaded_key
+
+    # Attempt to load any registered model from `lms ls`
+    loaded_key = load_model_by_path_or_key()
+    return loaded_key
 
 # ---------------- Pydantic Request Models ----------------
 
@@ -264,6 +329,11 @@ def api_delete_chat_session(req: DeleteChatSessionRequest):
 @app.post("/api/chat/completions")
 def api_chat_completion(req: ChatCompletionRequest):
     model_id = ensure_active_model(req.model_identifier)
+    if not model_id:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": "No models are installed on the server. Please download a model from the Models tab first."}
+        )
 
     messages = list(req.messages)
     current_date_str = datetime.datetime.utcnow().strftime("%A, %B %d, %Y")
@@ -423,63 +493,18 @@ def api_model_files(repo_id: str):
 
 @app.post("/api/load_model")
 def api_load_model(req: LoadRequest):
-    lms = get_lms_bin()
-    abs_path = os.path.abspath(req.model_path)
-    fname = os.path.basename(abs_path)
-    clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname).lower()
-
-    try: subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, timeout=5)
-    except Exception: pass
-
-    registered_keys = []
-    try:
-        ls_res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=5)
-        if ls_res.returncode == 0:
-            in_llm_section = False
-            for line in ls_res.stdout.splitlines():
-                l_str = line.strip()
-                if "LLM" in l_str: in_llm_section = True; continue
-                if "EMBEDDING" in l_str or l_str.startswith("---"): in_llm_section = False; continue
-                if in_llm_section and l_str:
-                    parts = l_str.split()
-                    if parts: registered_keys.append(parts[0])
-    except Exception: pass
-
-    matched_target = None
-    f_strip = re.sub(r'[^a-z0-9]', '', clean_fname)
-    for key in registered_keys:
-        k_strip = re.sub(r'[^a-z0-9]', '', key.lower())
-        if k_strip in f_strip or f_strip in k_strip:
-            matched_target = key
-            break
-
-    targets_to_try = []
-    if matched_target: targets_to_try.append(matched_target)
-    targets_to_try.extend(registered_keys)
-    targets_to_try.extend([clean_fname, fname])
-
-    seen = set()
-    dedup_targets = [t for t in targets_to_try if t and not (t in seen or seen.add(t))]
-
-    last_error = ""
-    for target in dedup_targets:
-        try:
-            cmd = [
-                lms, "load", target,
-                f"--gpu={req.gpu_offload}",
-                f"--context-length={req.context_length}",
-                f"--ttl={req.ttl}",
-                "--yes"
-            ]
-            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=30)
-            if res.returncode == 0:
-                return {"status": "success", "loaded_target": target, "context_length": req.context_length, "output": res.stdout or f"Loaded {target} into GPU VRAM."}
-            else:
-                last_error = (res.stderr or res.stdout or "").strip()
-        except Exception as err:
-            last_error = str(err)
-
-    return JSONResponse(status_code=400, content={"status": "error", "message": last_error or f"Could not load model for '{fname}'.", "attempted_candidates": dedup_targets})
+    loaded_key = load_model_by_path_or_key(
+        target_path=req.model_path,
+        context_length=req.context_length,
+        gpu_offload=req.gpu_offload
+    )
+    if loaded_key:
+        return {"status": "success", "loaded_target": loaded_key, "context_length": req.context_length, "output": f"Loaded {loaded_key} into GPU VRAM."}
+    
+    return JSONResponse(
+        status_code=400,
+        content={"status": "error", "message": f"Could not load model '{os.path.basename(req.model_path)}' into GPU VRAM."}
+    )
 
 @app.post("/api/unload_model")
 def api_unload_model():
@@ -765,6 +790,9 @@ def api_create_file(req: CreateFileRequest):
 @app.post("/api/agent/execute")
 def api_agent_execute(req: AgentTaskRequest):
     effective_model = ensure_active_model(req.model_identifier)
+    if not effective_model:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "No models available to load on server."})
+
     res = process_agent_task(
         req.repo_dir_name, 
         req.target_files, 
