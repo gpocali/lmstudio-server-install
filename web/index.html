@@ -30,7 +30,6 @@
     .markdown-body th { background: #0f172a; color: #38bdf8; }
     .markdown-body blockquote { border-left: 3px solid #38bdf8; padding-left: 0.75rem; color: #94a3b8; font-style: italic; margin: 0.5rem 0; }
 
-    /* Indicator badge pulse animation */
     @keyframes pulse-green {
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.4; transform: scale(1.15); }
@@ -45,7 +44,7 @@
     <div class="flex items-center gap-3">
       <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-black text-sm text-white shadow">M</div>
       <h1 class="text-lg font-bold bg-gradient-to-r from-sky-400 to-indigo-300 bg-clip-text text-transparent">Madison</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.0</span>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.1</span>
     </div>
 
     <!-- Navigation Page Buttons with Activity & Unread Indicators -->
@@ -200,7 +199,7 @@
     <aside id="studioSidebar" class="w-80 min-w-[200px] max-w-[500px] bg-slate-950 flex flex-col shrink-0 overflow-hidden">
       
       <!-- Section 1: Workspaces -->
-      <div id="sectionWorkspaces" class="flex flex-col h-44 min-h-[90px] overflow-hidden">
+      <div id="sectionWorkspaces" class="flex flex-col h-48 min-h-[100px] overflow-hidden">
         <div class="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
           <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Workspaces</h2>
           <button onclick="switchView('github')" class="text-xs text-sky-400 hover:text-sky-300 hover:underline">+ Clone</button>
@@ -579,8 +578,8 @@
     var currentTunerModel = null;
 
     // Background Tracker
-    var activeRunningTasks = new Map(); // task_id -> { domain, target_id }
-    var unreadCompletedTasks = new Map(); // target_id -> task_id
+    var activeRunningTasks = new Map();
+    var unreadCompletedTasks = new Map();
 
     function escapeHtml(text) {
       if (!text) return "";
@@ -718,7 +717,6 @@
         const isSel = (s.id === activeChatSessionId);
         const bg = isSel ? 'bg-sky-950/60 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700';
         
-        // Indicator for running background or unread
         const isRunning = Array.from(activeRunningTasks.values()).some(t => t.domain === 'chat' && t.target_id === s.id);
         const isUnread = unreadCompletedTasks.has(s.id);
 
@@ -1290,15 +1288,58 @@
           const pendingBadge = w.has_pending_changes ? '<span class="bg-amber-950 text-amber-300 border border-amber-800 px-1 py-0.2 rounded font-mono text-[9px]">Pending</span>' : '';
           const pushBadge = w.unpushed_commits > 0 ? ('<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-1 py-0.2 rounded font-mono text-[9px]">' + w.unpushed_commits + ' Unpushed</span>') : '';
 
-          return '<div onclick="selectStudioProject(\'' + w.dir_name + '\', \'' + escapeHtml(w.display_name) + '\', \'' + w.branch + '\')" class="p-2 rounded-lg border ' + bgClass + ' cursor-pointer transition">' +
+          return '<div class="p-2 rounded-lg border ' + bgClass + ' transition group relative flex justify-between items-center cursor-pointer">' +
+                 '<div onclick="selectStudioProject(\'' + w.dir_name + '\', \'' + escapeHtml(w.display_name) + '\', \'' + w.branch + '\')" class="flex-1 truncate pr-2">' +
                  '<div class="font-bold truncate">' + escapeHtml(w.display_name) + '</div>' +
                  '<div class="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400 mt-1">' +
                  '<span class="bg-slate-800 px-1.5 py-0.5 rounded font-mono">' + w.branch + '</span> ' +
                  pendingBadge + ' ' + pushBadge +
-                 '</div></div>';
+                 '</div></div>' +
+                 '<button onclick="deleteWorkspace(\'' + w.dir_name + '\', \'' + escapeHtml(w.display_name) + '\')" class="text-slate-500 hover:text-rose-400 p-1 rounded hover:bg-slate-800 transition opacity-0 group-hover:opacity-100 shrink-0" title="Delete Workspace from Disk">🗑️</button>' +
+                 '</div>';
         }).join('');
       } catch(e) {
         container.innerHTML = '<p class="text-rose-400 p-2">Error loading workspaces.</p>';
+      }
+    }
+
+    async function deleteWorkspace(dirName, displayName) {
+      if (!confirm(`Are you sure you want to permanently delete workspace "${displayName}" from disk (/storage/lmstudio/workspaces/${dirName})?`)) {
+        return;
+      }
+      try {
+        const res = await fetch('/api/workspace/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: dirName})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (currentWorkspaceDir === dirName) {
+            currentWorkspaceDir = "";
+            currentDisplayName = "";
+            document.getElementById('studioProjectHeader').textContent = "Select a Project from Left Pane";
+            document.getElementById('studioBranchContainer').classList.add('hidden');
+            document.getElementById('studioAccountSubtitle').textContent = "--";
+            document.getElementById('studioActionsGroup').classList.add('hidden');
+            document.getElementById('sectionThreads').classList.add('hidden');
+            document.getElementById('sectionFiles').classList.add('hidden');
+            document.getElementById('resizerV1').classList.add('hidden');
+            document.getElementById('resizerV2').classList.add('hidden');
+            document.getElementById('chatHistoryWindow').innerHTML = `
+              <div class="max-w-4xl mx-auto w-full space-y-3.5">
+                <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
+                  <div class="font-bold text-sky-400 mb-1">🤖 Madison AI Software Architect</div>
+                  Workspace deleted. Select another workspace from the left pane.
+                </div>
+              </div>`;
+          }
+          await loadSidebarWorkspaces();
+        } else {
+          alert('Delete failed: ' + data.message);
+        }
+      } catch(e) {
+        alert('Communication error: ' + e.message);
       }
     }
 
@@ -1467,7 +1508,7 @@
         if (modFiles.length > 0 && msg.diff) {
           reviewDiff = '<details class="bg-slate-900 p-2.5 rounded border border-slate-800 text-xs text-slate-200 mt-2">' +
             '<summary class="cursor-pointer font-bold text-sky-400">View Staged Diff</summary>' +
-            '<pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">' + escapeHtml(msg.diff) + '</pre></details>';
+            '<pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre font-mono">' + escapeHtml(msg.diff) + '</pre></details>';
         }
 
         const rawAiOutput = encodeURIComponent(msg.ai_response || '');
@@ -2080,7 +2121,7 @@
           row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
           row.innerHTML = '<div class="space-y-1 overflow-hidden pr-2">' +
             '<div class="font-medium text-sky-200 truncate flex items-center" title="' + escapeHtml(f.display_name) + '">' +
-            '<span class="truncate">${f.group_name}</span> ' + shardBadge +
+            '<span class="truncate">' + escapeHtml(f.group_name) + '</span> ' + shardBadge +
             '</div>' +
             '<div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">' +
             '<span>Weight: <strong class="text-slate-200">' + f.weight + '</strong></span>' +
@@ -2226,7 +2267,7 @@
             '<div class="text-slate-400 text-[10px] mt-0.5">Weight: ' + m.weight + ' | Variant: ' + m.variant + ' | Cap: ' + Math.round((m.max_context || 32768)/1024) + 'K Ctx</div>' +
             '</div>' +
             '<div class="flex items-center gap-2 shrink-0">' +
-            '<span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">' + m.size_gb + '</span>' +
+            '<span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">${m.size_gb}</span>' +
             actionBtn +
             '<button onclick="deleteModel(\'' + m.filename + '\')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">🗑️</button>' +
             '</div></div>';

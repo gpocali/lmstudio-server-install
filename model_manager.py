@@ -1,12 +1,13 @@
 """
 Madison AI Core Server Entrypoint
-Asynchronous background job engine, model grouping, temporal search grounding, and persona vault.
+Asynchronous background job engine, model grouping, workspace deletion, and persona vault.
 """
 
 import os
 import re
 import glob
 import json
+import shutil
 import datetime
 import requests
 import subprocess
@@ -233,6 +234,9 @@ class SaveChatSessionRequest(BaseModel):
 
 class DeleteChatSessionRequest(BaseModel):
     session_id: str
+
+class DeleteWorkspaceRequest(BaseModel):
+    repo_dir_name: str
 
 class AddAccountRequest(BaseModel):
     token: str
@@ -474,7 +478,8 @@ def api_model_files(repo_id: str):
             res = requests.get(f"https://huggingface.co/api/models/{repo_id}", headers=HF_HEADERS, timeout=10).json()
             for s in res.get("siblings", []):
                 fname = s.get("rfilename", "")
-                if fname.endswith(".gguf"): raw_files[fname] = s.get("size", 0)
+                if fname.endswith(".gguf"): 
+                    raw_files[fname] = s.get("size", 0)
         except Exception: pass
 
     grouped = {}
@@ -666,6 +671,17 @@ def api_list_branches(account_username: str, repo_full_name: str):
 def api_get_workspaces():
     return get_active_workspaces()
 
+@app.post("/api/workspace/delete")
+def api_delete_workspace(req: DeleteWorkspaceRequest):
+    w_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
+    if not os.path.exists(w_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+    try:
+        shutil.rmtree(w_path)
+        return {"status": "success", "message": f"Workspace '{req.repo_dir_name}' deleted."}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
 @app.get("/api/workspace/status")
 def api_get_status(repo_dir_name: str):
     return get_workspace_git_status(repo_dir_name)
@@ -757,7 +773,7 @@ def api_pull_upstream(req: WorkspaceActionRequest):
 
 @app.post("/api/github/clone")
 def api_clone_project(req: GithubCloneRequest):
-    token = get_token_for_user(req.account_username)
+    token = get_token_for_user(account_username=req.account_username)
     if not token: return JSONResponse(status_code=401, content={"status": "error", "message": "Auth required"})
     dir_name = req.repo_full_name.replace("/", "_")
     dest_path = os.path.join(WORKSPACES_ROOT, dir_name)
