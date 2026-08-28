@@ -18,7 +18,7 @@
     ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #334155; }
     
-    .markdown-body pre { background: #020617; border: 1px solid #1e293b; border-radius: 0.5rem; padding: 0.75rem; margin-top: 0.5rem; margin-bottom: 0.5rem; overflow-x: auto; }
+    .markdown-body pre { background: #020617; border: 1px solid #1e293b; border-radius: 0.5rem; padding: 0.75rem; margin-top: 0.5rem; margin-bottom: 0.5rem; overflow-x: auto; position: relative; }
     .markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.85em; }
     .markdown-body p { margin-bottom: 0.5rem; line-height: 1.5; }
     .markdown-body p:last-child { margin-bottom: 0; }
@@ -37,7 +37,7 @@
   <header class="bg-slate-950 border-b border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-4 shrink-0 z-20">
     <div class="flex items-center gap-3">
       <h1 class="text-lg font-bold text-sky-400">LM Studio Studio</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">v2.4 Grounded Edition</span>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">v2.5 Persona Vault</span>
     </div>
 
     <!-- Navigation Page Buttons -->
@@ -73,20 +73,25 @@
   <!-- ==================== VIEW 1: GENERAL CHAT BOT ==================== -->
   <main id="viewChat" class="flex-1 flex overflow-hidden relative select-text">
     
-    <!-- Left Sidebar: Chat Sessions -->
-    <aside class="w-72 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0 overflow-hidden">
+    <!-- Left Sidebar: Chat Sessions & Persona Configuration -->
+    <aside class="w-80 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0 overflow-hidden">
       <div class="p-3.5 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
         <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Conversations</h2>
-        <button onclick="createNewChatSession()" class="text-xs bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded font-medium transition">
-          + New Chat
-        </button>
+        <div class="flex items-center gap-1">
+          <button onclick="exportCurrentChat('markdown')" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700" title="Export as Markdown">MD</button>
+          <button onclick="exportCurrentChat('json')" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700" title="Export as JSON">JSON</button>
+          <button onclick="createNewChatSession()" class="text-xs bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded font-medium transition ml-1">
+            + New
+          </button>
+        </div>
       </div>
+
       <div id="generalChatSessionsList" class="flex-1 overflow-y-auto p-2.5 space-y-1.5 text-xs">
         <p class="text-slate-500">Loading chats...</p>
       </div>
       
-      <!-- System Persona & Web Search Options -->
-      <div class="p-3 border-t border-slate-800 bg-slate-950/60 shrink-0 space-y-2.5">
+      <!-- Persona Selector & System Override -->
+      <div class="p-3.5 border-t border-slate-800 bg-slate-950/70 shrink-0 space-y-3">
         <div class="flex items-center justify-between">
           <label class="text-[11px] font-bold text-slate-300">Live Web Search (RAG):</label>
           <label class="relative inline-flex items-center cursor-pointer">
@@ -95,36 +100,50 @@
           </label>
         </div>
 
-        <div>
-          <label class="text-[11px] font-bold text-slate-400 block mb-1">System Instructions:</label>
+        <div class="space-y-1">
+          <div class="flex justify-between items-center">
+            <label class="text-[11px] font-bold text-slate-400">Persona Template:</label>
+            <button onclick="resetGeneralChatPersona()" class="text-[10px] text-sky-400 hover:underline">Reset Default</button>
+          </div>
+          <select id="chatPersonaSelect" onchange="onChatPersonaChanged()" class="w-full bg-slate-900 border border-slate-700 text-sky-300 rounded px-2.5 py-1.5 text-xs">
+            <option value="chat">General Assistant (Grounded)</option>
+            <option value="chat_analytical">Technical Analyst & Architect</option>
+          </select>
+        </div>
+
+        <div class="space-y-1">
+          <label class="text-[11px] font-bold text-slate-400 block">System Persona Prompt (Editable Override):</label>
           <textarea id="generalChatSystemPrompt" rows="3" 
-                    class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs focus:border-sky-500 focus:outline-none resize-none font-mono text-slate-300">You are a helpful, knowledgeable AI assistant. Respond in clear, clean GitHub-flavored Markdown. Use fenced code blocks with language identifiers (e.g. ```python) for source code, format tables where comparative data is helpful, and use bold/bulleted lists for readability.</textarea>
+                    class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs focus:border-sky-500 focus:outline-none resize-none font-mono text-slate-300"></textarea>
         </div>
       </div>
     </aside>
 
-    <!-- Main Chat Feed & Input (Centered & Condensed) -->
+    <!-- Main Chat Feed & Input -->
     <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
       
-      <!-- Chat Header -->
+      <!-- Chat Header with Session Actions -->
       <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex justify-between items-center shrink-0 z-10">
         <div>
           <h2 class="text-sm font-bold text-slate-100" id="currentChatSessionTitle">General Conversation</h2>
           <span class="text-[11px] text-slate-400" id="currentChatModelIndicator">Model: Auto</span>
         </div>
         <div class="flex items-center gap-2">
-          <button onclick="clearCurrentChatMessages()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded border border-slate-700 transition">
-            🧹 Clear Chat
+          <button onclick="copyEntireChatHistory()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded border border-slate-700 transition flex items-center gap-1">
+            📋 Copy Chat
+          </button>
+          <button onclick="clearCurrentChatMessages()" class="text-xs bg-slate-800 hover:bg-slate-700 text-rose-300 px-3 py-1.5 rounded border border-slate-700 transition">
+            🧹 Clear
           </button>
         </div>
       </div>
 
-      <!-- Messages Window -->
+      <!-- Messages Window (Centered Container) -->
       <div id="generalChatMessagesWindow" class="flex-1 overflow-y-auto p-4 md:p-6">
         <div class="max-w-4xl mx-auto w-full space-y-3.5">
           <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
             <div class="font-bold text-sky-400 mb-1">💬 Grounded AI Assistant Ready</div>
-            Live Web Search and temporal grounding are enabled. Ask real-time questions, code, or draft documentation with full Markdown and syntax highlighting.
+            Live Web Search, temporal grounding, and automated model loading are enabled.
           </div>
         </div>
       </div>
@@ -133,13 +152,13 @@
       <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
           <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
-            <span>Model: <strong class="generalChatModelBadge text-sky-400 font-mono">Scanning...</strong></span>
+            <span>Model: <strong class="generalChatModelBadge text-sky-400 font-mono">Auto (Auto-Load on demand)</strong></span>
             <span class="text-slate-500 italic">Press Enter to send, Shift+Enter for new line</span>
           </div>
           <div class="flex gap-2">
             <textarea id="generalChatInput" rows="2" 
                       onkeydown="handleGeneralChatKeyDown(event)"
-                      placeholder="Type a message or breaking news inquiry... (Live search enabled)"
+                      placeholder="Type a message or inquiry... (Live search enabled)"
                       class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none resize-none text-slate-100"></textarea>
             <button id="generalChatSendBtn" onclick="executeGeneralChatSend()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
               Send
@@ -171,7 +190,7 @@
       <!-- Section 2: Multi-Chat Threads -->
       <div id="sectionThreads" class="flex-1 flex flex-col min-h-[100px] overflow-hidden hidden">
         <div class="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
-          <h3 class="text-xs font-bold text-slate-300">Chat Threads</h3>
+          <h3 class="text-xs font-bold text-slate-300">Studio Threads</h3>
           <button onclick="createNewThreadDialog()" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-sky-300 px-2 py-0.5 rounded border border-slate-700">
             + New Thread
           </button>
@@ -200,7 +219,7 @@
 
     <div id="resizerH" class="gutter-h bg-slate-800 shrink-0"></div>
 
-    <!-- Main Front & Center Code Studio -->
+    <!-- Main Code Studio View -->
     <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
       
       <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex flex-wrap justify-between items-center gap-3 shrink-0 z-10">
@@ -251,7 +270,7 @@
         <div class="max-w-4xl mx-auto w-full space-y-3.5">
           <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
             <div class="font-bold text-sky-400 mb-1">🤖 Local AI Software Engineer Ready</div>
-            Panels are resizable and locked to the frame. Press <kbd class="bg-slate-800 px-1 py-0.5 rounded text-sky-300">Enter</kbd> to submit, or <kbd class="bg-slate-800 px-1 py-0.5 rounded text-sky-300">Shift + Enter</kbd> for a new line.
+            Select context files, choose your target branch, and run development prompts.
           </div>
         </div>
       </div>
@@ -259,13 +278,13 @@
       <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
           <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
-            <span>Model: <strong class="generalChatModelBadge text-sky-400 font-mono">Scanning...</strong></span>
+            <span>Model: <strong class="generalChatModelBadge text-sky-400 font-mono">Auto (Auto-Load on demand)</strong></span>
             <span id="selectedFilesSummary" class="text-slate-400 italic">0 files selected for context</span>
           </div>
           <div class="flex gap-2">
             <textarea id="studioPromptInput" rows="2" 
                       onkeydown="handleStudioKeyDown(event)"
-                      placeholder="e.g. In install.sh and model_manager.py, add web search RAG grounding... (Enter to Send, Shift+Enter for New Line)"
+                      placeholder="e.g. In install.sh and model_manager.py, add automatic model fallback... (Enter to Send, Shift+Enter for New Line)"
                       class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none font-mono resize-none"></textarea>
             <button id="studioSendBtn" onclick="executeStudioTask()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
               ⚡ Run
@@ -473,7 +492,6 @@
         <button onclick="closeModelTuner()" class="text-slate-400 hover:text-slate-200 text-sm">✕</button>
       </div>
 
-      <!-- Context Slider -->
       <div class="space-y-2">
         <div class="flex justify-between items-center text-xs">
           <label class="font-bold text-slate-300">Context Length (Tokens):</label>
@@ -488,7 +506,6 @@
         </div>
       </div>
 
-      <!-- GPU Offload & TTL Grid -->
       <div class="grid grid-cols-2 gap-3 text-xs">
         <div>
           <label class="block font-bold text-slate-300 mb-1">GPU Offload:</label>
@@ -507,7 +524,6 @@
         </div>
       </div>
 
-      <!-- Modal Footer -->
       <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
         <button onclick="closeModelTuner()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded text-xs text-slate-300 transition">Cancel</button>
         <button id="tunerApplyBtn" onclick="applyTunerAndLoad()" class="px-5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold transition flex items-center gap-1.5">
@@ -527,7 +543,8 @@
     var activeThreadId = "thread-default";
     var currentHistoryData = null;
 
-    // General Chat State
+    // General Chat & Persona State
+    var personaVault = {};
     var generalChatSessions = [];
     var activeChatSessionId = "session-" + Date.now();
     var currentChatMessages = [];
@@ -562,6 +579,7 @@
       });
 
       if (viewName === 'chat') {
+        loadPersonas();
         loadGeneralChatSessions();
       } else if (viewName === 'studio') {
         loadSidebarWorkspaces();
@@ -574,6 +592,44 @@
         fetchLocalModels();
         searchModels();
       }
+    }
+
+    // ---------------- Personas Vault & Template Management ----------------
+
+    async function loadPersonas() {
+      try {
+        const res = await fetch('/api/personas');
+        personaVault = await res.json();
+        
+        const chatSelect = document.getElementById('chatPersonaSelect');
+        chatSelect.innerHTML = Object.entries(personaVault)
+          .filter(([k, v]) => v.domain === 'chat')
+          .map(([k, v]) => `<option value="${k}">${v.name}</option>`)
+          .join('');
+
+        if (!document.getElementById('generalChatSystemPrompt').value.trim()) {
+          resetGeneralChatPersona();
+        }
+      } catch(e) {}
+    }
+
+    function onChatPersonaChanged() {
+      const pId = document.getElementById('chatPersonaSelect').value;
+      if (personaVault[pId]) {
+        document.getElementById('generalChatSystemPrompt').value = personaVault[pId].system_prompt;
+        saveCurrentChatSession();
+      }
+    }
+
+    function resetGeneralChatPersona() {
+      const pId = document.getElementById('chatPersonaSelect').value || 'chat';
+      if (personaVault[pId]) {
+        document.getElementById('generalChatSystemPrompt').value = personaVault[pId].system_prompt;
+      } else {
+        document.getElementById('generalChatSystemPrompt').value = 
+          "You are a helpful, knowledgeable AI assistant. Respond in clear, clean GitHub-flavored Markdown. Use fenced code blocks with language identifiers for source code, format tables where comparative data is helpful, and use bold/bulleted lists for readability.";
+      }
+      saveCurrentChatSession();
     }
 
     // ---------------- General Chat Engine ----------------
@@ -631,15 +687,30 @@
 
       document.getElementById('currentChatSessionTitle').textContent = sess.title || "General Conversation";
       currentChatMessages = sess.messages || [];
+
+      if (sess.persona_id && document.getElementById('chatPersonaSelect')) {
+        document.getElementById('chatPersonaSelect').value = sess.persona_id;
+      }
+      if (sess.custom_system_prompt !== undefined) {
+        document.getElementById('generalChatSystemPrompt').value = sess.custom_system_prompt;
+      } else {
+        resetGeneralChatPersona();
+      }
+
       renderGeneralChatMessages();
       renderGeneralChatSidebar();
     }
 
     function createNewChatSession() {
       const newId = "session-" + Date.now();
+      const pId = document.getElementById('chatPersonaSelect') ? document.getElementById('chatPersonaSelect').value : "chat";
+      const sysPrompt = document.getElementById('generalChatSystemPrompt') ? document.getElementById('generalChatSystemPrompt').value : "";
+
       const newSess = {
         id: newId,
         title: "New Conversation",
+        persona_id: pId,
+        custom_system_prompt: sysPrompt,
         created_at: new Date().toISOString(),
         messages: []
       };
@@ -678,6 +749,9 @@
       if (!sess) return;
 
       sess.messages = currentChatMessages;
+      sess.persona_id = document.getElementById('chatPersonaSelect').value;
+      sess.custom_system_prompt = document.getElementById('generalChatSystemPrompt').value;
+
       if (currentChatMessages.length > 0 && sess.title === "New Conversation") {
         sess.title = currentChatMessages[0].content.slice(0, 26) + "...";
       }
@@ -689,11 +763,65 @@
           body: JSON.stringify({
             session_id: sess.id,
             title: sess.title,
+            persona_id: sess.persona_id,
+            custom_system_prompt: sess.custom_system_prompt,
             messages: sess.messages
           })
         });
         renderGeneralChatSidebar();
       } catch(e) {}
+    }
+
+    function copyToClipboard(text, btn) {
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.innerHTML;
+        btn.innerHTML = '✓ Copied';
+        setTimeout(() => { btn.innerHTML = orig; }, 1800);
+      });
+    }
+
+    function copyMessageContent(index, btn) {
+      if (!currentChatMessages[index]) return;
+      copyToClipboard(currentChatMessages[index].content, btn);
+    }
+
+    function copyEntireChatHistory() {
+      if (currentChatMessages.length === 0) return alert('Chat history is empty.');
+      const formatted = currentChatMessages.map(m => {
+        const author = m.role === 'user' ? 'User' : 'Assistant';
+        return `### ${author}\n${m.content}\n`;
+      }).join('\n---\n\n');
+      
+      navigator.clipboard.writeText(formatted).then(() => {
+        alert('Entire conversation copied to clipboard as Markdown!');
+      });
+    }
+
+    function exportCurrentChat(format) {
+      const sess = generalChatSessions.find(s => s.id === activeChatSessionId);
+      if (!sess || currentChatMessages.length === 0) return alert('No conversation data to export.');
+      
+      let dataStr = "";
+      let filename = (sess.title || "conversation").toLowerCase().replace(/[^a-z0-9]/g, "_");
+
+      if (format === 'markdown') {
+        dataStr = `# ${sess.title}\n*Exported on ${new Date().toLocaleString()}*\n\n` + 
+          currentChatMessages.map(m => `### ${m.role === 'user' ? 'User' : 'Assistant'}\n\n${m.content}`).join('\n\n---\n\n');
+        filename += ".md";
+      } else {
+        dataStr = JSON.stringify(sess, null, 2);
+        filename += ".json";
+      }
+
+      const blob = new Blob([dataStr], { type: format === 'markdown' ? 'text/markdown' : 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     }
 
     function renderGeneralChatMessages() {
@@ -702,26 +830,28 @@
       if (currentChatMessages.length === 0) {
         windowEl.innerHTML = '<div class="max-w-4xl mx-auto w-full space-y-3.5"><div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">' +
           '<div class="font-bold text-sky-400 mb-1">💬 Grounded AI Assistant Ready</div>' +
-          'Live Web Search and temporal grounding are enabled. Ask real-time questions, code, or draft documentation with full Markdown and syntax highlighting.</div></div>';
+          'Live Web Search, temporal grounding, and automated model loading are enabled.</div></div>';
         return;
       }
 
       const wrapper = document.createElement('div');
       wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
 
-      currentChatMessages.forEach(msg => {
+      currentChatMessages.forEach((msg, idx) => {
         const isUser = (msg.role === 'user');
         const div = document.createElement('div');
         div.className = isUser 
-          ? 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md' 
-          : 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-200 markdown-body max-w-[95%] mr-auto shadow-md';
+          ? 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md relative group' 
+          : 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-200 markdown-body max-w-[95%] mr-auto shadow-md relative group';
+
+        const copyBtn = `<button onclick="copyMessageContent(${idx}, this)" class="text-[10px] bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700 px-2 py-0.5 rounded transition" title="Copy raw text">📋 Copy</button>`;
 
         if (isUser) {
-          div.innerHTML = '<div class="font-bold text-sky-300 text-[11px] mb-1">You</div><p class="whitespace-pre-wrap font-sans">' + escapeHtml(msg.content) + '</p>';
+          div.innerHTML = `<div class="flex justify-between items-center text-sky-300 text-[11px] mb-1">` +
+            `<span class="font-bold">You</span>${copyBtn}</div><p class="whitespace-pre-wrap font-sans">${escapeHtml(msg.content)}</p>`;
         } else {
-          div.innerHTML = '<div class="font-bold text-emerald-400 text-[11px] mb-1.5 flex justify-between items-center border-b border-slate-800 pb-1">' +
-            '<span>🤖 Grounded Assistant</span><span class="text-[10px] text-slate-500 font-mono">LLM Output</span></div>' +
-            marked.parse(msg.content || '');
+          div.innerHTML = `<div class="flex justify-between items-center text-emerald-400 text-[11px] mb-1.5 border-b border-slate-800 pb-1">` +
+            `<span class="font-bold">🤖 Assistant</span>${copyBtn}</div>${marked.parse(msg.content || '')}`;
         }
         wrapper.appendChild(div);
       });
@@ -741,6 +871,7 @@
       const text = inputEl.value.trim();
       const sendBtn = document.getElementById('generalChatSendBtn');
       const windowEl = document.getElementById('generalChatMessagesWindow');
+      const personaId = document.getElementById('chatPersonaSelect').value;
       const sysPrompt = document.getElementById('generalChatSystemPrompt').value.trim();
       const isWebSearchEnabled = document.getElementById('enableWebSearchToggle').checked;
 
@@ -761,25 +892,21 @@
         windowEl.appendChild(wrapper);
       }
 
-      const searchStatusText = isWebSearchEnabled ? '🔎 Searching live web & generating grounded response...' : '🤖 Generating response...';
+      const searchStatusText = isWebSearchEnabled ? '🔎 Searching live web & generating grounded response...' : '🤖 Generating response (Auto-loading model if needed)...';
       const aiDiv = document.createElement('div');
       aiDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-emerald-400 max-w-[95%] mr-auto animate-pulse';
       aiDiv.innerHTML = searchStatusText;
       wrapper.appendChild(aiDiv);
       windowEl.scrollTop = windowEl.scrollHeight;
 
-      const apiMessages = [];
-      if (sysPrompt) {
-        apiMessages.push({role: "system", content: sysPrompt});
-      }
-      currentChatMessages.forEach(m => apiMessages.push({role: m.role, content: m.content}));
-
       try {
         const res = await fetch('/api/chat/completions', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
-            messages: apiMessages,
+            messages: currentChatMessages,
+            persona_id: personaId,
+            custom_system_prompt: sysPrompt,
             enable_web_search: isWebSearchEnabled,
             temperature: 0.7,
             max_tokens: 4096
@@ -791,6 +918,7 @@
           currentChatMessages.push({role: "assistant", content: reply});
           renderGeneralChatMessages();
           saveCurrentChatSession();
+          await initHardwareInfo();
         } else {
           aiDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto';
           aiDiv.innerHTML = '❌ Error: ' + (data.message || 'Failed to generate response');
@@ -952,7 +1080,7 @@
 
         if (data.storage) renderStorageMetrics(data.storage);
 
-        const primaryModel = loadedModelsList.length > 0 ? loadedModelsList[0] : "Default (Auto)";
+        const primaryModel = loadedModelsList.length > 0 ? loadedModelsList[0] : "Auto (Auto-Load on demand)";
         document.querySelectorAll('.generalChatModelBadge').forEach(el => el.textContent = primaryModel);
         document.getElementById('currentChatModelIndicator').textContent = "Model: " + primaryModel;
       } catch(e) {}
@@ -1129,16 +1257,20 @@
 
       activeThread.messages.forEach(msg => {
         const userMsgDiv = document.createElement('div');
-        userMsgDiv.className = 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md space-y-1';
+        userMsgDiv.className = 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md space-y-1 relative group';
+        
+        const rawUserPrompt = encodeURIComponent(msg.instruction || '');
         userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between text-[11px] mb-1">' +
           '<span>You</span>' +
+          '<div class="flex items-center gap-2">' +
           '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml((msg.target_files || []).join(', ') || 'No files selected') + '</span>' +
-          '</div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(msg.instruction) + '</p>';
+          '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawUserPrompt + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
+          '</div></div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(msg.instruction) + '</p>';
         wrapper.appendChild(userMsgDiv);
 
         const modFiles = msg.modified_files || [];
         const aiMsgDiv = document.createElement('div');
-        aiMsgDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-emerald-300 space-y-3 font-mono max-w-[95%] mr-auto shadow-md';
+        aiMsgDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-emerald-300 space-y-3 font-mono max-w-[95%] mr-auto shadow-md relative group';
         
         let reviewDiff = '';
         if (modFiles.length > 0 && msg.diff) {
@@ -1147,11 +1279,14 @@
             '<pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">' + escapeHtml(msg.diff) + '</pre></details>';
         }
 
+        const rawAiOutput = encodeURIComponent(msg.ai_response || '');
         const modText = modFiles.length > 0 ? ('Modified: ' + modFiles.join(', ')) : 'Advisory Response';
         aiMsgDiv.innerHTML = '<div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">' +
           '<span>🤖 Local AI Agent</span>' +
+          '<div class="flex items-center gap-2">' +
           '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml(modText) + '</span>' +
-          '</div><div class="text-slate-200 whitespace-pre-wrap mt-2">' + escapeHtml(msg.ai_response || '') + '</div>' + reviewDiff;
+          '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawAiOutput + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
+          '</div></div><div class="text-slate-200 whitespace-pre-wrap mt-2">' + escapeHtml(msg.ai_response || '') + '</div>' + reviewDiff;
         
         wrapper.appendChild(aiMsgDiv);
       });
@@ -1363,12 +1498,15 @@
         chatWindow.appendChild(wrapper);
       }
 
+      const rawPromptEnc = encodeURIComponent(instruction);
       const userMsgDiv = document.createElement('div');
-      userMsgDiv.className = 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md space-y-1';
+      userMsgDiv.className = 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md space-y-1 relative group';
       userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between text-[11px] mb-1">' +
         '<span>You</span>' +
+        '<div class="flex items-center gap-2">' +
         '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml(selectedFiles.length > 0 ? selectedFiles.join(', ') : 'No files selected') + '</span>' +
-        '</div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(instruction) + '</p>';
+        '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawPromptEnc + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
+        '</div></div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(instruction) + '</p>';
       wrapper.appendChild(userMsgDiv);
 
       promptInput.value = '';
@@ -1391,7 +1529,8 @@
             repo_dir_name: currentWorkspaceDir,
             target_files: selectedFiles,
             instruction: instruction,
-            thread_id: activeThreadId
+            thread_id: activeThreadId,
+            persona_id: "coding"
           })
         });
         const data = await res.json();
@@ -1424,11 +1563,14 @@
               '</div></div>';
           }
 
+          const rawAiTextEnc = encodeURIComponent(data.message.ai_response || '');
           const modText = modFiles.length > 0 ? 'Changes Staged on Disk' : 'Advisory Response';
           aiMsgDiv.innerHTML = '<div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">' +
             '<span>🤖 Local AI Agent</span>' +
+            '<div class="flex items-center gap-2">' +
             '<span class="text-[10px] text-slate-400 font-normal">' + modText + '</span>' +
-            '</div><div class="text-slate-200 whitespace-pre-wrap mt-2">' + escapeHtml(data.message.ai_response || '') + '</div>' + commitReviewBox;
+            '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawAiTextEnc + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
+            '</div></div><div class="text-slate-200 whitespace-pre-wrap mt-2">' + escapeHtml(data.message.ai_response || '') + '</div>' + commitReviewBox;
 
           await loadWorkspaceFiles();
           await refreshWorkspaceStatus();
@@ -1732,7 +1874,7 @@
         container.innerHTML = accounts.map(a => {
           return '<div class="bg-slate-950 p-3 rounded-lg border border-slate-700 flex justify-between items-center text-xs shadow-md">' +
             '<div class="flex items-center gap-2.5 overflow-hidden">' +
-            '<img src="' + (a.avatar_url || '[https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png](https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png)') + '" class="w-7 h-7 rounded-full border border-slate-700">' +
+            '<img src="' + (a.avatar_url || 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png') + '" class="w-7 h-7 rounded-full border border-slate-700">' +
             '<div class="truncate">' +
             '<div class="font-bold text-slate-200 truncate">' + escapeHtml(a.label) + '</div>' +
             '<div class="text-[11px] text-slate-400">@' + escapeHtml(a.username) + ' • <span class="font-mono text-[10px] text-slate-500">' + a.masked_token + '</span></div>' +
@@ -2030,122 +2172,6 @@
         body: JSON.stringify({repo_id: repoId, group_name: groupName, files: filePaths})
       });
       updateTasks();
-    }
-
-    async function toggleFiles(repoId, btn) {
-      const parent = btn.parentElement;
-      const fileContainer = parent.querySelector('.file-container');
-      
-      if (!fileContainer.classList.contains('hidden')) {
-        fileContainer.classList.add('hidden');
-        btn.textContent = 'Inspect Quantizations & Memory Fit';
-        btn.className = 'toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition';
-        return;
-      }
-
-      fileContainer.classList.remove('hidden');
-      btn.textContent = '▲ Minimize Quantizations';
-      btn.className = 'toggle-btn w-full text-xs bg-slate-700 hover:bg-slate-600 border border-slate-500 text-sky-300 px-3 py-1.5 rounded transition';
-      fileContainer.innerHTML = '<span class="text-xs text-slate-500">Fetching file metadata & calculating VRAM footprint...</span>';
-      
-      const res = await fetch('/api/model_files?repo_id=' + encodeURIComponent(repoId));
-      const data = await res.json();
-      fileContainer.innerHTML = '';
-
-      if (!data.files || data.files.length === 0) {
-        fileContainer.innerHTML = '<span class="text-xs text-slate-500">No .gguf files found in repository.</span>';
-        return;
-      }
-
-      const table = document.createElement('div');
-      table.className = 'space-y-2';
-
-      data.files.forEach(f => {
-        let fitBadge = '';
-        if (f.fit_status === 'fits_gpu') {
-          fitBadge = '<span class="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded font-medium">Fits GPU VRAM</span>';
-        } else if (f.fit_status === 'split_gpu_ram') {
-          fitBadge = '<span class="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-1.5 py-0.5 rounded font-medium">Split GPU + RAM</span>';
-        } else if (f.fit_status === 'fits_ram') {
-          fitBadge = '<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded font-medium">Fits System RAM</span>';
-        } else if (f.fit_status === 'exceeds') {
-          fitBadge = '<span class="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-medium">Exceeds Memory</span>';
-        }
-
-        const isDownloaded = f.is_downloaded || localModelSet.has(f.group_name);
-        const isDownloading = f.is_downloading || (activeTasksMap[f.group_name] && activeTasksMap[f.group_name].status === 'downloading');
-
-        let btnHtml = '';
-        const btnId = 'btn-' + btoa(f.group_name).replace(/=/g, '');
-        const filesPayload = encodeURIComponent(JSON.stringify(f.paths));
-
-        if (isDownloaded) {
-          btnHtml = '<button id="' + btnId + '" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">✓ Installed</button>';
-        } else if (isDownloading) {
-          btnHtml = '<button id="' + btnId + '" disabled class="bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1">⏳ Downloading...</button>';
-        } else {
-          btnHtml = '<button id="' + btnId + '" onclick="triggerDownload(\'' + repoId + '\', \'' + f.group_name + '\', \'' + filesPayload + '\', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition">Download</button>';
-        }
-
-        const shardBadge = f.is_sharded ? ('<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded ml-1 font-mono">' + f.shard_count + ' Shards</span>') : '';
-
-        const row = document.createElement('div');
-        row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
-        row.innerHTML = '<div class="space-y-1 overflow-hidden pr-2">' +
-          '<div class="font-medium text-sky-200 truncate flex items-center" title="' + escapeHtml(f.display_name) + '">' +
-          '<span class="truncate">' + escapeHtml(f.group_name) + '</span> ' + shardBadge +
-          '</div>' +
-          '<div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">' +
-          '<span>Weight: <strong class="text-slate-200">' + f.weight + '</strong></span>' +
-          '<span>•</span>' +
-          '<span>Variant: <strong class="text-slate-200">' + f.variant + '</strong></span>' +
-          '<span>•</span>' +
-          '<span>Size: <strong class="text-emerald-400">' + f.size_gb + '</strong></span>' +
-          '<span>(' + f.est_vram + ' Req)</span>' +
-          fitBadge +
-          '</div>' +
-          '<div class="text-[11px] text-slate-400 italic bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/80">ℹ ' + escapeHtml(f.description) + '</div>' +
-          '</div>' + btnHtml;
-
-        table.appendChild(row);
-      });
-      fileContainer.appendChild(table);
-    }
-
-    async function triggerDownload(repoId, groupName, filesPayloadEncoded, btn) {
-      btn.disabled = true;
-      btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
-      btn.innerHTML = "⏳ Downloading...";
-
-      const filePaths = JSON.parse(decodeURIComponent(filesPayloadEncoded));
-      await fetch('/api/download', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({repo_id: repoId, group_name: groupName, files: filePaths})
-      });
-      updateTasks();
-    }
-
-    async function loadModelIntoGPU(modelPath, btn) {
-      btn.disabled = true;
-      btn.textContent = '⏳ Loading (32k ctx)...';
-      btn.className = 'bg-sky-950 text-sky-300 border border-sky-800 px-2.5 py-1 rounded text-xs animate-pulse';
-
-      try {
-        const res = await fetch('/api/load_model', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({model_path: modelPath, gpu_offload: 'max', context_length: 32768, ttl: 3600})
-        });
-        const data = await res.json();
-        if (!res.ok || data.status !== 'success') {
-          alert('Load Failure Output from LMS:\n\n' + (data.message || JSON.stringify(data)));
-        }
-      } catch(e) {
-        alert('Communication Error: ' + e.message);
-      }
-      await initHardwareInfo();
-      await fetchLocalModels();
     }
 
     async function unloadActiveModel(btn) {

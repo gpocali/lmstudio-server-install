@@ -55,6 +55,38 @@ HF_HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 }
 
+# ---------------- Auto-Load Model Helper ----------------
+
+def ensure_active_model(model_identifier: str = "") -> str:
+    """Returns an active model identifier; if none loaded, loads the first available local GGUF."""
+    loaded = get_loaded_models()
+    if loaded and not model_identifier:
+        return loaded[0]
+    if model_identifier and model_identifier != "default" and model_identifier != "auto":
+        return model_identifier
+    if loaded:
+        return loaded[0]
+
+    # Find first locally installed model
+    if os.path.exists(MODELS_PATH):
+        for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
+            for f in filenames:
+                if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
+                    path = os.path.join(root, f)
+                    lms = get_lms_bin()
+                    clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', f).lower()
+                    try:
+                        # Attempt to load model into GPU automatically
+                        cmd = [lms, "load", path, "--gpu=max", "--context-length=32768", "--ttl=3600", "--yes"]
+                        res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=35)
+                        if res.returncode == 0:
+                            recheck = get_loaded_models()
+                            return recheck[0] if recheck else clean_fname
+                    except Exception:
+                        pass
+                    return clean_fname
+    return "default"
+
 # ---------------- Pydantic Request Models ----------------
 
 class DownloadRequest(BaseModel):
@@ -231,10 +263,7 @@ def api_delete_chat_session(req: DeleteChatSessionRequest):
 
 @app.post("/api/chat/completions")
 def api_chat_completion(req: ChatCompletionRequest):
-    model_id = req.model_identifier
-    if not model_id:
-        loaded = get_loaded_models()
-        model_id = loaded[0] if loaded else "default"
+    model_id = ensure_active_model(req.model_identifier)
 
     messages = list(req.messages)
     current_date_str = datetime.datetime.utcnow().strftime("%A, %B %d, %Y")
@@ -735,6 +764,7 @@ def api_create_file(req: CreateFileRequest):
 
 @app.post("/api/agent/execute")
 def api_agent_execute(req: AgentTaskRequest):
+    effective_model = ensure_active_model(req.model_identifier)
     res = process_agent_task(
         req.repo_dir_name, 
         req.target_files, 
@@ -742,7 +772,7 @@ def api_agent_execute(req: AgentTaskRequest):
         thread_id=req.thread_id, 
         persona_id=req.persona_id, 
         custom_system_prompt=req.custom_system_prompt, 
-        model_id=req.model_identifier
+        model_id=effective_model
     )
     if res.get("status") == "error": return JSONResponse(status_code=500, content=res)
     return res
