@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>LM Studio Remote Code, Chat & Model Studio</title>
+  <title>Madison AI Workstation</title>
   <!-- Direct CDN Scripts -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
@@ -29,6 +29,13 @@
     .markdown-body th, .markdown-body td { border: 1px solid #334155; padding: 0.35rem 0.6rem; text-align: left; }
     .markdown-body th { background: #0f172a; color: #38bdf8; }
     .markdown-body blockquote { border-left: 3px solid #38bdf8; padding-left: 0.75rem; color: #94a3b8; font-style: italic; margin: 0.5rem 0; }
+
+    /* Indicator badge pulse animation */
+    @keyframes pulse-green {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(1.15); }
+    }
+    .unread-pulse { animation: pulse-green 1.5s infinite ease-in-out; }
   </style>
 </head>
 <body class="bg-slate-900 text-slate-100 h-screen w-screen flex flex-col font-sans overflow-hidden select-none">
@@ -36,24 +43,42 @@
   <!-- Global Top Navbar (Pinned) -->
   <header class="bg-slate-950 border-b border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-4 shrink-0 z-20">
     <div class="flex items-center gap-3">
-      <h1 class="text-lg font-bold text-sky-400">LM Studio Studio</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">v2.5 Persona Vault</span>
+      <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-black text-sm text-white shadow">M</div>
+      <h1 class="text-lg font-bold bg-gradient-to-r from-sky-400 to-indigo-300 bg-clip-text text-transparent">Madison</h1>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.0</span>
     </div>
 
-    <!-- Navigation Page Buttons -->
+    <!-- Navigation Page Buttons with Activity & Unread Indicators -->
     <div class="flex items-center gap-2">
-      <button onclick="switchView('chat')" id="navBtnChat" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5">
-        💬 Chat Bot
+      <!-- Chat Tab -->
+      <button onclick="switchView('chat')" id="navBtnChat" class="relative px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5">
+        <span>💬 Chat</span>
+        <span id="chatTabSpinner" class="hidden">
+          <svg class="animate-spin h-3.5 w-3.5 text-sky-200" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+        </span>
+        <span id="chatTabUnreadDot" class="hidden w-2 h-2 rounded-full bg-emerald-400 unread-pulse"></span>
       </button>
-      <button onclick="switchView('studio')" id="navBtnStudio" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
-        💻 Code Studio
+
+      <!-- Code Studio Tab -->
+      <button onclick="switchView('studio')" id="navBtnStudio" class="relative px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
+        <span>💻 Code Studio</span>
+        <span id="studioTabSpinner" class="hidden">
+          <svg class="animate-spin h-3.5 w-3.5 text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+        </span>
+        <span id="studioTabUnreadDot" class="hidden w-2 h-2 rounded-full bg-emerald-400 unread-pulse"></span>
       </button>
+
+      <!-- Timeline Tab -->
       <button onclick="switchView('history')" id="navBtnHistory" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
         📜 Timeline
       </button>
+
+      <!-- Accounts Tab -->
       <button onclick="switchView('github')" id="navBtnGithub" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
         🔑 Accounts
       </button>
+
+      <!-- Models Tab -->
       <button onclick="switchView('models')" id="navBtnModels" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
         📦 Models
       </button>
@@ -70,7 +95,7 @@
     </div>
   </header>
 
-  <!-- ==================== VIEW 1: GENERAL CHAT BOT ==================== -->
+  <!-- ==================== VIEW 1: GENERAL CHAT ==================== -->
   <main id="viewChat" class="flex-1 flex overflow-hidden relative select-text">
     
     <!-- Left Sidebar: Chat Sessions & Persona Configuration -->
@@ -112,7 +137,7 @@
         </div>
 
         <div class="space-y-1">
-          <label class="text-[11px] font-bold text-slate-400 block">System Persona Prompt (Editable Override):</label>
+          <label class="text-[11px] font-bold text-slate-400 block">System Persona Prompt (Override):</label>
           <textarea id="generalChatSystemPrompt" rows="3" 
                     class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs focus:border-sky-500 focus:outline-none resize-none font-mono text-slate-300"></textarea>
         </div>
@@ -142,8 +167,8 @@
       <div id="generalChatMessagesWindow" class="flex-1 overflow-y-auto p-4 md:p-6">
         <div class="max-w-4xl mx-auto w-full space-y-3.5">
           <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
-            <div class="font-bold text-sky-400 mb-1">💬 Grounded AI Assistant Ready</div>
-            Live Web Search, temporal grounding, and automated model loading are enabled.
+            <div class="font-bold text-sky-400 mb-1">💬 Grounded Madison Assistant</div>
+            Background agent queue, temporal grounding, and auto-model loading are active.
           </div>
         </div>
       </div>
@@ -152,13 +177,13 @@
       <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
           <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
-            <span>Model: <strong class="generalChatModelBadge text-sky-400 font-mono">Auto (Auto-Load on demand)</strong></span>
+            <span>Engine: <strong class="generalChatModelBadge text-sky-400 font-mono">Auto (Auto-Load on demand)</strong></span>
             <span class="text-slate-500 italic">Press Enter to send, Shift+Enter for new line</span>
           </div>
           <div class="flex gap-2">
             <textarea id="generalChatInput" rows="2" 
                       onkeydown="handleGeneralChatKeyDown(event)"
-                      placeholder="Type a message or inquiry... (Live search enabled)"
+                      placeholder="Type a message or inquiry... (You can switch tabs freely while it runs)"
                       class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none resize-none text-slate-100"></textarea>
             <button id="generalChatSendBtn" onclick="executeGeneralChatSend()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
               Send
@@ -269,8 +294,8 @@
       <div id="chatHistoryWindow" class="flex-1 overflow-y-auto p-4 md:p-6">
         <div class="max-w-4xl mx-auto w-full space-y-3.5">
           <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
-            <div class="font-bold text-sky-400 mb-1">🤖 Local AI Software Engineer Ready</div>
-            Select context files, choose your target branch, and run development prompts.
+            <div class="font-bold text-sky-400 mb-1">🤖 Madison AI Software Architect</div>
+            Select context files, choose your target branch, and run background code modifications.
           </div>
         </div>
       </div>
@@ -278,13 +303,13 @@
       <div class="p-4 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
           <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
-            <span>Model: <strong class="generalChatModelBadge text-sky-400 font-mono">Auto (Auto-Load on demand)</strong></span>
+            <span>Engine: <strong class="generalChatModelBadge text-sky-400 font-mono">Auto (Auto-Load on demand)</strong></span>
             <span id="selectedFilesSummary" class="text-slate-400 italic">0 files selected for context</span>
           </div>
           <div class="flex gap-2">
             <textarea id="studioPromptInput" rows="2" 
                       onkeydown="handleStudioKeyDown(event)"
-                      placeholder="e.g. In install.sh and model_manager.py, add automatic model fallback... (Enter to Send, Shift+Enter for New Line)"
+                      placeholder="e.g. Implement background task monitoring with unread badges in web/index.html... (Enter to Run)"
                       class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:border-sky-500 focus:outline-none font-mono resize-none"></textarea>
             <button id="studioSendBtn" onclick="executeStudioTask()" class="bg-sky-600 hover:bg-sky-500 px-6 rounded-lg font-bold text-sm transition shrink-0 flex items-center justify-center">
               ⚡ Run
@@ -534,6 +559,7 @@
   </div>
 
   <script>
+    var currentActiveView = "chat";
     var localModelSet = new Set();
     var activeTasksMap = {};
     var loadedModelsList = [];
@@ -552,6 +578,10 @@
     // Model Tuner State
     var currentTunerModel = null;
 
+    // Background Tracker
+    var activeRunningTasks = new Map(); // task_id -> { domain, target_id }
+    var unreadCompletedTasks = new Map(); // target_id -> task_id
+
     function escapeHtml(text) {
       if (!text) return "";
       return String(text)
@@ -563,6 +593,7 @@
     }
 
     function switchView(viewName) {
+      currentActiveView = viewName;
       document.getElementById('viewChat').classList.toggle('hidden', viewName !== 'chat');
       document.getElementById('viewStudio').classList.toggle('hidden', viewName !== 'studio');
       document.getElementById('viewHistory').classList.toggle('hidden', viewName !== 'history');
@@ -572,18 +603,23 @@
       ['Chat', 'Studio', 'History', 'Github', 'Models'].forEach(v => {
         const btn = document.getElementById('navBtn' + v);
         if (btn) {
-          btn.className = (viewName.toLowerCase() === v.toLowerCase())
-            ? 'px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
-            : 'px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
+          const isSelected = (viewName.toLowerCase() === v.toLowerCase());
+          btn.className = isSelected
+            ? 'relative px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
+            : 'relative px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
         }
       });
 
       if (viewName === 'chat') {
         loadPersonas();
         loadGeneralChatSessions();
+        clearUnreadForCurrentChat();
       } else if (viewName === 'studio') {
         loadSidebarWorkspaces();
-        if (currentWorkspaceDir) refreshWorkspaceStatus();
+        if (currentWorkspaceDir) {
+          refreshWorkspaceStatus();
+          clearUnreadForCurrentStudioThread();
+        }
       } else if (viewName === 'history') {
         loadWorkspaceTimeline();
       } else if (viewName === 'github') {
@@ -594,7 +630,15 @@
       }
     }
 
-    // ---------------- Personas Vault & Template Management ----------------
+    function copyToClipboard(text, btn) {
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.innerHTML;
+        btn.innerHTML = '✓ Copied';
+        setTimeout(() => { btn.innerHTML = orig; }, 1800);
+      });
+    }
+
+    // ---------------- Personas Vault ----------------
 
     async function loadPersonas() {
       try {
@@ -673,8 +717,20 @@
       container.innerHTML = generalChatSessions.map(s => {
         const isSel = (s.id === activeChatSessionId);
         const bg = isSel ? 'bg-sky-950/60 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700';
+        
+        // Indicator for running background or unread
+        const isRunning = Array.from(activeRunningTasks.values()).some(t => t.domain === 'chat' && t.target_id === s.id);
+        const isUnread = unreadCompletedTasks.has(s.id);
+
+        let badge = '';
+        if (isRunning) {
+          badge = '<span class="ml-1.5"><svg class="animate-spin h-3.5 w-3.5 text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg></span>';
+        } else if (isUnread) {
+          badge = '<span class="ml-1.5 w-2 h-2 rounded-full bg-emerald-400 unread-pulse"></span>';
+        }
+
         return '<div class="p-2 rounded border ' + bg + ' flex justify-between items-center cursor-pointer group">' +
-          '<span onclick="selectChatSession(\'' + s.id + '\')" class="truncate flex-1">💬 ' + escapeHtml(s.title) + '</span>' +
+          '<span onclick="selectChatSession(\'' + s.id + '\')" class="truncate flex-1 flex items-center">💬 ' + escapeHtml(s.title) + badge + '</span>' +
           '<button onclick="deleteChatSession(\'' + s.id + '\')" class="text-slate-500 hover:text-rose-400 ml-1 text-xs opacity-0 group-hover:opacity-100 transition">✕</button>' +
           '</div>';
       }).join('');
@@ -697,8 +753,22 @@
         resetGeneralChatPersona();
       }
 
+      clearUnreadForCurrentChat();
       renderGeneralChatMessages();
       renderGeneralChatSidebar();
+    }
+
+    function clearUnreadForCurrentChat() {
+      if (unreadCompletedTasks.has(activeChatSessionId)) {
+        const tid = unreadCompletedTasks.get(activeChatSessionId);
+        fetch('/api/queue/mark_read', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({task_id: tid})
+        });
+        unreadCompletedTasks.delete(activeChatSessionId);
+        renderGeneralChatSidebar();
+      }
     }
 
     function createNewChatSession() {
@@ -772,14 +842,6 @@
       } catch(e) {}
     }
 
-    function copyToClipboard(text, btn) {
-      navigator.clipboard.writeText(text).then(() => {
-        const orig = btn.innerHTML;
-        btn.innerHTML = '✓ Copied';
-        setTimeout(() => { btn.innerHTML = orig; }, 1800);
-      });
-    }
-
     function copyMessageContent(index, btn) {
       if (!currentChatMessages[index]) return;
       copyToClipboard(currentChatMessages[index].content, btn);
@@ -829,8 +891,8 @@
       
       if (currentChatMessages.length === 0) {
         windowEl.innerHTML = '<div class="max-w-4xl mx-auto w-full space-y-3.5"><div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">' +
-          '<div class="font-bold text-sky-400 mb-1">💬 Grounded AI Assistant Ready</div>' +
-          'Live Web Search, temporal grounding, and automated model loading are enabled.</div></div>';
+          '<div class="font-bold text-sky-400 mb-1">💬 Grounded Madison Assistant</div>' +
+          'Live Web Search, temporal grounding, and automated background execution are enabled.</div></div>';
         return;
       }
 
@@ -866,11 +928,12 @@
       windowEl.scrollTop = windowEl.scrollHeight;
     }
 
+    // ---------------- Background Task Submissions ----------------
+
     async function executeGeneralChatSend() {
       const inputEl = document.getElementById('generalChatInput');
       const text = inputEl.value.trim();
       const sendBtn = document.getElementById('generalChatSendBtn');
-      const windowEl = document.getElementById('generalChatMessagesWindow');
       const personaId = document.getElementById('chatPersonaSelect').value;
       const sysPrompt = document.getElementById('generalChatSystemPrompt').value.trim();
       const isWebSearchEnabled = document.getElementById('enableWebSearchToggle').checked;
@@ -879,31 +942,17 @@
 
       currentChatMessages.push({role: "user", content: text});
       renderGeneralChatMessages();
+      saveCurrentChatSession();
 
+      const targetSessionId = activeChatSessionId;
       inputEl.value = '';
-      sendBtn.disabled = true;
-      sendBtn.textContent = '...';
-
-      let wrapper = windowEl.querySelector('.max-w-4xl');
-      if (!wrapper) {
-        wrapper = document.createElement('div');
-        wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
-        windowEl.innerHTML = '';
-        windowEl.appendChild(wrapper);
-      }
-
-      const searchStatusText = isWebSearchEnabled ? '🔎 Searching live web & generating grounded response...' : '🤖 Generating response (Auto-loading model if needed)...';
-      const aiDiv = document.createElement('div');
-      aiDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-emerald-400 max-w-[95%] mr-auto animate-pulse';
-      aiDiv.innerHTML = searchStatusText;
-      wrapper.appendChild(aiDiv);
-      windowEl.scrollTop = windowEl.scrollHeight;
 
       try {
-        const res = await fetch('/api/chat/completions', {
+        const res = await fetch('/api/queue/submit_chat', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
+            session_id: targetSessionId,
             messages: currentChatMessages,
             persona_id: personaId,
             custom_system_prompt: sysPrompt,
@@ -913,24 +962,153 @@
           })
         });
         const data = await res.json();
-        if (res.ok && data.choices && data.choices.length > 0) {
-          const reply = data.choices[0].message.content;
-          currentChatMessages.push({role: "assistant", content: reply});
-          renderGeneralChatMessages();
-          saveCurrentChatSession();
-          await initHardwareInfo();
-        } else {
-          aiDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto';
-          aiDiv.innerHTML = '❌ Error: ' + (data.message || 'Failed to generate response');
+        if (res.ok && data.task_id) {
+          activeRunningTasks.set(data.task_id, { domain: 'chat', target_id: targetSessionId });
+          renderGeneralChatSidebar();
+          pollTaskStatus(data.task_id, 'chat', targetSessionId);
         }
       } catch(e) {
-        aiDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto';
-        aiDiv.innerHTML = '❌ Communication Error: ' + e.message;
+        alert('Failed to submit chat task: ' + e.message);
       }
+    }
 
-      sendBtn.disabled = false;
-      sendBtn.textContent = 'Send';
-      windowEl.scrollTop = windowEl.scrollHeight;
+    async function executeStudioTask() {
+      const promptInput = document.getElementById('studioPromptInput');
+      const instruction = promptInput.value.trim();
+      if (!currentWorkspaceDir) return alert('Select an active workspace from the left pane first.');
+      if (!instruction) return alert('Please enter a task or coding instruction.');
+
+      const checkedBoxes = document.querySelectorAll('#filesCheckboxList input[type="checkbox"]:checked');
+      const selectedFiles = Array.from(checkedBoxes).map(cb => cb.value);
+      const targetThreadId = activeThreadId;
+      const targetRepoDir = currentWorkspaceDir;
+
+      promptInput.value = '';
+
+      try {
+        const res = await fetch('/api/queue/submit_agent', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            repo_dir_name: targetRepoDir,
+            target_files: selectedFiles,
+            instruction: instruction,
+            thread_id: targetThreadId,
+            persona_id: "coding"
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.task_id) {
+          const compTargetId = `${targetRepoDir}:${targetThreadId}`;
+          activeRunningTasks.set(data.task_id, { domain: 'coding', target_id: compTargetId });
+          renderThreadsSidebar();
+          pollTaskStatus(data.task_id, 'coding', compTargetId);
+        }
+      } catch(e) {
+        alert('Failed to submit coding task: ' + e.message);
+      }
+    }
+
+    async function pollTaskStatus(taskId, domain, targetId) {
+      const interval = setInterval(async () => {
+        try {
+          const res = await fetch('/api/queue/task_status?task_id=' + encodeURIComponent(taskId));
+          if (!res.ok) {
+            clearInterval(interval);
+            activeRunningTasks.delete(taskId);
+            return;
+          }
+          const task = await res.json();
+          if (task.status === 'completed' || task.status === 'failed') {
+            clearInterval(interval);
+            activeRunningTasks.delete(taskId);
+
+            if (task.status === 'completed' && task.result) {
+              if (domain === 'chat') {
+                const sess = generalChatSessions.find(s => s.id === targetId);
+                if (sess) {
+                  const reply = task.result.choices[0].message.content;
+                  sess.messages.push({role: "assistant", content: reply});
+                  if (targetId === activeChatSessionId && currentActiveView === 'chat') {
+                    currentChatMessages = sess.messages;
+                    renderGeneralChatMessages();
+                    fetch('/api/queue/mark_read', {
+                      method: 'POST',
+                      headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({task_id: taskId})
+                    });
+                  } else {
+                    unreadCompletedTasks.set(targetId, taskId);
+                  }
+                  saveCurrentChatSession();
+                }
+              } else if (domain === 'coding') {
+                const parts = targetId.split(':');
+                const repoDir = parts[0];
+                const threadId = parts[1];
+
+                if (repoDir === currentWorkspaceDir && threadId === activeThreadId && currentActiveView === 'studio') {
+                  await loadWorkspaceFiles();
+                  await refreshWorkspaceStatus();
+                  await loadWorkspaceHistoryAndRender();
+                  fetch('/api/queue/mark_read', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({task_id: taskId})
+                  });
+                } else {
+                  unreadCompletedTasks.set(targetId, taskId);
+                }
+              }
+            }
+            updateGlobalIndicatorDots();
+            renderGeneralChatSidebar();
+            renderThreadsSidebar();
+          }
+        } catch(e) {
+          clearInterval(interval);
+          activeRunningTasks.delete(taskId);
+        }
+      }, 1500);
+    }
+
+    function clearUnreadForCurrentStudioThread() {
+      const compTargetId = `${currentWorkspaceDir}:${activeThreadId}`;
+      if (unreadCompletedTasks.has(compTargetId)) {
+        const tid = unreadCompletedTasks.get(compTargetId);
+        fetch('/api/queue/mark_read', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({task_id: tid})
+        });
+        unreadCompletedTasks.delete(compTargetId);
+        renderThreadsSidebar();
+      }
+    }
+
+    async function syncQueueStates() {
+      try {
+        const res = await fetch('/api/queue/states');
+        const data = await res.json();
+
+        // Update Nav Spinners
+        const chatRunning = data.running.some(t => t.domain === 'chat');
+        const studioRunning = data.running.some(t => t.domain === 'coding');
+
+        document.getElementById('chatTabSpinner').classList.toggle('hidden', !chatRunning);
+        document.getElementById('studioTabSpinner').classList.toggle('hidden', !studioRunning);
+
+        // Update Nav Unread Dots
+        const chatUnread = data.unread.some(t => t.domain === 'chat' && t.target_id !== activeChatSessionId);
+        const studioUnread = data.unread.some(t => t.domain === 'coding' && t.target_id !== `${currentWorkspaceDir}:${activeThreadId}`);
+
+        document.getElementById('chatTabUnreadDot').classList.toggle('hidden', !chatUnread);
+        document.getElementById('studioTabUnreadDot').classList.toggle('hidden', !studioUnread);
+      } catch(e) {}
+    }
+
+    function updateGlobalIndicatorDots() {
+      syncQueueStates();
     }
 
     // ---------------- Model Tuner Modal Engine ----------------
@@ -1179,6 +1357,7 @@
         currentHistoryData = await res.json();
         activeThreadId = currentHistoryData.active_thread_id || "thread-default";
         
+        clearUnreadForCurrentStudioThread();
         renderThreadsSidebar();
         renderActiveThreadChat();
       } catch(e) {
@@ -1198,8 +1377,19 @@
         const bg = isSel ? 'bg-sky-950/60 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700';
         const count = (t.messages || []).length;
 
+        const compTargetId = `${currentWorkspaceDir}:${t.id}`;
+        const isRunning = Array.from(activeRunningTasks.values()).some(task => task.domain === 'coding' && task.target_id === compTargetId);
+        const isUnread = unreadCompletedTasks.has(compTargetId);
+
+        let badge = '';
+        if (isRunning) {
+          badge = '<span class="ml-1.5"><svg class="animate-spin h-3.5 w-3.5 text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg></span>';
+        } else if (isUnread) {
+          badge = '<span class="ml-1.5 w-2 h-2 rounded-full bg-emerald-400 unread-pulse"></span>';
+        }
+
         return '<div onclick="switchActiveThread(\'' + t.id + '\')" class="p-2 rounded border ' + bg + ' cursor-pointer truncate flex justify-between items-center">' +
-               '<span class="truncate">💬 ' + escapeHtml(t.title) + '</span>' +
+               '<span class="truncate flex items-center">💬 ' + escapeHtml(t.title) + badge + '</span>' +
                '<span class="text-[9px] text-slate-500 ml-1 font-mono">' + count + '</span></div>';
       }).join('');
     }
@@ -1213,6 +1403,7 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({repo_dir_name: currentWorkspaceDir, thread_id: threadId})
         });
+        clearUnreadForCurrentStudioThread();
         renderThreadsSidebar();
         renderActiveThreadChat();
       } catch(e) {}
@@ -1248,7 +1439,7 @@
       if (!activeThread || !activeThread.messages || activeThread.messages.length === 0) {
         chatWindow.innerHTML = '<div class="max-w-4xl mx-auto w-full space-y-3.5"><div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">' +
           '<div class="font-bold text-sky-400 mb-1">💬 Thread: ' + escapeHtml(activeThread ? activeThread.title : 'New Thread') + '</div>' +
-          'Fresh context ready. Check your target files and run your next coding task.</div></div>';
+          'Fresh context ready. Select your files and run coding tasks.</div></div>';
         return;
       }
 
@@ -1282,7 +1473,7 @@
         const rawAiOutput = encodeURIComponent(msg.ai_response || '');
         const modText = modFiles.length > 0 ? ('Modified: ' + modFiles.join(', ')) : 'Advisory Response';
         aiMsgDiv.innerHTML = '<div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">' +
-          '<span>🤖 Local AI Agent</span>' +
+          '<span>🤖 Madison Architect</span>' +
           '<div class="flex items-center gap-2">' +
           '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml(modText) + '</span>' +
           '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawAiOutput + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
@@ -1316,7 +1507,7 @@
       const val = select.value;
 
       if (val === "__NEW_BRANCH__") {
-        const newBranchName = prompt("Enter new branch name (e.g. feature/persistent-chat):");
+        const newBranchName = prompt("Enter new branch name (e.g. feature/background-queue):");
         if (!newBranchName) {
           select.value = currentBranch;
           return;
@@ -1448,214 +1639,6 @@
       }
     }
 
-    async function autoFillCommitMessage(cardId) {
-      const card = document.getElementById(cardId);
-      if (!card) return;
-      const input = card.querySelector('.commit-msg-input');
-      const modFiles = JSON.parse(card.dataset.modfiles || '[]');
-
-      if (input) input.value = "⏳ AI analyzing diff content...";
-
-      try {
-        const res = await fetch('/api/workspace/generate_commit_msg', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            repo_dir_name: currentWorkspaceDir,
-            target_files: modFiles
-          })
-        });
-        const data = await res.json();
-        if (res.ok && data.commit_msg) {
-          if (input) input.value = data.commit_msg;
-        } else {
-          if (input) input.value = "chore: update workspace files";
-        }
-      } catch(e) {
-        if (input) input.value = "chore: update workspace files";
-      }
-    }
-
-    // ---------------- Studio Chat Execution & Staging ----------------
-
-    async function executeStudioTask() {
-      const promptInput = document.getElementById('studioPromptInput');
-      const instruction = promptInput.value.trim();
-      const sendBtn = document.getElementById('studioSendBtn');
-      const chatWindow = document.getElementById('chatHistoryWindow');
-
-      if (!currentWorkspaceDir) return alert('Select an active workspace from the left pane first.');
-      if (!instruction) return alert('Please enter a task or coding instruction.');
-
-      const checkedBoxes = document.querySelectorAll('#filesCheckboxList input[type="checkbox"]:checked');
-      const selectedFiles = Array.from(checkedBoxes).map(cb => cb.value);
-
-      let wrapper = chatWindow.querySelector('.max-w-4xl');
-      if (!wrapper) {
-        wrapper = document.createElement('div');
-        wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
-        chatWindow.innerHTML = '';
-        chatWindow.appendChild(wrapper);
-      }
-
-      const rawPromptEnc = encodeURIComponent(instruction);
-      const userMsgDiv = document.createElement('div');
-      userMsgDiv.className = 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md space-y-1 relative group';
-      userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between text-[11px] mb-1">' +
-        '<span>You</span>' +
-        '<div class="flex items-center gap-2">' +
-        '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml(selectedFiles.length > 0 ? selectedFiles.join(', ') : 'No files selected') + '</span>' +
-        '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawPromptEnc + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
-        '</div></div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(instruction) + '</p>';
-      wrapper.appendChild(userMsgDiv);
-
-      promptInput.value = '';
-      sendBtn.disabled = true;
-      sendBtn.textContent = '...';
-
-      const cardId = 'action-card-' + Date.now();
-      const aiMsgDiv = document.createElement('div');
-      aiMsgDiv.id = cardId;
-      aiMsgDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-emerald-300 space-y-3 font-mono max-w-[95%] mr-auto shadow-md';
-      aiMsgDiv.innerHTML = '<span class="animate-pulse">🤖 Analyzing context & generating file changes...</span>';
-      wrapper.appendChild(aiMsgDiv);
-      chatWindow.scrollTop = chatWindow.scrollHeight;
-
-      try {
-        const res = await fetch('/api/agent/execute', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            repo_dir_name: currentWorkspaceDir,
-            target_files: selectedFiles,
-            instruction: instruction,
-            thread_id: activeThreadId,
-            persona_id: "coding"
-          })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          const modFiles = data.message.modified_files || [];
-          aiMsgDiv.dataset.modfiles = JSON.stringify(modFiles);
-          aiMsgDiv.dataset.summary = data.message.summary || instruction;
-
-          let commitReviewBox = '';
-          if (modFiles.length > 0) {
-            commitReviewBox = '<div class="review-box bg-slate-900 p-3 rounded-lg border border-slate-700 space-y-2 mt-3 text-slate-200">' +
-              '<div class="flex justify-between items-center text-xs">' +
-              '<span class="font-bold text-sky-300">📝 Staged Changes (' + modFiles.length + ' files)</span>' +
-              '<span class="text-[10px] bg-slate-800 px-2 py-0.5 rounded font-mono text-amber-300">Target: ' + currentBranch + '</span>' +
-              '</div>' +
-              '<details class="bg-slate-950 p-2 rounded border border-slate-800 text-xs">' +
-              '<summary class="cursor-pointer font-bold text-sky-400">View Git Diff</summary>' +
-              '<pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">' + escapeHtml(data.git_status.diff || 'No diff available') + '</pre>' +
-              '</details>' +
-              '<div>' +
-              '<div class="flex items-center justify-between mb-1">' +
-              '<label class="text-[11px] text-slate-400">AI Generated Commit Message:</label>' +
-              '<button type="button" onclick="autoFillCommitMessage(\'' + cardId + '\')" class="text-[10px] text-amber-300 hover:text-amber-200 bg-slate-950 border border-slate-700 px-2 py-0.5 rounded flex items-center gap-1 transition">✨ Regenerate</button>' +
-              '</div>' +
-              '<input type="text" value="' + escapeHtml(data.message.proposed_commit_msg) + '" class="commit-msg-input w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-sky-500 focus:outline-none">' +
-              '</div>' +
-              '<div class="flex justify-end gap-2 pt-1">' +
-              '<button type="button" onclick="discardProposedChanges(\'' + cardId + '\')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1 rounded text-xs text-rose-300 transition">✕ Discard</button>' +
-              '<button type="button" onclick="commitProposedChanges(\'' + cardId + '\')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1 rounded text-xs transition flex items-center gap-1">✓ Commit & Append CHANGELOG</button>' +
-              '</div></div>';
-          }
-
-          const rawAiTextEnc = encodeURIComponent(data.message.ai_response || '');
-          const modText = modFiles.length > 0 ? 'Changes Staged on Disk' : 'Advisory Response';
-          aiMsgDiv.innerHTML = '<div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">' +
-            '<span>🤖 Local AI Agent</span>' +
-            '<div class="flex items-center gap-2">' +
-            '<span class="text-[10px] text-slate-400 font-normal">' + modText + '</span>' +
-            '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawAiTextEnc + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
-            '</div></div><div class="text-slate-200 whitespace-pre-wrap mt-2">' + escapeHtml(data.message.ai_response || '') + '</div>' + commitReviewBox;
-
-          await loadWorkspaceFiles();
-          await refreshWorkspaceStatus();
-          await loadWorkspaceHistoryAndRender();
-        } else {
-          aiMsgDiv.innerHTML = '<span class="text-rose-400">❌ Error: ' + escapeHtml(data.message) + '</span>';
-        }
-      } catch(e) {
-        aiMsgDiv.innerHTML = '<span class="text-rose-400">❌ Communication Error: ' + escapeHtml(e.message) + '</span>';
-      }
-
-      sendBtn.disabled = false;
-      sendBtn.textContent = '⚡ Run';
-      chatWindow.scrollTop = chatWindow.scrollHeight;
-    }
-
-    async function commitProposedChanges(cardId) {
-      const card = document.getElementById(cardId);
-      if (!card) return;
-      const input = card.querySelector('.commit-msg-input');
-      const commitMsg = input ? input.value.trim() : "AI Update";
-      const modFiles = JSON.parse(card.dataset.modfiles || '[]');
-      const summary = card.dataset.summary || commitMsg;
-
-      try {
-        const res = await fetch('/api/workspace/commit', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            repo_dir_name: currentWorkspaceDir,
-            commit_message: commitMsg,
-            target_files: modFiles,
-            instruction_summary: summary
-          })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          const targetCard = card.querySelector('.review-box');
-          if (targetCard) {
-            targetCard.innerHTML = '<div class="flex justify-between items-center text-xs">' +
-              '<span class="text-emerald-400 font-bold">✓ Committed to \'' + data.branch + '\' & Updated CHANGELOG.md</span>' +
-              '<button type="button" onclick="pushCurrentBranch()" class="bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded text-xs font-semibold transition flex items-center gap-1">🚀 Push to GitHub</button>' +
-              '</div>';
-          }
-          loadSidebarWorkspaces();
-          await refreshWorkspaceStatus();
-        } else {
-          alert('Commit failed: ' + data.message);
-        }
-      } catch(e) {
-        alert('Communication Error: ' + e.message);
-      }
-    }
-
-    async function discardProposedChanges(cardId) {
-      if (!confirm("Are you sure you want to discard these file changes?")) return;
-      const card = document.getElementById(cardId);
-      if (!card) return;
-      const modFiles = JSON.parse(card.dataset.modfiles || '[]');
-
-      try {
-        const res = await fetch('/api/workspace/discard', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            repo_dir_name: currentWorkspaceDir,
-            target_files: modFiles
-          })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          const targetCard = card.querySelector('.review-box');
-          if (targetCard) {
-            targetCard.innerHTML = '<span class="text-rose-400 font-bold">✕ Changes discarded.</span>';
-          }
-          await loadWorkspaceFiles();
-          await refreshWorkspaceStatus();
-        } else {
-          alert('Discard failed: ' + data.message);
-        }
-      } catch(e) {
-        alert('Communication Error: ' + e.message);
-      }
-    }
-
     async function showPendingDiffModal() {
       const promptMsg = prompt("Enter commit message for currently pending changes:");
       if (!promptMsg) return;
@@ -1707,21 +1690,6 @@
       if (!currentWorkspaceDir) return alert('Select an active project first.');
       if (!confirm("Push committed changes on branch '" + currentBranch + "' to GitHub origin/" + currentBranch + "?")) return;
       
-      const chatWindow = document.getElementById('chatHistoryWindow');
-      let wrapper = chatWindow.querySelector('.max-w-4xl');
-      if (!wrapper) {
-        wrapper = document.createElement('div');
-        wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
-        chatWindow.innerHTML = '';
-        chatWindow.appendChild(wrapper);
-      }
-
-      const pushDiv = document.createElement('div');
-      pushDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs font-mono text-slate-300 max-w-[95%] mr-auto shadow-md';
-      pushDiv.innerHTML = '<span class="animate-pulse">🚀 Pushing commits to GitHub origin/' + currentBranch + '...</span>';
-      wrapper.appendChild(pushDiv);
-      chatWindow.scrollTop = chatWindow.scrollHeight;
-
       try {
         const res = await fetch('/api/workspace/push', {
           method: 'POST',
@@ -1730,34 +1698,18 @@
         });
         const data = await res.json();
         if (res.ok) {
-          pushDiv.innerHTML = '<div class="font-bold text-emerald-400">✓ Push Successful</div><p class="mt-1">' + escapeHtml(data.message) + '</p>';
+          alert('✓ Push Successful: ' + data.message);
           await refreshWorkspaceStatus();
         } else {
-          pushDiv.innerHTML = '<div class="font-bold text-rose-400">❌ Push Failed</div><p class="mt-1">' + escapeHtml(data.message) + '</p>';
+          alert('❌ Push Failed: ' + data.message);
         }
       } catch(e) {
-        pushDiv.innerHTML = '<span class="text-rose-400">Push Error: ' + escapeHtml(e.message) + '</span>';
+        alert('Push Error: ' + e.message);
       }
-      chatWindow.scrollTop = chatWindow.scrollHeight;
     }
 
     async function runSyntaxValidation() {
       if (!currentWorkspaceDir) return alert('Select an active project first.');
-      const chatWindow = document.getElementById('chatHistoryWindow');
-      let wrapper = chatWindow.querySelector('.max-w-4xl');
-      if (!wrapper) {
-        wrapper = document.createElement('div');
-        wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
-        chatWindow.innerHTML = '';
-        chatWindow.appendChild(wrapper);
-      }
-
-      const valDiv = document.createElement('div');
-      valDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs font-mono text-slate-300 max-w-[95%] mr-auto shadow-md';
-      valDiv.innerHTML = '<span class="animate-pulse">🧪 Running Python & Shell script syntax validation...</span>';
-      wrapper.appendChild(valDiv);
-      chatWindow.scrollTop = chatWindow.scrollHeight;
-
       try {
         const res = await fetch('/api/workspace/validate', {
           method: 'POST',
@@ -1765,18 +1717,13 @@
           body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
         });
         const data = await res.json();
-        const headerClass = data.passed ? 'text-emerald-400' : 'text-rose-400';
-        const headerText = data.passed ? '✓ Syntax Checks Passed' : '❌ Syntax Errors Detected';
-
-        valDiv.innerHTML = '<div class="font-bold ' + headerClass + ' border-b border-slate-800 pb-1">' + headerText + '</div>' +
-          '<pre class="mt-2 text-[11px] whitespace-pre-wrap">' + escapeHtml(data.logs) + '</pre>';
+        alert((data.passed ? '✓ Checks Passed:\n\n' : '❌ Checks Failed:\n\n') + data.logs);
       } catch(e) {
-        valDiv.innerHTML = '<span class="text-rose-400">Validator Error: ' + escapeHtml(e.message) + '</span>';
+        alert('Validator Error: ' + e.message);
       }
-      chatWindow.scrollTop = chatWindow.scrollHeight;
     }
 
-    // ---------------- View 3: Workspace Timeline Page ----------------
+    // ---------------- Timeline, Accounts & Models ----------------
 
     async function loadWorkspaceTimeline() {
       const container = document.getElementById('timelineEventsContainer');
@@ -1839,8 +1786,6 @@
       }
     }
 
-    // ---------------- View 4: GitHub Accounts & Clone Management ----------------
-
     function togglePatGuide() {
       const el = document.getElementById('patGuideContent');
       const btn = document.getElementById('toggleGuideBtn');
@@ -1894,7 +1839,6 @@
     async function submitAddAccount() {
       const label = document.getElementById('newAccountLabel').value.trim();
       const token = document.getElementById('newAccountToken').value.trim();
-
       if (!token) return alert('Please enter a valid GitHub token');
 
       try {
@@ -2001,7 +1945,7 @@
       }
     }
 
-    // ---------------- View 5: Model Manager Logic ----------------
+    // ---------------- Model Manager Logic ----------------
 
     function quickSearch(tag) {
       document.getElementById('searchInput').value = tag;
@@ -2136,7 +2080,7 @@
           row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
           row.innerHTML = '<div class="space-y-1 overflow-hidden pr-2">' +
             '<div class="font-medium text-sky-200 truncate flex items-center" title="' + escapeHtml(f.display_name) + '">' +
-            '<span class="truncate">' + escapeHtml(f.group_name) + '</span> ' + shardBadge +
+            '<span class="truncate">${f.group_name}</span> ' + shardBadge +
             '</div>' +
             '<div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">' +
             '<span>Weight: <strong class="text-slate-200">' + f.weight + '</strong></span>' +
@@ -2239,9 +2183,7 @@
         localModelSet.clear();
         loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
 
-        if (data.storage) {
-          renderStorageMetrics(data.storage);
-        }
+        if (data.storage) renderStorageMetrics(data.storage);
 
         if (!data.files || data.files.length === 0) {
           list.innerHTML = '<span class="text-slate-500">No GGUF models on disk (/storage/lmstudio/models)</span>';
@@ -2300,6 +2242,7 @@
     fetchLocalModels();
     switchView('chat');
     setInterval(updateTasks, 1000);
+    setInterval(syncQueueStates, 1000);
     setInterval(initHardwareInfo, 5000);
     setInterval(fetchLocalModels, 4000);
     setInterval(() => { if (currentWorkspaceDir) refreshWorkspaceStatus(); }, 3000);

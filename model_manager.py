@@ -1,6 +1,6 @@
 """
-LM Studio Server Entrypoint Router
-Dispatches API requests with Grounded Live Web Search, Markdown Chat Bot, Model Tuning, and Workspace Timeline.
+Madison AI Core Server Entrypoint
+Asynchronous background job engine, model grouping, temporal search grounding, and persona vault.
 """
 
 import os
@@ -47,21 +47,23 @@ from core.github_vault import (
 )
 from core.agent_engine import process_agent_task, generate_commit_msg_from_diff
 from core.personas import load_all_personas, get_persona_prompt
+from core.task_queue import TASK_QUEUE
 
-app = FastAPI(title="LM Studio Code, Chat & Model Studio")
+app = FastAPI(title="Madison AI Workstation")
 
 CHAT_SESSIONS_FILE = os.path.join(STORAGE_PATH, ".chat_sessions.json")
 HF_HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 }
 
-# ---------------- Auto-Load Model Helper ----------------
+@app.on_event("startup")
+async def startup_event():
+    TASK_QUEUE.start_worker()
+
+# ---------------- Model Resolution Helper ----------------
 
 def load_model_by_path_or_key(target_path: str = "", context_length: int = 32768, gpu_offload: str = "max") -> str:
-    """Robustly attempts to load a model using registered keys, slugs, and paths."""
     lms = get_lms_bin()
-    
-    # 1. Fetch all registered keys from `lms ls`
     registered_keys = []
     try:
         ls_res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=8)
@@ -69,25 +71,18 @@ def load_model_by_path_or_key(target_path: str = "", context_length: int = 32768
             in_llm = False
             for line in ls_res.stdout.splitlines():
                 l_str = line.strip()
-                if "LLM" in l_str:
-                    in_llm = True
-                    continue
-                if "EMBEDDING" in l_str or l_str.startswith("---"):
-                    in_llm = False
-                    continue
+                if "LLM" in l_str: in_llm = True; continue
+                if "EMBEDDING" in l_str or l_str.startswith("---"): in_llm = False; continue
                 if in_llm and l_str:
                     parts = l_str.split()
-                    if parts:
-                        registered_keys.append(parts[0])
-    except Exception:
-        pass
+                    if parts: registered_keys.append(parts[0])
+    except Exception: pass
 
     candidates = []
     if target_path:
         fname = os.path.basename(target_path)
         clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname).lower()
         f_strip = re.sub(r'[^a-z0-9]', '', clean_fname)
-
         for key in registered_keys:
             k_strip = re.sub(r'[^a-z0-9]', '', key.lower())
             if k_strip in f_strip or f_strip in k_strip:
@@ -95,64 +90,101 @@ def load_model_by_path_or_key(target_path: str = "", context_length: int = 32768
                 break
         candidates.extend([clean_fname, fname, target_path])
 
-    # Append any available registered keys as fallbacks
     candidates.extend(registered_keys)
-
-    # Deduplicate candidates while preserving order
     seen = set()
     dedup = [c for c in candidates if c and not (c in seen or seen.add(c))]
 
     for candidate in dedup:
         try:
-            cmd = [
-                lms, "load", candidate,
-                f"--gpu={gpu_offload}",
-                f"--context-length={context_length}",
-                "--ttl=3600",
-                "--yes"
-            ]
+            cmd = [lms, "load", candidate, f"--gpu={gpu_offload}", f"--context-length={context_length}", "--ttl=3600", "--yes"]
             res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=60)
             if res.returncode == 0:
                 loaded = get_loaded_models()
-                if loaded:
-                    return loaded[0]
-                return candidate
-        except Exception:
-            continue
+                return loaded[0] if loaded else candidate
+        except Exception: pass
 
     loaded_now = get_loaded_models()
     return loaded_now[0] if loaded_now else ""
 
 def ensure_active_model(model_identifier: str = "") -> str:
-    """Returns an active model identifier; if none loaded, automatically discovers and loads a local model."""
     loaded = get_loaded_models()
     if loaded and not model_identifier:
         return loaded[0]
     if model_identifier and model_identifier not in ("default", "auto"):
-        # If user explicitly requested a specific model that isn't loaded yet
         if not loaded or not any(model_identifier.lower() in l.lower() for l in loaded):
             loaded_key = load_model_by_path_or_key(model_identifier)
-            if loaded_key:
-                return loaded_key
+            if loaded_key: return loaded_key
         return model_identifier
     if loaded:
         return loaded[0]
 
-    # Find the first locally installed GGUF file
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
             for f in sorted(filenames):
                 if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
                     first_model_path = os.path.join(root, f)
                     loaded_key = load_model_by_path_or_key(first_model_path)
-                    if loaded_key:
-                        return loaded_key
+                    if loaded_key: return loaded_key
 
-    # Attempt to load any registered model from `lms ls`
-    loaded_key = load_model_by_path_or_key()
-    return loaded_key
+    return load_model_by_path_or_key()
 
-# ---------------- Pydantic Request Models ----------------
+# ---------------- Execution Callables for Queue ----------------
+
+def _execute_chat_task_sync(messages: list, model_id: str, persona_id: str, custom_system_prompt: str, enable_web_search: bool, temperature: float, max_tokens: int, top_p: float):
+    active_model = ensure_active_model(model_id)
+    if not active_model:
+        raise RuntimeError("No model could be initialized or loaded in VRAM.")
+
+    msgs = list(messages)
+    current_date_str = datetime.datetime.utcnow().strftime("%A, %B %d, %Y")
+    base_system = get_persona_prompt(persona_id, custom_system_prompt, domain="chat")
+    grounding_system = f"{base_system}\n\n[System Info: Real-world date is {current_date_str}]"
+
+    search_context = ""
+    if enable_web_search and msgs:
+        user_query = next((m.get("content", "") for m in reversed(msgs) if m.get("role") == "user"), "")
+        if user_query:
+            snippets = fetch_web_search_snippets(user_query, max_results=5)
+            search_context = f"\n\n--- LIVE SEARCH CONTEXT ({current_date_str}) ---\n{snippets}\n--- END SEARCH CONTEXT ---\n"
+            grounding_system += f"{search_context}\nIncorporate the search context above into your response. Reference sources accurately."
+
+    if msgs and msgs[0].get("role") == "system":
+        msgs[0]["content"] = f"{grounding_system}\n\n{msgs[0]['content']}"
+    else:
+        msgs.insert(0, {"role": "system", "content": grounding_system})
+
+    payload = {
+        "model": active_model,
+        "messages": msgs,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "top_p": top_p
+    }
+    resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=240)
+    if resp.status_code != 200:
+        raise RuntimeError(f"LM Studio API Error: {resp.text}")
+    
+    data = resp.json()
+    data["search_grounded"] = bool(search_context)
+    data["loaded_model"] = active_model
+    return data
+
+def _execute_agent_task_sync(repo_dir_name: str, target_files: list, instruction: str, thread_id: str, persona_id: str, custom_system_prompt: str, model_id: str):
+    effective_model = ensure_active_model(model_id)
+    if not effective_model:
+        raise RuntimeError("No model available to execute coding task.")
+    
+    return process_agent_task(
+        repo_dir_name=repo_dir_name,
+        target_files=target_files,
+        instruction=instruction,
+        thread_id=thread_id,
+        persona_id=persona_id,
+        custom_system_prompt=custom_system_prompt,
+        model_id=effective_model
+    )
+
+# ---------------- Request Models ----------------
 
 class DownloadRequest(BaseModel):
     repo_id: str
@@ -169,7 +201,8 @@ class LoadRequest(BaseModel):
     context_length: int = 32768
     ttl: int = 3600
 
-class ChatCompletionRequest(BaseModel):
+class AsyncChatSubmitRequest(BaseModel):
+    session_id: str
     messages: list[dict]
     model_identifier: str = ""
     persona_id: str = "chat"
@@ -178,6 +211,18 @@ class ChatCompletionRequest(BaseModel):
     temperature: float = 0.7
     max_tokens: int = 4096
     top_p: float = 0.95
+
+class AsyncAgentSubmitRequest(BaseModel):
+    repo_dir_name: str
+    target_files: list[str] = []
+    instruction: str
+    thread_id: str = ""
+    persona_id: str = "coding"
+    custom_system_prompt: str = ""
+    model_identifier: str = ""
+
+class MarkTaskReadRequest(BaseModel):
+    task_id: str
 
 class SaveChatSessionRequest(BaseModel):
     session_id: str
@@ -222,15 +267,6 @@ class SwitchThreadRequest(BaseModel):
     repo_dir_name: str
     thread_id: str
 
-class AgentTaskRequest(BaseModel):
-    repo_dir_name: str
-    target_files: list[str] = []
-    instruction: str
-    thread_id: str = ""
-    persona_id: str = "coding"
-    custom_system_prompt: str = ""
-    model_identifier: str = ""
-
 class GenCommitMsgRequest(BaseModel):
     repo_dir_name: str
     target_files: list[str] = []
@@ -260,13 +296,71 @@ def serve_ui():
             return f.read()
     return HTMLResponse("<h2>Error: /storage/lmstudio/web/index.html not found</h2>", status_code=404)
 
-# ---------------- Persona Templates API ----------------
+# ---------------- Background Task Queue Endpoints ----------------
+
+@app.post("/api/queue/submit_chat")
+async def api_queue_submit_chat(req: AsyncChatSubmitRequest):
+    task_id = await TASK_QUEUE.submit_task(
+        domain="chat",
+        target_id=req.session_id,
+        runner_func=_execute_chat_task_sync,
+        runner_kwargs={
+            "messages": req.messages,
+            "model_id": req.model_identifier,
+            "persona_id": req.persona_id,
+            "custom_system_prompt": req.custom_system_prompt,
+            "enable_web_search": req.enable_web_search,
+            "temperature": req.temperature,
+            "max_tokens": req.max_tokens,
+            "top_p": req.top_p
+        },
+        preferred_model=req.model_identifier
+    )
+    return {"status": "queued", "task_id": task_id, "session_id": req.session_id}
+
+@app.post("/api/queue/submit_agent")
+async def api_queue_submit_agent(req: AsyncAgentSubmitRequest):
+    t_id = req.thread_id or "thread-default"
+    task_id = await TASK_QUEUE.submit_task(
+        domain="coding",
+        target_id=f"{req.repo_dir_name}:{t_id}",
+        runner_func=_execute_agent_task_sync,
+        runner_kwargs={
+            "repo_dir_name": req.repo_dir_name,
+            "target_files": req.target_files,
+            "instruction": req.instruction,
+            "thread_id": t_id,
+            "persona_id": req.persona_id,
+            "custom_system_prompt": req.custom_system_prompt,
+            "model_id": req.model_identifier
+        },
+        preferred_model=req.model_identifier
+    )
+    return {"status": "queued", "task_id": task_id, "repo_dir_name": req.repo_dir_name, "thread_id": t_id}
+
+@app.get("/api/queue/task_status")
+def api_get_task_status(task_id: str):
+    t = TASK_QUEUE.get_task(task_id)
+    if not t:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Task not found"})
+    return t
+
+@app.get("/api/queue/states")
+def api_get_queue_states():
+    return TASK_QUEUE.get_active_and_unread_states()
+
+@app.post("/api/queue/mark_read")
+def api_mark_task_read(req: MarkTaskReadRequest):
+    TASK_QUEUE.mark_task_read(req.task_id)
+    return {"status": "success"}
+
+# ---------------- Personas API ----------------
 
 @app.get("/api/personas")
 def api_get_personas():
     return load_all_personas()
 
-# ---------------- General Chat Bot API ----------------
+# ---------------- Chat Sessions API ----------------
 
 def load_chat_sessions():
     if os.path.exists(CHAT_SESSIONS_FILE):
@@ -281,8 +375,7 @@ def save_chat_sessions(data):
     try:
         with open(CHAT_SESSIONS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-    except Exception:
-        pass
+    except Exception: pass
 
 @app.get("/api/chat/sessions")
 def api_get_chat_sessions():
@@ -292,7 +385,6 @@ def api_get_chat_sessions():
 def api_save_chat_session(req: SaveChatSessionRequest):
     data = load_chat_sessions()
     sessions = data.get("sessions", [])
-    
     found = False
     for s in sessions:
         if s["id"] == req.session_id:
@@ -326,54 +418,6 @@ def api_delete_chat_session(req: DeleteChatSessionRequest):
     save_chat_sessions(data)
     return {"status": "success"}
 
-@app.post("/api/chat/completions")
-def api_chat_completion(req: ChatCompletionRequest):
-    model_id = ensure_active_model(req.model_identifier)
-    if not model_id:
-        return JSONResponse(
-            status_code=400,
-            content={"status": "error", "message": "No models are installed on the server. Please download a model from the Models tab first."}
-        )
-
-    messages = list(req.messages)
-    current_date_str = datetime.datetime.utcnow().strftime("%A, %B %d, %Y")
-
-    base_system = get_persona_prompt(req.persona_id, req.custom_system_prompt, domain="chat")
-    grounding_system = f"{base_system}\n\n[System Info: Current real-world date is {current_date_str}]"
-
-    search_context = ""
-    if req.enable_web_search and messages:
-        user_query = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
-        if user_query:
-            snippets = fetch_web_search_snippets(user_query, max_results=5)
-            search_context = f"\n\n--- LIVE WEB SEARCH CONTEXT (Retrieved {current_date_str}) ---\n{snippets}\n--- END SEARCH CONTEXT ---\n"
-            grounding_system += f"{search_context}\nIncorporate the search context above into your response. Reference sources accurately."
-    else:
-        grounding_system += "\n[Web Search: DISABLED. Rely on static knowledge base.]"
-
-    if messages and messages[0].get("role") == "system":
-        messages[0]["content"] = f"{grounding_system}\n\n{messages[0]['content']}"
-    else:
-        messages.insert(0, {"role": "system", "content": grounding_system})
-
-    try:
-        payload = {
-            "model": model_id,
-            "messages": messages,
-            "temperature": req.temperature,
-            "max_tokens": req.max_tokens,
-            "top_p": req.top_p
-        }
-        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=180)
-        if resp.status_code != 200:
-            return JSONResponse(status_code=500, content={"status": "error", "message": f"LM Studio API Error: {resp.text}"})
-        
-        data = resp.json()
-        data["search_grounded"] = bool(search_context)
-        return data
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
-
 # ---------------- Hardware & Model Endpoints ----------------
 
 @app.get("/api/system_info")
@@ -384,16 +428,13 @@ def api_sys_info():
 def api_search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool = False):
     hf_sort = "likes" if sort_by == "likes" else ("lastModified" if sort_by == "lastModified" else "downloads")
     params = {"filter": "gguf", "sort": hf_sort, "direction": "-1", "limit": 60}
-    if q.strip(): 
-        params["search"] = q.strip()
+    if q.strip(): params["search"] = q.strip()
         
     res = []
     try:
         resp = requests.get("https://huggingface.co/api/models", params=params, headers=HF_HEADERS, timeout=12)
-        if resp.status_code == 200:
-            res = resp.json()
-    except Exception as e:
-        print(f"HF Search Error: {e}")
+        if resp.status_code == 200: res = resp.json()
+    except Exception: pass
 
     results = []
     if isinstance(res, list):
@@ -411,10 +452,8 @@ def api_search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool =
                 "is_verified": is_verified, "trust_score": calculate_trust_score(dl, likes, is_verified)
             })
 
-    if sort_by == "alphabetical": 
-        results.sort(key=lambda x: x["model_name"].lower())
-    elif sort_by == "trust": 
-        results.sort(key=lambda x: x["trust_score"], reverse=True)
+    if sort_by == "alphabetical": results.sort(key=lambda x: x["model_name"].lower())
+    elif sort_by == "trust": results.sort(key=lambda x: x["trust_score"], reverse=True)
     return results
 
 @app.get("/api/model_files")
@@ -435,8 +474,7 @@ def api_model_files(repo_id: str):
             res = requests.get(f"https://huggingface.co/api/models/{repo_id}", headers=HF_HEADERS, timeout=10).json()
             for s in res.get("siblings", []):
                 fname = s.get("rfilename", "")
-                if fname.endswith(".gguf"): 
-                    raw_files[fname] = s.get("size", 0)
+                if fname.endswith(".gguf"): raw_files[fname] = s.get("size", 0)
         except Exception: pass
 
     grouped = {}
@@ -501,10 +539,7 @@ def api_load_model(req: LoadRequest):
     if loaded_key:
         return {"status": "success", "loaded_target": loaded_key, "context_length": req.context_length, "output": f"Loaded {loaded_key} into GPU VRAM."}
     
-    return JSONResponse(
-        status_code=400,
-        content={"status": "error", "message": f"Could not load model '{os.path.basename(req.model_path)}' into GPU VRAM."}
-    )
+    return JSONResponse(status_code=400, content={"status": "error", "message": f"Could not load model '{os.path.basename(req.model_path)}' into GPU VRAM."})
 
 @app.post("/api/unload_model")
 def api_unload_model():
@@ -565,7 +600,7 @@ def api_local_models():
                     })
     return {"files": files, "storage": get_storage_usage(), "loaded_models": get_loaded_models()}
 
-# ---------------- GitHub Multi-Account Endpoints ----------------
+# ---------------- GitHub Vault Endpoints ----------------
 
 @app.get("/api/github/accounts")
 def api_list_accounts():
@@ -625,7 +660,7 @@ def api_list_branches(account_username: str, repo_full_name: str):
     except Exception: pass
     return ["main", "dev", "master"]
 
-# ---------------- Workspace, History & Timeline Endpoints ----------------
+# ---------------- Workspaces & Git Actions ----------------
 
 @app.get("/api/workspaces/active")
 def api_get_workspaces():
@@ -643,7 +678,6 @@ def api_get_history(repo_dir_name: str):
 def api_get_timeline(repo_dir_name: str):
     hist = load_workspace_history(repo_dir_name)
     events = hist.get("timeline_events", [])
-    
     w_path = os.path.join(WORKSPACES_ROOT, repo_dir_name)
     git_commits = []
     if os.path.exists(w_path):
@@ -652,13 +686,7 @@ def api_get_timeline(repo_dir_name: str):
             for line in res.stdout.splitlines():
                 parts = line.split("|", 3)
                 if len(parts) == 4:
-                    git_commits.append({
-                        "hash": parts[0],
-                        "author": parts[1],
-                        "date": parts[2],
-                        "subject": parts[3]
-                    })
-    
+                    git_commits.append({"hash": parts[0], "author": parts[1], "date": parts[2], "subject": parts[3]})
     return {"events": events, "commits": git_commits}
 
 @app.post("/api/workspace/create_thread")
@@ -690,26 +718,22 @@ def api_get_workspace_branches(repo_dir_name: str):
 @app.post("/api/workspace/switch_branch")
 def api_switch_branch(req: GithubBranchSwitchRequest):
     w_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
-    if not os.path.exists(w_path):
-        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+    if not os.path.exists(w_path): return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
     try:
         subprocess.run(["git", "-C", w_path, "checkout", req.branch], capture_output=True)
         res = subprocess.run(["git", "-C", w_path, "branch", "--show-current"], capture_output=True, text=True)
-        current = res.stdout.strip() or req.branch
-        return {"status": "success", "active_branch": current}
+        return {"status": "success", "active_branch": res.stdout.strip() or req.branch}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 @app.post("/api/workspace/create_branch")
 def api_create_branch(req: CreateBranchRequest):
     w_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
-    if not os.path.exists(w_path):
-        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+    if not os.path.exists(w_path): return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
     clean_b = req.branch_name.strip().replace(" ", "-")
     try:
         res = subprocess.run(["git", "-C", w_path, "checkout", "-b", clean_b], capture_output=True, text=True)
-        if res.returncode == 0:
-            return {"status": "success", "active_branch": clean_b}
+        if res.returncode == 0: return {"status": "success", "active_branch": clean_b}
         return JSONResponse(status_code=400, content={"status": "error", "message": res.stderr or res.stdout})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
@@ -717,19 +741,16 @@ def api_create_branch(req: CreateBranchRequest):
 @app.post("/api/workspace/generate_commit_msg")
 def api_gen_commit_msg(req: GenCommitMsgRequest):
     res = generate_commit_msg_from_diff(req.repo_dir_name, req.target_files, req.model_identifier)
-    if res.get("status") == "error":
-        return JSONResponse(status_code=500, content=res)
+    if res.get("status") == "error": return JSONResponse(status_code=500, content=res)
     return res
 
 @app.post("/api/workspace/pull")
 def api_pull_upstream(req: WorkspaceActionRequest):
     w_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
-    if not os.path.exists(w_path):
-        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+    if not os.path.exists(w_path): return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
     try:
         res = subprocess.run(["git", "-C", w_path, "pull", "origin", req.branch], capture_output=True, text=True, timeout=25)
-        if res.returncode == 0:
-            return {"status": "success", "message": res.stdout or f"Branch '{req.branch}' is up to date."}
+        if res.returncode == 0: return {"status": "success", "message": res.stdout or f"Branch '{req.branch}' is up to date."}
         return JSONResponse(status_code=500, content={"status": "error", "message": res.stderr or res.stdout})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
@@ -787,38 +808,17 @@ def api_create_file(req: CreateFileRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
-@app.post("/api/agent/execute")
-def api_agent_execute(req: AgentTaskRequest):
-    effective_model = ensure_active_model(req.model_identifier)
-    if not effective_model:
-        return JSONResponse(status_code=400, content={"status": "error", "message": "No models available to load on server."})
-
-    res = process_agent_task(
-        req.repo_dir_name, 
-        req.target_files, 
-        req.instruction, 
-        thread_id=req.thread_id, 
-        persona_id=req.persona_id, 
-        custom_system_prompt=req.custom_system_prompt, 
-        model_id=effective_model
-    )
-    if res.get("status") == "error": return JSONResponse(status_code=500, content=res)
-    return res
-
 @app.post("/api/workspace/commit")
 def api_commit(req: CommitRequest):
     w_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
-    if not os.path.exists(w_path):
-        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+    if not os.path.exists(w_path): return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
     try:
         b_res = subprocess.run(["git", "-C", w_path, "branch", "--show-current"], capture_output=True, text=True)
         active_branch = b_res.stdout.strip() or "main"
-
         append_to_changelog(w_path, active_branch, req.commit_message, req.target_files, req.instruction_summary)
 
         if req.target_files:
-            for f in req.target_files:
-                subprocess.run(["git", "-C", w_path, "add", f], capture_output=True)
+            for f in req.target_files: subprocess.run(["git", "-C", w_path, "add", f], capture_output=True)
         else:
             subprocess.run(["git", "-C", w_path, "add", "."], capture_output=True)
 
@@ -835,9 +835,7 @@ def api_commit(req: CommitRequest):
                 "modified_files": req.target_files
             })
             save_workspace_history(req.repo_dir_name, hist)
-
-            git_status = get_workspace_git_status(req.repo_dir_name)
-            return {"status": "success", "message": f"Committed to branch '{active_branch}'", "branch": active_branch, "git_status": git_status}
+            return {"status": "success", "message": f"Committed to branch '{active_branch}'", "branch": active_branch, "git_status": get_workspace_git_status(req.repo_dir_name)}
         return JSONResponse(status_code=400, content={"status": "error", "message": res.stderr or res.stdout})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
@@ -845,8 +843,7 @@ def api_commit(req: CommitRequest):
 @app.post("/api/workspace/discard")
 def api_discard(req: DiscardRequest):
     w_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
-    if not os.path.exists(w_path):
-        return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
+    if not os.path.exists(w_path): return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
     try:
         if req.target_files:
             for f in req.target_files:
@@ -855,8 +852,7 @@ def api_discard(req: DiscardRequest):
         else:
             subprocess.run(["git", "-C", w_path, "checkout", "--", "."], capture_output=True)
             subprocess.run(["git", "-C", w_path, "clean", "-fd"], capture_output=True)
-        git_status = get_workspace_git_status(req.repo_dir_name)
-        return {"status": "success", "message": "Changes discarded.", "git_status": git_status}
+        return {"status": "success", "message": "Changes discarded.", "git_status": get_workspace_git_status(req.repo_dir_name)}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
@@ -884,8 +880,7 @@ def api_push(req: WorkspaceActionRequest):
     try:
         res = subprocess.run(["git", "-C", w_path, "push", "origin", req.branch], capture_output=True, text=True, timeout=25)
         if res.returncode == 0:
-            git_status = get_workspace_git_status(req.repo_dir_name)
-            return {"status": "success", "message": f"Pushed to origin/{req.branch}!", "git_status": git_status}
+            return {"status": "success", "message": f"Pushed to origin/{req.branch}!", "git_status": get_workspace_git_status(req.repo_dir_name)}
         return JSONResponse(status_code=500, content={"status": "error", "message": res.stderr or res.stdout})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
