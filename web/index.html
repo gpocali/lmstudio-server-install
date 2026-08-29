@@ -52,12 +52,11 @@
     <div class="flex items-center gap-3">
       <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-black text-sm text-white shadow">M</div>
       <h1 class="text-lg font-bold bg-gradient-to-r from-sky-400 to-indigo-300 bg-clip-text text-transparent">Madison</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.5</span>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.6</span>
     </div>
 
     <!-- Navigation Page Buttons with Activity & Unread Indicators -->
     <div class="flex items-center gap-2">
-      <!-- Chat Tab -->
       <button onclick="switchView('chat')" id="navBtnChat" class="relative px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5">
         <span>💬 Chat</span>
         <span id="chatTabSpinner" class="hidden">
@@ -66,7 +65,6 @@
         <span id="chatTabUnreadDot" class="hidden w-2 h-2 rounded-full bg-emerald-400 unread-pulse"></span>
       </button>
 
-      <!-- Code Studio Tab -->
       <button onclick="switchView('studio')" id="navBtnStudio" class="relative px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
         <span>💻 Code Studio</span>
         <span id="studioTabSpinner" class="hidden">
@@ -75,17 +73,14 @@
         <span id="studioTabUnreadDot" class="hidden w-2 h-2 rounded-full bg-emerald-400 unread-pulse"></span>
       </button>
 
-      <!-- Timeline Tab -->
       <button onclick="switchView('history')" id="navBtnHistory" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
         📜 Timeline
       </button>
 
-      <!-- Accounts Tab -->
       <button onclick="switchView('github')" id="navBtnGithub" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
         🔑 Accounts
       </button>
 
-      <!-- Models Tab -->
       <button onclick="switchView('models')" id="navBtnModels" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
         📦 Models
       </button>
@@ -124,7 +119,6 @@
         <p class="text-slate-500">Loading chats...</p>
       </div>
       
-      <!-- Persona Selector & System Override -->
       <div class="p-3.5 border-t border-slate-800 bg-slate-950/70 shrink-0 space-y-3">
         <div class="flex items-center justify-between">
           <label class="text-[11px] font-bold text-slate-300">Live Web Search (RAG):</label>
@@ -153,10 +147,8 @@
       </div>
     </aside>
 
-    <!-- Main Chat Feed & Input -->
     <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
       
-      <!-- Chat Header -->
       <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex justify-between items-center shrink-0 z-10">
         <div>
           <h2 class="text-sm font-bold text-slate-100" id="currentChatSessionTitle">General Conversation</h2>
@@ -172,7 +164,6 @@
         </div>
       </div>
 
-      <!-- Messages Window -->
       <div id="generalChatMessagesWindow" class="flex-1 overflow-y-auto p-4 md:p-6">
         <div class="max-w-4xl mx-auto w-full space-y-3.5">
           <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
@@ -182,7 +173,6 @@
         </div>
       </div>
 
-      <!-- Chat Input Bar with Direct Engine & Context Controls -->
       <div class="p-4 md:px-6 md:pb-6 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
           
@@ -228,7 +218,6 @@
     
     <aside id="studioSidebar" class="w-80 min-w-[200px] max-w-[500px] bg-slate-950 flex flex-col shrink-0 overflow-hidden">
       
-      <!-- Section 1: Workspaces -->
       <div id="sectionWorkspaces" class="flex flex-col h-48 min-h-[100px] overflow-hidden">
         <div class="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
           <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Workspaces</h2>
@@ -241,7 +230,6 @@
 
       <div id="resizerV1" class="gutter-v bg-slate-800 shrink-0 hidden"></div>
 
-      <!-- Section 2: Multi-Chat Threads -->
       <div id="sectionThreads" class="flex-1 flex flex-col min-h-[100px] overflow-hidden hidden">
         <div class="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
           <h3 class="text-xs font-bold text-slate-300">Studio Threads</h3>
@@ -256,7 +244,6 @@
 
       <div id="resizerV2" class="gutter-v bg-slate-800 shrink-0 hidden"></div>
 
-      <!-- Section 3: Context Files -->
       <div id="sectionFiles" class="flex flex-col h-48 min-h-[100px] bg-slate-950 overflow-hidden hidden">
         <div class="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
           <h3 class="text-xs font-bold text-slate-300">Context Files</h3>
@@ -273,7 +260,6 @@
 
     <div id="resizerH" class="gutter-h bg-slate-800 shrink-0"></div>
 
-    <!-- Main Code Studio View -->
     <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
       
       <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex flex-wrap justify-between items-center gap-3 shrink-0 z-10">
@@ -319,7 +305,6 @@
         </div>
       </div>
 
-      <!-- Studio Chat History Window -->
       <div id="chatHistoryWindow" class="flex-1 overflow-y-auto p-4 md:p-6">
         <div class="max-w-4xl mx-auto w-full space-y-3.5">
           <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
@@ -329,7 +314,6 @@
         </div>
       </div>
 
-      <!-- Studio Input Bar with Direct Engine & Context Controls -->
       <div class="p-4 md:px-6 md:pb-6 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
           
@@ -380,7 +364,6 @@
         <p class="text-xs text-slate-400">Summaries generated by the AI model along with Git commit logs.</p>
       </div>
 
-      <!-- Timeline Project Selector Dropdown -->
       <div class="flex flex-wrap items-center gap-2">
         <label for="timelineProjectSelect" class="text-xs text-slate-400 font-medium">Project:</label>
         <select id="timelineProjectSelect" onchange="onTimelineProjectChanged()" class="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-xs text-sky-300 font-mono focus:border-sky-500 focus:outline-none">
@@ -615,6 +598,7 @@
   <script>
     var currentActiveView = "chat";
     var lmsRegisteredKeys = [];
+    var localModelSet = new Set();
     var activeTasksMap = {};
     var loadedModelsList = [];
     var currentWorkspaceDir = "";
@@ -1242,14 +1226,12 @@
         const res = await fetch('/api/queue/states');
         const data = await res.json();
 
-        // Update Nav Spinners
         const chatRunning = data.running.some(t => t.domain === 'chat');
         const studioRunning = data.running.some(t => t.domain === 'coding');
 
         document.getElementById('chatTabSpinner').classList.toggle('hidden', !chatRunning);
         document.getElementById('studioTabSpinner').classList.toggle('hidden', !studioRunning);
 
-        // Update Nav Unread Dots
         const chatUnread = data.unread.some(t => t.domain === 'chat' && t.target_id !== activeChatSessionId);
         const studioUnread = data.unread.some(t => t.domain === 'coding' && t.target_id !== `${currentWorkspaceDir}:${activeThreadId}`);
 
@@ -2227,7 +2209,7 @@
           container.appendChild(card);
         });
       } catch(err) {
-        container.innerHTML = '<p class="text-rose-400 p-2">Error retrieving models from Hugging Face.</p>';
+        container.innerHTML = '<p class="text-rose-400 p-2">Error retrieving models from Hugging Face: ' + escapeHtml(err.message) + '</p>';
       }
     }
 
@@ -2250,6 +2232,10 @@
       
       try {
         const res = await fetch('/api/model_files?repo_id=' + encodeURIComponent(repoId));
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || `Server returned ${res.status}`);
+        }
         const data = await res.json();
         fileContainer.innerHTML = '';
 
@@ -2314,7 +2300,7 @@
         });
         fileContainer.appendChild(table);
       } catch(e) {
-        fileContainer.innerHTML = '<span class="text-xs text-rose-400">Error inspecting files.</span>';
+        fileContainer.innerHTML = '<span class="text-xs text-rose-400">Error inspecting files: ' + escapeHtml(e.message) + '</span>';
       }
     }
 
@@ -2394,6 +2380,9 @@
           list.innerHTML = '<span class="text-slate-500">No GGUF models on disk (/storage/lmstudio/models)</span>';
           return;
         }
+
+        localModelSet.clear();
+        data.files.forEach(m => localModelSet.add(m.filename));
 
         list.innerHTML = data.files.map(m => {
           const fClean = m.filename.replace('.gguf', '').toLowerCase();

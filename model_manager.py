@@ -89,7 +89,6 @@ def ensure_models_indexed():
                     if not os.path.exists(link_dest):
                         try: os.symlink(src_file, link_dest)
                         except Exception: pass
-                # Attempt silent background registry import
                 try:
                     subprocess.run([lms, "import", "--yes", "--symbolic-link", src_file], env=LMS_ENV, capture_output=True, timeout=5)
                 except Exception: pass
@@ -146,7 +145,7 @@ def list_registered_lms_keys() -> list[dict]:
                                 })
     except Exception: pass
 
-    # 3. If LMS hasn't populated yet, scan disk as fallback
+    # 3. Disk fallback
     if not models and os.path.exists(MODELS_PATH):
         for root, _, files in os.walk(MODELS_PATH, followlinks=True):
             for f in files:
@@ -168,7 +167,6 @@ def execute_lms_load(target_key: str, context_length: int = 32768, gpu_offload: 
     if not target_key or target_key in ("auto", "default"):
         return True, "Auto mode active"
 
-    # Context fallback ladder
     ctx_ladder = [context_length]
     for fallback in [16384, 8192, 4096]:
         if fallback < context_length:
@@ -580,23 +578,34 @@ def api_search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool =
 @app.get("/api/model_files")
 def api_model_files(repo_id: str):
     raw_files = {}
+
+    # Method 1: Hugging Face tree API
     try:
         resp = requests.get(f"https://huggingface.co/api/models/{repo_id}/tree/main?recursive=true", headers=HF_HEADERS, timeout=10)
         if resp.status_code == 200:
-            for item in resp.json():
-                path = item.get("path", "")
-                if path.endswith(".gguf"):
-                    sz = item.get("size", 0) or (item.get("lfs", {}).get("size", 0) if isinstance(item.get("lfs"), dict) else 0)
-                    raw_files[path] = sz
+            data = resp.json()
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        path = item.get("path", "")
+                        if path.endswith(".gguf"):
+                            sz = item.get("size", 0) or (item.get("lfs", {}).get("size", 0) if isinstance(item.get("lfs"), dict) else 0)
+                            raw_files[path] = sz
     except Exception: pass
 
+    # Method 2: Hugging Face model details API fallback
     if not raw_files:
         try:
-            res = requests.get(f"https://huggingface.co/api/models/{repo_id}", headers=HF_HEADERS, timeout=10).json()
-            for s in res.get("siblings", []):
-                fname = s.get("rfilename", "")
-                if fname.endswith(".gguf"): 
-                    raw_files[fname] = s.get("size", 0)
+            resp = requests.get(f"https://huggingface.co/api/models/{repo_id}", headers=HF_HEADERS, timeout=10)
+            if resp.status_code == 200:
+                res = resp.json()
+                siblings = res.get("siblings")
+                if isinstance(siblings, list):
+                    for s in siblings:
+                        if isinstance(s, dict):
+                            fname = s.get("rfilename", "")
+                            if fname.endswith(".gguf"):
+                                raw_files[fname] = s.get("size", 0)
         except Exception: pass
 
     grouped = {}
@@ -611,8 +620,8 @@ def api_model_files(repo_id: str):
     for g in grouped.values(): g["paths"].sort()
 
     hw = get_system_hardware_info()
-    vram_total = hw["gpu"]["total_vram_gb"]
-    ram_total = hw["system_ram"]["total_gb"]
+    vram_total = hw.get("gpu", {}).get("total_vram_gb", 0)
+    ram_total = hw.get("system_ram", {}).get("total_gb", 16)
 
     local_files = set()
     if os.path.exists(MODELS_PATH):
