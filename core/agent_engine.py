@@ -1,3 +1,8 @@
+"""
+Madison Agent Engine
+Handles autonomous multi-file generation, Git diff analysis, and commit message synthesis.
+"""
+
 import os
 import re
 import datetime
@@ -10,6 +15,7 @@ from core.github_vault import (
     get_workspace_git_status
 )
 from core.hardware import get_loaded_models
+from core.personas import get_persona_prompt
 
 def get_active_model_for_agent():
     models = get_loaded_models()
@@ -17,8 +23,7 @@ def get_active_model_for_agent():
         return models[0]
     return "default"
 
-def generate_commit_msg_from_diff(repo_dir_name: str, target_files: list[str] = None, model_id: str = "") -> dict:
-    """Analyzes raw git diff content on disk to generate a conventional commit message."""
+def generate_commit_msg_from_diff(repo_dir_name: str, target_files: list = None, model_id: str = "") -> dict:
     workspace_path = os.path.join(WORKSPACES_ROOT, repo_dir_name)
     if not os.path.exists(workspace_path):
         return {"status": "error", "message": "Workspace not found"}
@@ -71,11 +76,21 @@ def generate_commit_msg_from_diff(repo_dir_name: str, target_files: list[str] = 
 
     return {"status": "success", "commit_msg": "chore: update workspace files", "summary": "Updated files on disk"}
 
-def process_agent_task(repo_dir_name: str, target_files: list[str], instruction: str, thread_id: str = "", model_id: str = ""):
+def process_agent_task(
+    repo_dir_name: str, 
+    target_files: list = None, 
+    instruction: str = "", 
+    thread_id: str = "", 
+    persona_id: str = "coding", 
+    custom_system_prompt: str = "", 
+    model_id: str = "",
+    **kwargs
+):
     workspace_path = os.path.join(WORKSPACES_ROOT, repo_dir_name)
     if not os.path.exists(workspace_path):
         return {"status": "error", "message": "Workspace not found"}
 
+    target_files = target_files or []
     context_blocks = []
     for rel_file in target_files:
         full_p = os.path.join(workspace_path, rel_file)
@@ -88,16 +103,7 @@ def process_agent_task(repo_dir_name: str, target_files: list[str], instruction:
 
     context_str = "\n\n".join(context_blocks) if context_blocks else "No existing files selected as context."
 
-    system_prompt = (
-        "You are an expert AI software architect.\n"
-        "Output complete updated or newly created files.\n"
-        "Format EACH file output strictly as:\n"
-        "### File: <relative_path>\n"
-        "```\n"
-        "<full file content without truncation>\n"
-        "```"
-    )
-
+    system_prompt = get_persona_prompt(persona_id, custom_system_prompt, domain="coding")
     user_prompt = (
         f"Active Workspace Context Files:\n\n{context_str}\n\n"
         f"Task Instruction:\n{instruction}\n\n"
@@ -117,7 +123,7 @@ def process_agent_task(repo_dir_name: str, target_files: list[str], instruction:
             "max_tokens": 16384
         }
         
-        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=150)
+        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=180)
         if resp.status_code != 200:
             return {"status": "error", "message": f"LM Studio API Error: {resp.text}"}
 
