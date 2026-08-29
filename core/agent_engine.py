@@ -62,7 +62,7 @@ def generate_commit_msg_from_diff(repo_dir_name: str, target_files: list = None,
             "temperature": 0.1,
             "max_tokens": 160
         }
-        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=25)
+        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=30)
         if resp.status_code == 200:
             out = resp.json()["choices"][0]["message"]["content"].strip()
             c_match = re.search(r'COMMIT_MSG:\s*(.+)', out)
@@ -91,6 +91,24 @@ def process_agent_task(
         return {"status": "error", "message": "Workspace not found"}
 
     target_files = target_files or []
+
+    # Auto-Reference Engine: If no files selected, scan instruction for file mentions
+    if not target_files and instruction:
+        all_disk_files = []
+        for root, _, files in os.walk(workspace_path):
+            if ".git" in root or "__pycache__" in root: continue
+            for f in files:
+                if f == ".lmstudio_history.json": continue
+                rel_p = os.path.relpath(os.path.join(root, f), workspace_path)
+                all_disk_files.append(rel_p)
+
+        for df in all_disk_files:
+            # Check if filename or base name appears in instruction
+            base_name = os.path.basename(df)
+            if df.lower() in instruction.lower() or base_name.lower() in instruction.lower():
+                if df not in target_files:
+                    target_files.append(df)
+
     context_blocks = []
     for rel_file in target_files:
         full_p = os.path.join(workspace_path, rel_file)
@@ -98,6 +116,9 @@ def process_agent_task(
             try:
                 with open(full_p, "r", encoding="utf-8") as f:
                     content = f.read()
+                # Truncate extremely large files to prevent token overflow (~12,000 chars per file)
+                if len(content) > 12000:
+                    content = content[:12000] + "\n... [File truncated for context limit] ..."
                 context_blocks.append(f"### File: {rel_file}\n```\n{content}\n```")
             except Exception: pass
 
@@ -107,7 +128,7 @@ def process_agent_task(
     user_prompt = (
         f"Active Workspace Context Files:\n\n{context_str}\n\n"
         f"Task Instruction:\n{instruction}\n\n"
-        "Provide the complete implementation:"
+        "Provide the complete implementation following the file modification format:"
     )
 
     selected_model = model_id or get_active_model_for_agent()
@@ -123,9 +144,10 @@ def process_agent_task(
             "max_tokens": 16384
         }
         
-        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=180)
+        # Extended timeout to 300 seconds for large file generation
+        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=300)
         if resp.status_code != 200:
-            return {"status": "error", "message": f"LM Studio API Error: {resp.text}"}
+            return {"status": "error", "message": f"LM Studio API Error ({resp.status_code}): {resp.text[:300]}"}
 
         ai_response = resp.json()["choices"][0]["message"]["content"]
         
