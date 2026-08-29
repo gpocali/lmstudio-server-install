@@ -46,7 +46,12 @@ from core.github_vault import (
     save_workspace_history,
     append_to_changelog
 )
-from core.agent_engine import process_agent_task, generate_commit_msg_from_diff
+from core.agent_engine import (
+    process_agent_task,
+    generate_commit_msg_from_diff,
+    generate_agent_plan,
+    execute_approved_plan
+)
 from core.personas import load_all_personas, get_persona_prompt
 from core.task_queue import TASK_QUEUE
 
@@ -184,7 +189,7 @@ def _execute_chat_task_sync(messages: list, model_id: str, context_length: int, 
     data["loaded_model"] = active_model
     return data
 
-def _execute_agent_task_sync(repo_dir_name: str, target_files: list, instruction: str, thread_id: str, persona_id: str, custom_system_prompt: str, model_id: str, context_length: int):
+def _execute_agent_task_sync(repo_dir_name: str, target_files: list, instruction: str, change_name: str = "", thread_id: str = "", persona_id: str = "coding", custom_system_prompt: str = "", model_id: str = "", context_length: int = 32768):
     effective_model = ensure_active_model(model_id, context_length=context_length)
     if not effective_model:
         raise RuntimeError("No model available to execute coding task.")
@@ -193,6 +198,7 @@ def _execute_agent_task_sync(repo_dir_name: str, target_files: list, instruction
         repo_dir_name=repo_dir_name,
         target_files=target_files,
         instruction=instruction,
+        change_name=change_name,
         thread_id=thread_id,
         persona_id=persona_id,
         custom_system_prompt=custom_system_prompt,
@@ -232,6 +238,7 @@ class AsyncAgentSubmitRequest(BaseModel):
     repo_dir_name: str
     target_files: list[str] = []
     instruction: str
+    change_name: str = ""
     thread_id: str = ""
     persona_id: str = "coding"
     custom_system_prompt: str = ""
@@ -380,6 +387,7 @@ async def api_queue_submit_agent(req: AsyncAgentSubmitRequest):
             "repo_dir_name": req.repo_dir_name,
             "target_files": req.target_files,
             "instruction": req.instruction,
+            "change_name": req.change_name,
             "thread_id": t_id,
             "persona_id": req.persona_id,
             "custom_system_prompt": req.custom_system_prompt,
@@ -945,8 +953,9 @@ class AgentPlanRequest(BaseModel):
 
 class AgentExecutePlanRequest(BaseModel):
     repo_dir_name: str
-    target_files: list[str]
+    target_files: list[str] = []
     instruction: str
+    change_name: str = ""
     thread_id: str = ""
     persona_id: str = "coding"
     custom_system_prompt: str = ""
@@ -955,28 +964,35 @@ class AgentExecutePlanRequest(BaseModel):
 
 @app.post("/api/agent/plan")
 def api_agent_plan(req: AgentPlanRequest):
-    effective_model = ensure_active_model(req.model_identifier)
-    res = generate_agent_plan(req.repo_dir_name, req.instruction, model_id=effective_model)
-    if res.get("status") == "error":
-        return JSONResponse(status_code=500, content=res)
-    return res
+    try:
+        effective_model = ensure_active_model(req.model_identifier)
+        res = generate_agent_plan(req.repo_dir_name, req.instruction, model_id=effective_model)
+        if res.get("status") == "error":
+            return JSONResponse(status_code=500, content=res)
+        return res
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"Plan server error: {str(e)}"})
 
 @app.post("/api/agent/execute_plan")
 def api_agent_execute_plan(req: AgentExecutePlanRequest):
-    effective_model = ensure_active_model(req.model_identifier)
-    res = execute_approved_plan(
-        repo_dir_name=req.repo_dir_name,
-        target_files=req.target_files,
-        instruction=req.instruction,
-        thread_id=req.thread_id,
-        persona_id=req.persona_id,
-        custom_system_prompt=req.custom_system_prompt,
-        model_id=effective_model,
-        context_length=req.context_length
-    )
-    if res.get("status") == "error":
-        return JSONResponse(status_code=500, content=res)
-    return res
+    try:
+        effective_model = ensure_active_model(req.model_identifier, context_length=req.context_length)
+        res = execute_approved_plan(
+            repo_dir_name=req.repo_dir_name,
+            target_files=req.target_files,
+            instruction=req.instruction,
+            change_name=req.change_name,
+            thread_id=req.thread_id,
+            persona_id=req.persona_id,
+            custom_system_prompt=req.custom_system_prompt,
+            model_id=effective_model,
+            context_length=req.context_length
+        )
+        if res.get("status") == "error":
+            return JSONResponse(status_code=500, content=res)
+        return res
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"Execution server error: {str(e)}"})
 
 if __name__ == "__main__":
     uvicorn.run("model_manager:app", host="0.0.0.0", port=8080, log_level="info")

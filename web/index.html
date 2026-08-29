@@ -1169,37 +1169,89 @@
             model_identifier: modelIdentifier === 'auto' ? '' : modelIdentifier
           })
         });
-        const data = await res.json();
-        if (res.ok) {
-          const filesJsonEnc = encodeURIComponent(JSON.stringify(data.target_files || []));
+
+        let data;
+        try {
+          data = await res.json();
+        } catch (err) {
+          throw new Error(`Server returned HTTP ${res.status}: ${res.statusText || 'Invalid non-JSON response'}`);
+        }
+
+        if (res.ok && data.status !== 'error') {
+          const targetFiles = data.target_files || [];
+          const changeName = data.change_name || instruction.split('\n')[0].slice(0, 50);
+          planDiv.dataset.targetFiles = JSON.stringify(targetFiles);
           const instructionEnc = encodeURIComponent(instruction);
 
+          const filesChips = targetFiles.length > 0
+            ? targetFiles.map((f, idx) => `
+                <span class="inline-flex items-center gap-1 bg-slate-950 border border-slate-700 px-2 py-0.5 rounded text-[11px] text-emerald-300 font-mono" id="fileChip-${planCardId}-${idx}">
+                  <span>${escapeHtml(f)}</span>
+                  <button type="button" onclick="removePlanFile('${planCardId}', ${idx})" class="text-slate-400 hover:text-rose-400 text-xs ml-0.5 leading-none" title="Remove file">×</button>
+                </span>
+              `).join('')
+            : '<span class="text-slate-500 italic text-[11px]">No specific existing files identified. New files will be created as needed.</span>';
+
           planDiv.innerHTML = `
-            <div class="font-bold text-sky-400 border-b border-slate-800 pb-1.5 flex justify-between items-center">
-              <span>📋 Proposed Implementation Plan</span>
-              <span class="text-[10px] text-slate-400 font-normal">Step 1 of 2</span>
+            <div class="font-bold text-sky-400 border-b border-slate-800 pb-2 flex justify-between items-center">
+              <span class="flex items-center gap-1.5">
+                <span>📋</span>
+                <span>Proposed Changes & Implementation Plan</span>
+              </span>
+              <span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800/80 px-2 py-0.5 rounded font-mono">Step 1: Review & Confirm</span>
             </div>
-            <div class="text-slate-300 space-y-1 mt-1">
-              <div><strong>Target Files:</strong> <code class="text-emerald-400">${escapeHtml((data.target_files || []).join(', ') || 'Auto-detect')}</code></div>
-              <div class="whitespace-pre-wrap mt-2 bg-slate-900 p-3 rounded border border-slate-800 text-[11px] text-slate-200">${escapeHtml(data.plan_summary)}</div>
+
+            <div class="space-y-3 mt-2 text-slate-200">
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">🏷️ Proposed Change Name / Title:</label>
+                <input type="text" id="planChangeName-${planCardId}" value="${escapeHtml(changeName)}" placeholder="e.g. feat(auth): add token refresh" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-sky-300 font-mono focus:border-sky-500 focus:outline-none">
+              </div>
+
+              <div>
+                <div class="flex justify-between items-center mb-1">
+                  <label class="block text-[11px] font-semibold text-slate-300">📁 Required Target Files (${targetFiles.length}):</label>
+                  <span class="text-[10px] text-emerald-400">✓ Auto-determined</span>
+                </div>
+                <div id="planFilesList-${planCardId}" class="flex flex-wrap gap-1.5 p-2 bg-slate-900 rounded border border-slate-800">
+                  ${filesChips}
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">📝 Implementation Plan:</label>
+                <div class="whitespace-pre-wrap bg-slate-900 p-3 rounded border border-slate-800 text-[11px] text-slate-200 leading-relaxed font-mono">${escapeHtml(data.plan_summary || 'Execute proposed modifications.')}</div>
+              </div>
             </div>
-            <div class="space-y-2 mt-3 pt-2 border-t border-slate-800">
+
+            <div class="space-y-2 mt-3 pt-3 border-t border-slate-800">
               <label class="block text-[11px] text-slate-400">Provide Feedback / Request Revisions (Optional):</label>
-              <input type="text" id="planFeedback-${planCardId}" placeholder="e.g. Make sure to also update unit tests..." class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 focus:border-sky-500 focus:outline-none">
+              <input type="text" id="planFeedback-${planCardId}" placeholder="e.g. Also make sure to update related unit tests..." class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 focus:border-sky-500 focus:outline-none">
               <div class="flex justify-end gap-2 pt-1">
-                <button onclick="revisePlan('${targetRepoDir}', '${planCardId}', decodeURIComponent('${instructionEnc}'))" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1 rounded text-xs text-amber-300 transition">🔄 Revise Plan</button>
-                <button onclick="approveAndExecutePlan('${targetRepoDir}', '${planCardId}', decodeURIComponent('${instructionEnc}'), decodeURIComponent('${filesJsonEnc}'))" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1 rounded text-xs transition flex items-center gap-1">✓ Approve & Execute Plan</button>
+                <button type="button" onclick="revisePlan('${targetRepoDir}', '${planCardId}', decodeURIComponent('${instructionEnc}'))" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded text-xs text-amber-300 transition flex items-center gap-1">🔄 Revise Plan</button>
+                <button type="button" onclick="approveAndExecutePlan('${targetRepoDir}', '${planCardId}', decodeURIComponent('${instructionEnc}'))" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1.5 rounded text-xs transition flex items-center gap-1.5 shadow">✓ Confirm & Implement Changes</button>
               </div>
             </div>`;
         } else {
           planDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
-          planDiv.innerHTML = '❌ Plan Generation Error: ' + escapeHtml(data.message);
+          planDiv.innerHTML = '❌ Plan Generation Error: ' + escapeHtml(data.message || 'Unknown error occurred');
         }
       } catch(e) {
         planDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
-        planDiv.innerHTML = '❌ Communication Error: ' + e.message;
+        planDiv.innerHTML = '❌ Communication Error: ' + escapeHtml(e.message);
       }
       chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    function removePlanFile(cardId, fileIdx) {
+      const card = document.getElementById(cardId);
+      if (!card) return;
+      const chip = document.getElementById(`fileChip-${cardId}-${fileIdx}`);
+      if (chip) chip.remove();
+      try {
+        let files = JSON.parse(card.dataset.targetFiles || '[]');
+        files.splice(fileIdx, 1);
+        card.dataset.targetFiles = JSON.stringify(files);
+      } catch(e) {}
     }
 
     async function revisePlan(repoDir, cardId, originalInstruction) {
@@ -1217,16 +1269,25 @@
       if (card) card.remove();
     }
 
-    async function approveAndExecutePlan(repoDir, cardId, instruction, filesJsonEncoded) {
-      const targetFiles = JSON.parse(decodeURIComponent(filesJsonEncoded));
+    async function approveAndExecutePlan(repoDir, cardId, instruction) {
+      const card = document.getElementById(cardId);
+      if (!card) return;
+
+      const changeNameInput = document.getElementById('planChangeName-' + cardId);
+      const changeName = changeNameInput ? changeNameInput.value.trim() : "";
+      
+      let targetFiles = [];
+      try {
+        targetFiles = JSON.parse(card.dataset.targetFiles || '[]');
+      } catch(e) {
+        targetFiles = [];
+      }
+
       const modelIdentifier = document.getElementById('studioModelSelector').value;
       const ctxLength = parseInt(document.getElementById('studioContextSelector').value) || 32768;
-      const card = document.getElementById(cardId);
 
-      if (card) {
-        card.className = 'bg-slate-950 p-4 rounded-xl border border-emerald-800/80 text-xs text-emerald-300 space-y-3 font-mono max-w-[95%] mr-auto shadow-md';
-        card.innerHTML = '<div class="flex items-center gap-2 font-bold text-emerald-400 animate-pulse"><svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg><span>Executing approved plan and modifying files on disk...</span></div>';
-      }
+      card.className = 'bg-slate-950 p-4 rounded-xl border border-emerald-800/80 text-xs text-emerald-300 space-y-3 font-mono max-w-[95%] mr-auto shadow-md';
+      card.innerHTML = '<div class="flex items-center gap-2 font-bold text-emerald-400 animate-pulse"><svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg><span>⚙️ Implementing changes & modifying files on disk...</span></div>';
 
       try {
         const res = await fetch('/api/agent/execute_plan', {
@@ -1236,17 +1297,27 @@
             repo_dir_name: repoDir,
             target_files: targetFiles,
             instruction: instruction,
+            change_name: changeName,
             thread_id: activeThreadId,
             persona_id: "coding",
             model_identifier: modelIdentifier === 'auto' ? '' : modelIdentifier,
             context_length: ctxLength
           })
         });
-        const data = await res.json();
-        if (res.ok) {
+
+        let data;
+        try {
+          data = await res.json();
+        } catch(err) {
+          throw new Error(`Server returned HTTP ${res.status}: ${res.statusText || 'Invalid non-JSON response'}`);
+        }
+
+        if (res.ok && data.status !== 'error') {
           const modFiles = data.message.modified_files || [];
           card.dataset.modfiles = JSON.stringify(modFiles);
-          card.dataset.summary = data.message.summary || instruction;
+          card.dataset.summary = changeName || data.message.summary || instruction;
+
+          const proposedCommitMsg = data.message.proposed_commit_msg || changeName || (modFiles.length > 0 ? `Update ${modFiles.join(', ')}` : 'Update workspace');
 
           let commitReviewBox = `
             <div class="review-box bg-slate-900 p-3 rounded-lg border border-slate-700 space-y-2 mt-3 text-slate-200">
@@ -1254,30 +1325,87 @@
                 <span class="font-bold text-emerald-300">✓ Plan Executed Successfully (${modFiles.length} files modified)</span>
                 <span class="text-[10px] bg-slate-800 px-2 py-0.5 rounded font-mono text-amber-300">Branch: ${currentBranch}</span>
               </div>
+              ${modFiles.length > 0 && data.git_status && data.git_status.diff ? `
               <details class="bg-slate-950 p-2 rounded border border-slate-800 text-xs">
                 <summary class="cursor-pointer font-bold text-sky-400">View Git Diff</summary>
-                <pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">${escapeHtml(data.git_status.diff || 'No diff available')}</pre>
-              </details>
+                <pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre font-mono">${escapeHtml(data.git_status.diff)}</pre>
+              </details>` : ''}
               <div>
                 <label class="block text-[11px] text-slate-400 mb-1">Proposed Commit Message:</label>
-                <input type="text" value="${escapeHtml(data.message.proposed_commit_msg)}" class="commit-msg-input w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-sky-500 focus:outline-none">
+                <input type="text" value="${escapeHtml(proposedCommitMsg)}" class="commit-msg-input w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-sky-500 focus:outline-none">
               </div>
               <div class="flex justify-end gap-2 pt-1">
-                <button type="button" onclick="commitProposedChanges('${cardId}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1 rounded text-xs transition flex items-center gap-1">✓ Commit Changes</button>
+                <button type="button" onclick="commitProposedChanges('${cardId}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1.5 rounded text-xs transition flex items-center gap-1 shadow">✓ Commit Changes</button>
               </div>
             </div>`;
 
-          card.innerHTML = '<div class="font-bold text-emerald-400 border-b border-slate-800 pb-1.5"><span>✓ Plan Executed</span></div><div class="text-slate-200 whitespace-pre-wrap mt-2">' + escapeHtml(data.message.ai_response || '') + '</div>' + commitReviewBox;
+          card.innerHTML = '<div class="font-bold text-emerald-400 border-b border-slate-800 pb-1.5 flex justify-between items-center"><span>✓ Changes Implemented</span><span class="text-[10px] text-slate-400 font-mono">' + escapeHtml(changeName) + '</span></div><div class="text-slate-200 whitespace-pre-wrap mt-2 font-mono text-xs">' + escapeHtml(data.message.ai_response || '') + '</div>' + commitReviewBox;
           await loadWorkspaceFiles();
           await refreshWorkspaceStatus();
           await loadWorkspaceHistoryAndRender();
         } else {
           card.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
-          card.innerHTML = '❌ Execution Error: ' + escapeHtml(data.message);
+          card.innerHTML = '❌ Execution Error: ' + escapeHtml(data.message || 'Unknown execution error');
         }
       } catch(e) {
         card.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
-        card.innerHTML = '❌ Communication Error: ' + e.message;
+        card.innerHTML = '❌ Communication Error: ' + escapeHtml(e.message);
+      }
+    }
+
+    async function commitProposedChanges(cardId) {
+      const card = document.getElementById(cardId);
+      if (!card) return;
+
+      const commitMsgInput = card.querySelector('.commit-msg-input');
+      const commitMsg = commitMsgInput ? commitMsgInput.value.trim() : "";
+      if (!commitMsg) return alert('Please enter a commit message.');
+
+      let targetFiles = [];
+      try {
+        targetFiles = JSON.parse(card.dataset.modfiles || '[]');
+      } catch(e) {
+        targetFiles = [];
+      }
+      const summary = card.dataset.summary || commitMsg;
+
+      try {
+        const res = await fetch('/api/workspace/commit', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            repo_dir_name: currentWorkspaceDir,
+            commit_message: commitMsg,
+            target_files: targetFiles,
+            instruction_summary: summary
+          })
+        });
+
+        let data;
+        try {
+          data = await res.json();
+        } catch(err) {
+          throw new Error(`Server returned HTTP ${res.status}: ${res.statusText || 'Invalid response'}`);
+        }
+
+        if (res.ok && data.status !== 'error') {
+          const reviewBox = card.querySelector('.review-box');
+          if (reviewBox) {
+            reviewBox.innerHTML = `
+              <div class="flex items-center justify-between p-2.5 bg-emerald-950/60 border border-emerald-800/80 rounded text-emerald-300 text-xs">
+                <span class="font-bold">✓ Committed to branch '${escapeHtml(data.branch || currentBranch)}'</span>
+                <span class="text-[10px] text-slate-400 font-mono">${escapeHtml(commitMsg)}</span>
+              </div>`;
+          }
+          loadSidebarWorkspaces();
+          await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
+          await loadWorkspaceHistoryAndRender();
+        } else {
+          alert('Commit failed: ' + (data.message || 'Unknown error'));
+        }
+      } catch(e) {
+        alert('Commit Error: ' + e.message);
       }
     }
 
@@ -1774,10 +1902,14 @@
         userMsgDiv.className = 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md space-y-1 relative group';
         
         const rawUserPrompt = encodeURIComponent(msg.instruction || '');
+        const targetSummary = (msg.target_files && msg.target_files.length > 0)
+          ? `${msg.target_files.length} files: ` + msg.target_files.join(', ')
+          : 'Auto-scoped';
+
         userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between text-[11px] mb-1">' +
           '<span>You</span>' +
           '<div class="flex items-center gap-2">' +
-          '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml((msg.target_files || []).join(', ') || 'No files selected') + '</span>' +
+          '<span class="text-[10px] text-slate-400 font-normal truncate max-w-[280px]" title="' + escapeHtml(targetSummary) + '">' + escapeHtml(targetSummary) + '</span>' +
           '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawUserPrompt + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
           '</div></div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(msg.instruction) + '</p>';
         wrapper.appendChild(userMsgDiv);
@@ -1795,8 +1927,10 @@
 
         const rawAiOutput = encodeURIComponent(msg.ai_response || '');
         const modText = modFiles.length > 0 ? ('Modified: ' + modFiles.join(', ')) : 'Advisory Response';
+        const titleBadge = msg.change_name ? `<span class="text-[10px] text-sky-400 font-normal bg-sky-950/80 px-2 py-0.5 rounded border border-sky-800/60 mr-2">${escapeHtml(msg.change_name)}</span>` : '';
+
         aiMsgDiv.innerHTML = '<div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">' +
-          '<span>🤖 Madison Architect</span>' +
+          '<div class="flex items-center gap-1.5"><span>🤖 Madison Architect</span>' + titleBadge + '</div>' +
           '<div class="flex items-center gap-2">' +
           '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml(modText) + '</span>' +
           '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawAiOutput + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
@@ -1929,11 +2063,11 @@
       const count = checked.length;
       const summary = document.getElementById('selectedFilesSummary');
       if (count === 0) {
-        summary.textContent = '0 files selected (General Question / New Script mode)';
+        summary.textContent = '⚡ Auto-Scope Active: Architect will automatically determine required files';
       } else if (count === 1) {
-        summary.textContent = '1 file selected: ' + checked[0].value;
+        summary.textContent = '1 file pinned for context: ' + checked[0].value;
       } else {
-        summary.textContent = count + ' files selected for context';
+        summary.textContent = count + ' files pinned for context';
       }
     }
 

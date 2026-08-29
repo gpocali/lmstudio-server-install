@@ -94,18 +94,28 @@ def generate_agent_plan(repo_dir_name: str, instruction: str, model_id: str = ""
         return {"status": "error", "message": "Workspace not found"}
 
     file_tree = get_workspace_file_tree(workspace_path)
-    tree_str = "\n".join([f"- {f}" for f in file_tree])
+    tree_str = "\n".join([f"- {f}" for f in file_tree]) if file_tree else "No existing files in repository."
 
     system_prompt = (
         "You are an expert Principal Software Architect.\n"
-        "Analyze the user's task instruction and the repository file tree. "
-        "Formulate a precise, step-by-step implementation plan. Identify exactly which files need to be modified or created.\n"
-        "Output your response strictly in JSON format with keys:\n"
-        "{\n  \"target_files\": [\"path/to/file.py\"],\n  \"plan_summary\": \"Step 1: ...\\nStep 2: ...\"\n}"
+        "Analyze the user's task instruction and the repository file tree.\n"
+        "1. Formulate a concise, descriptive name for the change (e.g. Conventional Commit format like 'feat(auth): implement token refresh' or a clear change title).\n"
+        "2. Identify exactly which files in the repository need to be modified or newly created.\n"
+        "3. Provide a clear, step-by-step implementation plan summary.\n\n"
+        "Output your response STRICTLY as a valid JSON object matching this schema:\n"
+        "{\n"
+        "  \"change_name\": \"feat(scope): concise title of change\",\n"
+        "  \"target_files\": [\"path/to/file1.py\", \"path/to/file2.py\"],\n"
+        "  \"plan_summary\": \"1. Step one details...\\n2. Step two details...\"\n"
+        "}"
     )
 
     user_prompt = f"Repository File Tree:\n{tree_str}\n\nTask Instruction:\n{instruction}"
     selected_model = model_id or get_active_model_for_agent()
+
+    fallback_change_name = instruction.strip().split("\n")[0][:60]
+    if len(fallback_change_name) >= 60:
+        fallback_change_name = fallback_change_name[:57] + "..."
 
     try:
         payload = {
@@ -122,28 +132,66 @@ def generate_agent_plan(repo_dir_name: str, instruction: str, model_id: str = ""
             return {"status": "error", "message": f"LLM Plan Error: {resp.text}"}
 
         content = resp.json()["choices"][0]["message"]["content"].strip()
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0].strip()
+        
+        # Clean markdown code blocks if present
+        clean_json_str = content
+        if "```json" in clean_json_str:
+            clean_json_str = clean_json_str.split("```json")[1].split("```")[0].strip()
+        elif "```" in clean_json_str:
+            clean_json_str = clean_json_str.split("```")[1].split("```")[0].strip()
 
-        plan_data = json.loads(content)
+        # Find outer JSON boundaries if surrounded by conversational text
+        json_match = re.search(r'\{[\s\S]*\}', clean_json_str)
+        if json_match:
+            clean_json_str = json_match.group(0)
+
+        plan_data = json.loads(clean_json_str)
+        target_files = plan_data.get("target_files", [])
+        if isinstance(target_files, str):
+            target_files = [target_files]
+        elif not isinstance(target_files, list):
+            target_files = []
+
+        # Sanitize target file paths
+        sanitized_files = []
+        for tf in target_files:
+            if isinstance(tf, str):
+                cleaned_tf = tf.strip().lstrip("./\\").replace("\\", "/")
+                if cleaned_tf and cleaned_tf not in sanitized_files:
+                    sanitized_files.append(cleaned_tf)
+
+        change_name = plan_data.get("change_name", "").strip() or fallback_change_name
+        plan_summary = plan_data.get("plan_summary", "").strip() or "Execute proposed code modifications."
+
         return {
             "status": "success",
-            "target_files": plan_data.get("target_files", []),
-            "plan_summary": plan_data.get("plan_summary", "Review plan before execution.")
+            "change_name": change_name,
+            "target_files": sanitized_files,
+            "plan_summary": plan_summary
         }
     except Exception as e:
+        # Smart fallback detection from file_tree
+        auto_targets = []
+        for f in file_tree:
+            base_low = os.path.basename(f).lower()
+            inst_low = instruction.lower()
+            if base_low in inst_low or f.lower() in inst_low:
+                auto_targets.append(f)
+        if not auto_targets and file_tree:
+            auto_targets = file_tree[:3]
+
         return {
             "status": "success",
-            "target_files": file_tree[:5],
-            "plan_summary": f"Fallback Plan for instruction: {instruction}"
+            "change_name": fallback_change_name,
+            "target_files": auto_targets,
+            "plan_summary": f"Implementation Plan:\n1. Analyze task requirements for '{instruction.strip()}'.\n2. Update target files to apply changes.\n3. Validate syntax and review git diff."
         }
 
 def execute_approved_plan(
     repo_dir_name: str,
     target_files: list,
     instruction: str,
+    change_name: str = "",
     thread_id: str = "",
     persona_id: str = "coding",
     custom_system_prompt: str = "",
@@ -201,7 +249,7 @@ def execute_approved_plan(
         modified_files = []
         if matches:
             for file_rel_path, file_content in matches:
-                clean_rel = file_rel_path.strip().lstrip("/")
+                clean_rel = file_rel_path.strip().lstrip("./\\").replace("\\", "/")
                 dest_file_path = os.path.join(workspace_path, clean_rel)
                 os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
                 with open(dest_file_path, "w", encoding="utf-8") as f:
@@ -211,14 +259,18 @@ def execute_approved_plan(
             fallback_pattern = re.compile(r'\x60\x60\x60(?:[a-zA-Z0-9_\-]+)?\n([\s\S]*?)\n\x60\x60\x60')
             code_match = fallback_pattern.search(ai_response)
             if code_match:
-                single_rel = target_files[0]
+                single_rel = target_files[0].strip().lstrip("./\\").replace("\\", "/")
                 dest_p = os.path.join(workspace_path, single_rel)
+                os.makedirs(os.path.dirname(dest_p), exist_ok=True)
                 with open(dest_p, "w", encoding="utf-8") as f:
                     f.write(code_match.group(1).strip() + "\n")
                 modified_files.append(single_rel)
 
         git_status = get_workspace_git_status(repo_dir_name)
         ai_summary_meta = generate_commit_msg_from_diff(repo_dir_name, modified_files, selected_model)
+
+        effective_commit_msg = change_name.strip() or ai_summary_meta.get("commit_msg", f"Update {', '.join(modified_files[:2])}")
+        effective_summary = change_name.strip() or ai_summary_meta.get("summary", instruction)
 
         hist = load_workspace_history(repo_dir_name)
         t_id = thread_id or hist.get("active_thread_id", "thread-default")
@@ -229,25 +281,30 @@ def execute_approved_plan(
                 target_thread = t
                 break
         
+        thread_title = change_name.strip() or f"Thread: {instruction[:25]}..."
         if not target_thread:
             target_thread = {
                 "id": t_id,
-                "title": f"Thread: {instruction[:25]}...",
+                "title": thread_title,
                 "created_at": datetime.datetime.utcnow().isoformat(),
                 "messages": []
             }
             hist.setdefault("threads", []).append(target_thread)
+        elif target_thread.get("title", "").startswith("Thread: ") or target_thread.get("title") == "General Task Thread":
+            if change_name.strip():
+                target_thread["title"] = change_name.strip()
 
         msg_payload = {
             "id": f"msg-{int(datetime.datetime.utcnow().timestamp()*1000)}",
             "timestamp": datetime.datetime.utcnow().isoformat(),
             "instruction": instruction,
+            "change_name": change_name,
             "target_files": target_files,
             "modified_files": modified_files,
             "ai_response": ai_response,
             "diff": git_status["diff"],
-            "proposed_commit_msg": ai_summary_meta.get("commit_msg", f"Update {', '.join(modified_files[:2])}"),
-            "summary": ai_summary_meta.get("summary", instruction)
+            "proposed_commit_msg": effective_commit_msg,
+            "summary": effective_summary
         }
         target_thread["messages"].append(msg_payload)
 
@@ -256,8 +313,9 @@ def execute_approved_plan(
             "timestamp": datetime.datetime.utcnow().isoformat(),
             "type": "code_edit" if modified_files else "inquiry",
             "instruction": instruction,
-            "summary": ai_summary_meta.get("summary", instruction),
-            "commit_msg": ai_summary_meta.get("commit_msg", f"Update {', '.join(modified_files[:2])}"),
+            "change_name": change_name,
+            "summary": effective_summary,
+            "commit_msg": effective_commit_msg,
             "modified_files": modified_files,
             "diff": git_status["diff"]
         })
@@ -267,6 +325,7 @@ def execute_approved_plan(
         return {
             "status": "success",
             "thread_id": t_id,
+            "change_name": change_name,
             "message": msg_payload,
             "git_status": git_status
         }
@@ -274,11 +333,22 @@ def execute_approved_plan(
         return {"status": "error", "message": f"Execution error: {str(e)}"}
 
 # Backwards compatibility alias for queue workers
-def process_agent_task(repo_dir_name: str, target_files: list = None, instruction: str = "", thread_id: str = "", persona_id: str = "coding", custom_system_prompt: str = "", model_id: str = "", **kwargs):
+def process_agent_task(
+    repo_dir_name: str,
+    target_files: list = None,
+    instruction: str = "",
+    change_name: str = "",
+    thread_id: str = "",
+    persona_id: str = "coding",
+    custom_system_prompt: str = "",
+    model_id: str = "",
+    **kwargs
+):
     return execute_approved_plan(
         repo_dir_name=repo_dir_name,
         target_files=target_files or [],
         instruction=instruction,
+        change_name=change_name,
         thread_id=thread_id,
         persona_id=persona_id,
         custom_system_prompt=custom_system_prompt,
