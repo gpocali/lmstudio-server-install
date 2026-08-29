@@ -937,6 +937,46 @@ def api_push(req: WorkspaceActionRequest):
         return JSONResponse(status_code=500, content={"status": "error", "message": res.stderr or res.stdout})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        
+class AgentPlanRequest(BaseModel):
+    repo_dir_name: str
+    instruction: str
+    model_identifier: str = ""
+
+class AgentExecutePlanRequest(BaseModel):
+    repo_dir_name: str
+    target_files: list[str]
+    instruction: str
+    thread_id: str = ""
+    persona_id: str = "coding"
+    custom_system_prompt: str = ""
+    model_identifier: str = ""
+    context_length: int = 32768
+
+@app.post("/api/agent/plan")
+def api_agent_plan(req: AgentPlanRequest):
+    effective_model = ensure_active_model(req.model_identifier)
+    res = generate_agent_plan(req.repo_dir_name, req.instruction, model_id=effective_model)
+    if res.get("status") == "error":
+        return JSONResponse(status_code=500, content=res)
+    return res
+
+@app.post("/api/agent/execute_plan")
+def api_agent_execute_plan(req: AgentExecutePlanRequest):
+    effective_model = ensure_active_model(req.model_identifier)
+    res = execute_approved_plan(
+        repo_dir_name=req.repo_dir_name,
+        target_files=req.target_files,
+        instruction=req.instruction,
+        thread_id=req.thread_id,
+        persona_id=req.persona_id,
+        custom_system_prompt=req.custom_system_prompt,
+        model_id=effective_model,
+        context_length=req.context_length
+    )
+    if res.get("status") == "error":
+        return JSONResponse(status_code=500, content=res)
+    return res
 
 if __name__ == "__main__":
     uvicorn.run("model_manager:app", host="0.0.0.0", port=8080, log_level="info")

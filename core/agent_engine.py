@@ -1,6 +1,7 @@
 """
-Madison Agent Engine
-Handles autonomous multi-file generation, Git diff analysis, and commit message synthesis.
+Madison Agent Engine (Plan-and-Execute Workflow)
+Handles repository file discovery, structured plan generation, user feedback revision,
+and precise file patching.
 """
 
 import os
@@ -76,38 +77,84 @@ def generate_commit_msg_from_diff(repo_dir_name: str, target_files: list = None,
 
     return {"status": "success", "commit_msg": "chore: update workspace files", "summary": "Updated files on disk"}
 
-def process_agent_task(
-    repo_dir_name: str, 
-    target_files: list = None, 
-    instruction: str = "", 
-    thread_id: str = "", 
-    persona_id: str = "coding", 
-    custom_system_prompt: str = "", 
+def get_workspace_file_tree(workspace_path: str) -> list[str]:
+    file_list = []
+    for root, _, files in os.walk(workspace_path):
+        if ".git" in root or "__pycache__" in root: continue
+        for f in files:
+            if f == ".lmstudio_history.json": continue
+            rel = os.path.relpath(os.path.join(root, f), workspace_path)
+            file_list.append(rel)
+    file_list.sort()
+    return file_list
+
+def generate_agent_plan(repo_dir_name: str, instruction: str, model_id: str = "") -> dict:
+    workspace_path = os.path.join(WORKSPACES_ROOT, repo_dir_name)
+    if not os.path.exists(workspace_path):
+        return {"status": "error", "message": "Workspace not found"}
+
+    file_tree = get_workspace_file_tree(workspace_path)
+    tree_str = "\n".join([f"- {f}" for f in file_tree])
+
+    system_prompt = (
+        "You are an expert Principal Software Architect.\n"
+        "Analyze the user's task instruction and the repository file tree. "
+        "Formulate a precise, step-by-step implementation plan. Identify exactly which files need to be modified or created.\n"
+        "Output your response strictly in JSON format with keys:\n"
+        "{\n  \"target_files\": [\"path/to/file.py\"],\n  \"plan_summary\": \"Step 1: ...\\nStep 2: ...\"\n}"
+    )
+
+    user_prompt = f"Repository File Tree:\n{tree_str}\n\nTask Instruction:\n{instruction}"
+    selected_model = model_id or get_active_model_for_agent()
+
+    try:
+        payload = {
+            "model": selected_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 1024
+        }
+        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=60)
+        if resp.status_code != 200:
+            return {"status": "error", "message": f"LLM Plan Error: {resp.text}"}
+
+        content = resp.json()["choices"][0]["message"]["content"].strip()
+        # Clean markdown code blocks if present
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+
+        plan_data = json.loads(content)
+        return {
+            "status": "success",
+            "target_files": plan_data.get("target_files", []),
+            "plan_summary": plan_data.get("plan_summary", "Review plan before execution.")
+        }
+    except Exception as e:
+        # Fallback plan using all files or direct execution
+        return {
+            "status": "success",
+            "target_files": file_tree[:5],
+            "plan_summary": f"Fallback Plan for instruction: {instruction}"
+        }
+
+def execute_approved_plan(
+    repo_dir_name: str,
+    target_files: list,
+    instruction: str,
+    thread_id: str = "",
+    persona_id: str = "coding",
+    custom_system_prompt: str = "",
     model_id: str = "",
     **kwargs
 ):
     workspace_path = os.path.join(WORKSPACES_ROOT, repo_dir_name)
     if not os.path.exists(workspace_path):
         return {"status": "error", "message": "Workspace not found"}
-
-    target_files = target_files or []
-
-    # Auto-Reference Engine: If no files selected, scan instruction for file mentions
-    if not target_files and instruction:
-        all_disk_files = []
-        for root, _, files in os.walk(workspace_path):
-            if ".git" in root or "__pycache__" in root: continue
-            for f in files:
-                if f == ".lmstudio_history.json": continue
-                rel_p = os.path.relpath(os.path.join(root, f), workspace_path)
-                all_disk_files.append(rel_p)
-
-        for df in all_disk_files:
-            # Check if filename or base name appears in instruction
-            base_name = os.path.basename(df)
-            if df.lower() in instruction.lower() or base_name.lower() in instruction.lower():
-                if df not in target_files:
-                    target_files.append(df)
 
     context_blocks = []
     for rel_file in target_files:
@@ -116,9 +163,8 @@ def process_agent_task(
             try:
                 with open(full_p, "r", encoding="utf-8") as f:
                     content = f.read()
-                # Truncate extremely large files to prevent token overflow (~12,000 chars per file)
-                if len(content) > 12000:
-                    content = content[:12000] + "\n... [File truncated for context limit] ..."
+                if len(content) > 16000:
+                    content = content[:16000] + "\n... [File truncated for context limit] ..."
                 context_blocks.append(f"### File: {rel_file}\n```\n{content}\n```")
             except Exception: pass
 
@@ -126,9 +172,10 @@ def process_agent_task(
 
     system_prompt = get_persona_prompt(persona_id, custom_system_prompt, domain="coding")
     user_prompt = (
-        f"Active Workspace Context Files:\n\n{context_str}\n\n"
-        f"Task Instruction:\n{instruction}\n\n"
-        "Provide the complete implementation following the file modification format:"
+        f"Target Files Existing Contents:\n\n{context_str}\n\n"
+        f"Task Instruction & Approved Plan:\n{instruction}\n\n"
+        "Provide the complete, updated file implementations using the format:\n"
+        "### File: path/to/file\n```python\n[complete updated file content]\n```"
     )
 
     selected_model = model_id or get_active_model_for_agent()
@@ -144,10 +191,9 @@ def process_agent_task(
             "max_tokens": 16384
         }
         
-        # Extended timeout to 300 seconds for large file generation
         resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=300)
         if resp.status_code != 200:
-            return {"status": "error", "message": f"LM Studio API Error ({resp.status_code}): {resp.text[:300]}"}
+            return {"status": "error", "message": f"LM Studio API Error: {resp.text[:300]}"}
 
         ai_response = resp.json()["choices"][0]["message"]["content"]
         
@@ -161,7 +207,7 @@ def process_agent_task(
                 dest_file_path = os.path.join(workspace_path, clean_rel)
                 os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
                 with open(dest_file_path, "w", encoding="utf-8") as f:
-                    f.write(file_content)
+                    f.write(file_content.strip() + "\n")
                 modified_files.append(clean_rel)
         elif len(target_files) == 1:
             fallback_pattern = re.compile(r'\x60\x60\x60(?:[a-zA-Z0-9_\-]+)?\n([\s\S]*?)\n\x60\x60\x60')
@@ -170,7 +216,7 @@ def process_agent_task(
                 single_rel = target_files[0]
                 dest_p = os.path.join(workspace_path, single_rel)
                 with open(dest_p, "w", encoding="utf-8") as f:
-                    f.write(code_match.group(1))
+                    f.write(code_match.group(1).strip() + "\n")
                 modified_files.append(single_rel)
 
         git_status = get_workspace_git_status(repo_dir_name)

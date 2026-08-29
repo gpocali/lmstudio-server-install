@@ -1129,17 +1129,12 @@
       const promptInput = document.getElementById('studioPromptInput');
       const instruction = promptInput.value.trim();
       const modelIdentifier = document.getElementById('studioModelSelector').value;
-      const ctxLength = parseInt(document.getElementById('studioContextSelector').value) || 32768;
       const chatWindow = document.getElementById('chatHistoryWindow');
 
       if (!currentWorkspaceDir) return alert('Select an active workspace from the left pane first.');
       if (!instruction) return alert('Please enter a task or coding instruction.');
 
-      const checkedBoxes = document.querySelectorAll('#filesCheckboxList input[type="checkbox"]:checked');
-      const selectedFiles = Array.from(checkedBoxes).map(cb => cb.value);
-      const targetThreadId = activeThreadId;
       const targetRepoDir = currentWorkspaceDir;
-
       promptInput.value = '';
       autoResizeTextarea(promptInput);
 
@@ -1151,52 +1146,138 @@
         chatWindow.appendChild(wrapper);
       }
 
-      const rawPromptEnc = encodeURIComponent(instruction);
       const userMsgDiv = document.createElement('div');
       userMsgDiv.className = 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md space-y-1 relative group';
-      userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between text-[11px] mb-1">' +
-        '<span>You</span>' +
-        '<div class="flex items-center gap-2">' +
-        '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml(selectedFiles.length > 0 ? selectedFiles.join(', ') : 'No files selected') + '</span>' +
-        '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawPromptEnc + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
-        '</div></div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(instruction) + '</p>';
+      userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between text-[11px] mb-1"><span>You</span></div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(instruction) + '</p>';
       wrapper.appendChild(userMsgDiv);
 
-      const progressDiv = document.createElement('div');
-      progressDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-emerald-400 max-w-[95%] mr-auto shadow-md flex items-center gap-2 animate-pulse';
-      progressDiv.innerHTML = '<svg class="animate-spin h-4 w-4 text-emerald-400 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>' +
-        '<span>🤖 Analyzing workspace context & generating code changes in background...</span>';
-      wrapper.appendChild(progressDiv);
+      const planCardId = 'plan-card-' + Date.now();
+      const planDiv = document.createElement('div');
+      planDiv.id = planCardId;
+      planDiv.className = 'bg-slate-950 p-4 rounded-xl border border-sky-800/80 text-xs text-slate-200 space-y-3 font-mono max-w-[95%] mr-auto shadow-md';
+      planDiv.innerHTML = '<div class="flex items-center gap-2 text-sky-400 font-bold animate-pulse"><svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg><span>Analyzing repository structure & formulating execution plan...</span></div>';
+      wrapper.appendChild(planDiv);
       chatWindow.scrollTop = chatWindow.scrollHeight;
 
       try {
-        const res = await fetch('/api/queue/submit_agent', {
+        const res = await fetch('/api/agent/plan', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             repo_dir_name: targetRepoDir,
-            target_files: selectedFiles,
             instruction: instruction,
-            thread_id: targetThreadId,
+            model_identifier: modelIdentifier === 'auto' ? '' : modelIdentifier
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const filesJsonEnc = encodeURIComponent(JSON.stringify(data.target_files || []));
+          const instructionEnc = encodeURIComponent(instruction);
+
+          planDiv.innerHTML = `
+            <div class="font-bold text-sky-400 border-b border-slate-800 pb-1.5 flex justify-between items-center">
+              <span>📋 Proposed Implementation Plan</span>
+              <span class="text-[10px] text-slate-400 font-normal">Step 1 of 2</span>
+            </div>
+            <div class="text-slate-300 space-y-1 mt-1">
+              <div><strong>Target Files:</strong> <code class="text-emerald-400">${escapeHtml((data.target_files || []).join(', ') || 'Auto-detect')}</code></div>
+              <div class="whitespace-pre-wrap mt-2 bg-slate-900 p-3 rounded border border-slate-800 text-[11px] text-slate-200">${escapeHtml(data.plan_summary)}</div>
+            </div>
+            <div class="space-y-2 mt-3 pt-2 border-t border-slate-800">
+              <label class="block text-[11px] text-slate-400">Provide Feedback / Request Revisions (Optional):</label>
+              <input type="text" id="planFeedback-${planCardId}" placeholder="e.g. Make sure to also update unit tests..." class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 focus:border-sky-500 focus:outline-none">
+              <div class="flex justify-end gap-2 pt-1">
+                <button onclick="revisePlan('${targetRepoDir}', '${planCardId}', decodeURIComponent('${instructionEnc}'))" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1 rounded text-xs text-amber-300 transition">🔄 Revise Plan</button>
+                <button onclick="approveAndExecutePlan('${targetRepoDir}', '${planCardId}', decodeURIComponent('${instructionEnc}'), decodeURIComponent('${filesJsonEnc}'))" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1 rounded text-xs transition flex items-center gap-1">✓ Approve & Execute Plan</button>
+              </div>
+            </div>`;
+        } else {
+          planDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
+          planDiv.innerHTML = '❌ Plan Generation Error: ' + escapeHtml(data.message);
+        }
+      } catch(e) {
+        planDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
+        planDiv.innerHTML = '❌ Communication Error: ' + e.message;
+      }
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    async function revisePlan(repoDir, cardId, originalInstruction) {
+      const feedbackInput = document.getElementById('planFeedback-' + cardId);
+      const feedback = feedbackInput ? feedbackInput.value.trim() : "";
+      const combinedInstruction = feedback ? `${originalInstruction}\n\nUser Feedback/Revision: ${feedback}` : originalInstruction;
+      
+      const card = document.getElementById(cardId);
+      if (card) {
+        card.innerHTML = '<div class="flex items-center gap-2 text-amber-400 font-bold animate-pulse"><svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg><span>Revising plan based on feedback...</span></div>';
+      }
+
+      document.getElementById('studioPromptInput').value = combinedInstruction;
+      await executeStudioTask();
+      if (card) card.remove();
+    }
+
+    async function approveAndExecutePlan(repoDir, cardId, instruction, filesJsonEncoded) {
+      const targetFiles = JSON.parse(decodeURIComponent(filesJsonEncoded));
+      const modelIdentifier = document.getElementById('studioModelSelector').value;
+      const ctxLength = parseInt(document.getElementById('studioContextSelector').value) || 32768;
+      const card = document.getElementById(cardId);
+
+      if (card) {
+        card.className = 'bg-slate-950 p-4 rounded-xl border border-emerald-800/80 text-xs text-emerald-300 space-y-3 font-mono max-w-[95%] mr-auto shadow-md';
+        card.innerHTML = '<div class="flex items-center gap-2 font-bold text-emerald-400 animate-pulse"><svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg><span>Executing approved plan and modifying files on disk...</span></div>';
+      }
+
+      try {
+        const res = await fetch('/api/agent/execute_plan', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            repo_dir_name: repoDir,
+            target_files: targetFiles,
+            instruction: instruction,
+            thread_id: activeThreadId,
             persona_id: "coding",
             model_identifier: modelIdentifier === 'auto' ? '' : modelIdentifier,
             context_length: ctxLength
           })
         });
         const data = await res.json();
-        if (res.ok && data.task_id) {
-          const compTargetId = `${targetRepoDir}:${targetThreadId}`;
-          activeRunningTasks.set(data.task_id, { domain: 'coding', target_id: compTargetId });
-          renderThreadsSidebar();
-          updateGlobalIndicatorDots();
-          pollTaskStatus(data.task_id, 'coding', compTargetId);
+        if (res.ok) {
+          const modFiles = data.message.modified_files || [];
+          card.dataset.modfiles = JSON.stringify(modFiles);
+          card.dataset.summary = data.message.summary || instruction;
+
+          let commitReviewBox = `
+            <div class="review-box bg-slate-900 p-3 rounded-lg border border-slate-700 space-y-2 mt-3 text-slate-200">
+              <div class="flex justify-between items-center text-xs">
+                <span class="font-bold text-emerald-300">✓ Plan Executed Successfully (${modFiles.length} files modified)</span>
+                <span class="text-[10px] bg-slate-800 px-2 py-0.5 rounded font-mono text-amber-300">Branch: ${currentBranch}</span>
+              </div>
+              <details class="bg-slate-950 p-2 rounded border border-slate-800 text-xs">
+                <summary class="cursor-pointer font-bold text-sky-400">View Git Diff</summary>
+                <pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre">${escapeHtml(data.git_status.diff || 'No diff available')}</pre>
+              </details>
+              <div>
+                <label class="block text-[11px] text-slate-400 mb-1">Proposed Commit Message:</label>
+                <input type="text" value="${escapeHtml(data.message.proposed_commit_msg)}" class="commit-msg-input w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-sky-500 focus:outline-none">
+              </div>
+              <div class="flex justify-end gap-2 pt-1">
+                <button type="button" onclick="commitProposedChanges('${cardId}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1 rounded text-xs transition flex items-center gap-1">✓ Commit Changes</button>
+              </div>
+            </div>`;
+
+          card.innerHTML = '<div class="font-bold text-emerald-400 border-b border-slate-800 pb-1.5"><span>✓ Plan Executed</span></div><div class="text-slate-200 whitespace-pre-wrap mt-2">' + escapeHtml(data.message.ai_response || '') + '</div>' + commitReviewBox;
+          await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
+          await loadWorkspaceHistoryAndRender();
         } else {
-          progressDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
-          progressDiv.innerHTML = '❌ Submission Error: ' + (data.message || 'Failed to queue task');
+          card.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
+          card.innerHTML = '❌ Execution Error: ' + escapeHtml(data.message);
         }
       } catch(e) {
-        progressDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
-        progressDiv.innerHTML = '❌ Communication Error: ' + e.message;
+        card.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
+        card.innerHTML = '❌ Communication Error: ' + e.message;
       }
     }
 
