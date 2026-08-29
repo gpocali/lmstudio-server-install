@@ -1221,7 +1221,8 @@
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
-            model_path: currentTunerModel.path,
+            model_key: currentTunerModel.filename || "",
+            model_path: currentTunerModel.path || "",
             context_length: ctxLen,
             gpu_offload: gpuOffload,
             ttl: ttl
@@ -1229,9 +1230,10 @@
         });
         const data = await res.json();
         if (res.ok) {
-          alert(`Model loaded successfully with ${Math.round(ctxLen/1024)}K token context!`);
+          alert(`Model loaded successfully!`);
           closeModelTuner();
           await initHardwareInfo();
+          await syncLmsRegisteredModels();
           await fetchLocalModels();
         } else {
           alert('Load failure: ' + (data.message || JSON.stringify(data)));
@@ -1242,6 +1244,39 @@
 
       btn.disabled = false;
       btn.textContent = "🚀 Apply & Load into VRAM";
+    }
+    
+    async function loadModelDirect(modelJsonStr, btn) {
+      const model = JSON.parse(decodeURIComponent(modelJsonStr));
+      const origText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = "⏳ Loading...";
+
+      try {
+        const res = await fetch('/api/load_model', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            model_key: model.filename || "",
+            model_path: model.path || "",
+            context_length: 32768,
+            gpu_offload: "max"
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          await initHardwareInfo();
+          await syncLmsRegisteredModels();
+          await fetchLocalModels();
+        } else {
+          alert('Load error: ' + (data.message || JSON.stringify(data)));
+        }
+      } catch(e) {
+        alert('Communication error: ' + e.message);
+      }
+
+      btn.disabled = false;
+      btn.innerHTML = origText;
     }
 
     // ---------------- Resizable Panels Engine ----------------
@@ -2315,48 +2350,33 @@
       try {
         const res = await fetch('/api/local_models');
         const data = await res.json();
-        localModelSet.clear();
-        localModelObjects = data.files || [];
-        loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
 
         if (data.storage) renderStorageMetrics(data.storage);
-
-        syncModelDropdownSelectors();
 
         if (!data.files || data.files.length === 0) {
           list.innerHTML = '<span class="text-slate-500">No GGUF models on disk (/storage/lmstudio/models)</span>';
           return;
         }
 
-        data.files.forEach(m => localModelSet.add(m.filename));
-
         list.innerHTML = data.files.map(m => {
-          const fLower = m.filename.toLowerCase().replace('.gguf', '');
-          const pLower = m.path.toLowerCase();
-          
-          const isLoaded = loadedModelsList.some(loaded => {
-            if (!loaded || loaded.length < 3) return false;
-            const cleanSlug = loaded.replace(/[^a-z0-9]/g, '');
-            const cleanF = fLower.replace(/[^a-z0-9]/g, '');
-            return cleanF.includes(cleanSlug) || cleanSlug.includes(cleanF) || pLower.includes(loaded);
-          });
-          
-          let actionBtn = '';
-          const modelJson = encodeURIComponent(JSON.stringify(m));
-
-          if (isLoaded) {
-            actionBtn = '<div class="flex items-center gap-1.5">' +
-              '<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold">⚡ Loaded</span>' +
-              '<button onclick="openModelTuner(JSON.parse(decodeURIComponent(\'' + modelJson + '\')))" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sky-300 px-2.5 py-1 rounded text-xs transition" title="Tune Context & Settings">🎛️ Tune</button>' +
-              '<button onclick="unloadActiveModel(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-2 py-1 rounded text-xs transition" title="Unload from VRAM">⏹</button>' +
-              '</div>';
-          } else {
-            actionBtn = '<div class="flex items-center gap-1.5">' +
-              '<button onclick="openModelTuner(JSON.parse(decodeURIComponent(\'' + modelJson + '\')))" class="bg-sky-700 hover:bg-sky-600 text-white px-2.5 py-1 rounded text-xs transition flex items-center gap-1 font-medium">🚀 Load / Tune</button>' +
-              '</div>';
-          }
+          const fClean = m.filename.replace('.gguf', '').toLowerCase();
+          const isLoaded = (loadedModelsList || []).some(loaded => loaded.includes(fClean) || fClean.includes(loaded));
 
           const borderClass = isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700';
+          const modelJson = encodeURIComponent(JSON.stringify(m));
+
+          let actionButtons = '';
+          if (isLoaded) {
+            actionButtons = `
+              <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2.5 py-1 rounded text-xs flex items-center gap-1 font-semibold">⚡ Loaded in VRAM</span>
+              <button onclick="openModelTuner(JSON.parse(decodeURIComponent('${modelJson}')))" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sky-300 px-2.5 py-1 rounded text-xs transition" title="Tune Context & Parameters">🎛️ Tune</button>
+            `;
+          } else {
+            actionButtons = `
+              <button onclick="loadModelDirect('${modelJson}', this)" class="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1 rounded text-xs transition flex items-center gap-1">🚀 Load</button>
+              <button onclick="openModelTuner(JSON.parse(decodeURIComponent('${modelJson}')))" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sky-300 px-2.5 py-1 rounded text-xs transition" title="Tune Context & Parameters">🎛️ Tune</button>
+            `;
+          }
 
           return '<div class="flex justify-between items-center bg-slate-950 p-3 rounded-lg border ' + borderClass + ' text-xs gap-3 shadow-sm">' +
             '<div class="truncate pr-2">' +
@@ -2365,7 +2385,7 @@
             '</div>' +
             '<div class="flex items-center gap-2 shrink-0">' +
             '<span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">' + m.size_gb + '</span>' +
-            actionBtn +
+            actionButtons +
             '<button onclick="deleteModel(\'' + m.filename + '\')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">🗑️</button>' +
             '</div></div>';
         }).join('');
