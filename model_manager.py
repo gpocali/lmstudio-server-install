@@ -113,36 +113,55 @@ def list_registered_lms_keys() -> list[dict]:
 
     return models
 
-def execute_lms_load(model_key: str, context_length: int = 32768, gpu_offload: str = "max") -> tuple[bool, str]:
-    """Executes direct `lms load <key>` with specified parameters."""
+def execute_lms_load(target: str, context_length: int = 32768, gpu_offload: str = "max") -> tuple[bool, str]:
+    """Executes `lms load <target>` trying exact key or importing path."""
     lms = get_lms_bin()
-    if not model_key or model_key in ("auto", "default"):
+    if not target or target in ("auto", "default"):
         return True, "Auto mode active"
 
-    cmd = [
-        lms, "load", model_key,
-        f"--gpu={gpu_offload}",
-        f"--context-length={context_length}",
-        "--ttl=3600",
-        "--yes"
-    ]
-    try:
-        res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=90)
-        if res.returncode == 0:
-            return True, f"Loaded {model_key} successfully."
-        return False, res.stderr or res.stdout or "Failed to load model"
-    except Exception as e:
-        return False, str(e)
+    # If full path was passed, import it first
+    candidates = [target]
+    if os.path.exists(target):
+        fname = os.path.basename(target)
+        parent_dir = os.path.basename(os.path.dirname(target))
+        clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname, flags=re.IGNORECASE).lower()
+        candidates.extend([f"{parent_dir}/{fname}", f"{parent_dir}/{clean_fname}", clean_fname, fname])
+        try:
+            subprocess.run([lms, "import", "--yes", "--symbolic-link", target], env=LMS_ENV, capture_output=True, timeout=10)
+        except Exception: pass
+
+    # Context fallback ladder
+    ctx_ladder = [context_length]
+    for fallback in [16384, 8192, 4096]:
+        if fallback < context_length:
+            ctx_ladder.append(fallback)
+
+    last_error = ""
+    for candidate in candidates:
+        for ctx in ctx_ladder:
+            cmd = [
+                lms, "load", candidate,
+                f"--gpu={gpu_offload}",
+                f"--context-length={ctx}",
+                "--ttl=3600",
+                "--yes"
+            ]
+            try:
+                res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=90)
+                if res.returncode == 0:
+                    return True, f"Loaded {candidate} successfully ({ctx} context)."
+                last_error = (res.stderr or res.stdout or "").strip()
+            except Exception as e:
+                last_error = str(e)
+
+    return False, last_error or "Failed to load model"
 
 def ensure_active_model(model_key: str = "", context_length: int = 32768) -> str:
-    """Ensures the selected model key is active; if none specified, uses whatever is loaded."""
     loaded = get_loaded_models()
     if model_key and model_key not in ("auto", "default"):
-        # Check if already loaded in VRAM
         for l in (loaded or []):
             if model_key.lower() in l.lower() or l.lower() in model_key.lower():
                 return l
-        # Otherwise load it directly
         success, _ = execute_lms_load(model_key, context_length=context_length)
         if success:
             recheck = get_loaded_models()
@@ -151,7 +170,6 @@ def ensure_active_model(model_key: str = "", context_length: int = 32768) -> str
     if loaded:
         return loaded[0]
 
-    # Auto fallback: load first available model in registry
     reg = list_registered_lms_keys()
     if reg:
         first_key = reg[0]["key"]
@@ -227,10 +245,12 @@ class DownloadRequest(BaseModel):
 class DeleteRequest(BaseModel):
     filename: str
 
-class DirectLoadRequest(BaseModel):
-    model_key: str
+class LoadRequest(BaseModel):
+    model_key: str = ""
+    model_path: str = ""
     context_length: int = 32768
     gpu_offload: str = "max"
+    ttl: int = 3600
 
 class AsyncChatSubmitRequest(BaseModel):
     session_id: str
@@ -342,10 +362,11 @@ def api_get_lms_models():
     }
 
 @app.post("/api/load_model")
-def api_load_model(req: DirectLoadRequest):
-    success, msg = execute_lms_load(req.model_key, context_length=req.context_length, gpu_offload=req.gpu_offload)
+def api_load_model(req: LoadRequest):
+    target = req.model_key or req.model_path
+    success, msg = execute_lms_load(target, context_length=req.context_length, gpu_offload=req.gpu_offload)
     if success:
-        return {"status": "success", "loaded_target": req.model_key, "output": msg}
+        return {"status": "success", "loaded_target": target, "output": msg}
     return JSONResponse(status_code=400, content={"status": "error", "message": msg})
 
 @app.post("/api/unload_model")
