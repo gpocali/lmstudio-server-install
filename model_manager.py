@@ -94,19 +94,19 @@ def list_local_gguf_models() -> list[dict]:
     models.sort(key=lambda x: x["display_name"].lower())
     return models
 
-def execute_lms_load(target_path: str, context_length: int = 131072, gpu_offload: str = "max") -> tuple[bool, str]:
-    """Executes `lms load` defaulting to 128K max context with automatic OOM fallback."""
+def execute_lms_load(target_path: str, context_length: int = 32768, gpu_offload: str = "max") -> tuple[bool, str]:
+    """Executes `lms load <absolute_path>` directly with context fallback."""
     lms = get_lms_bin()
     if not target_path or target_path in ("auto", "default"):
         return True, "Auto mode active"
 
-    # Default to requested or max 128K context window
-    ctx_ladder = [context_length, 65536, 32768, 16384, 8192]
-    seen_ctx = set()
-    dedup_ladder = [c for c in ctx_ladder if not (c in seen_ctx or seen_ctx.add(c))]
+    ctx_ladder = [context_length]
+    for fallback in [16384, 8192, 4096]:
+        if fallback < context_length:
+            ctx_ladder.append(fallback)
 
     last_error = ""
-    for ctx in dedup_ladder:
+    for ctx in ctx_ladder:
         cmd = [
             lms, "load", target_path,
             f"--gpu={gpu_offload}",
@@ -115,9 +115,9 @@ def execute_lms_load(target_path: str, context_length: int = 131072, gpu_offload
             "--yes"
         ]
         try:
-            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=120)
+            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=90)
             if res.returncode == 0:
-                return True, f"Loaded model successfully with {ctx} context window."
+                return True, f"Loaded model successfully ({ctx} context)."
             last_error = (res.stderr or res.stdout or "").strip()
         except Exception as e:
             last_error = str(e)
