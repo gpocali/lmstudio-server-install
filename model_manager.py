@@ -95,13 +95,12 @@ def ensure_models_indexed():
 
 def list_registered_lms_keys() -> list[dict]:
     """
-    Retrieves model keys directly from LM Studio CLI, deduplicating
-    unnamespaced slugs when author-namespaced keys exist.
+    Retrieves model keys directly from LM Studio CLI, aggressively filtering out
+    any unnamespaced short slugs when a fully author-namespaced key exists.
     """
     lms = get_lms_bin()
     ensure_models_indexed()
     raw_models = []
-    seen_keys = set()
 
     # 1. Try JSON parsing
     try:
@@ -160,22 +159,34 @@ def list_registered_lms_keys() -> list[dict]:
                     else:
                         raw_models.append({"key": clean_name, "display_name": clean_name, "loaded": False})
 
-    # Deduplication pass: filter out unnamespaced keys if an author-namespaced version exists
-    namespaced_bases = set()
+    # Aggressive Deduplication Pass
+    # Collect all unique file basenames present in author-namespaced keys (e.g. "qwen3.8-27b-ud-q4_k_m")
+    namespaced_filenames = set()
     for m in raw_models:
         if "/" in m["key"]:
-            parts = m["key"].split("/")
-            if len(parts) >= 2:
-                namespaced_bases.add(parts[-1].lower().replace('.gguf', ''))
+            fname = os.path.basename(m["key"]).lower().replace('.gguf', '')
+            namespaced_filenames.add(fname)
+            # Also add parts of repo/model name
+            for part in m["key"].lower().split('/'):
+                if len(part) > 3: namespaced_filenames.add(part)
 
     final_models = []
+    seen_keys = set()
     for m in raw_models:
         k_lower = m["key"].lower()
-        # If this is a bare slug (no '/') but we have a namespaced version for it, skip it
-        is_bare = "/" not in m["key"]
-        base_slug = k_lower.replace('.gguf', '')
-        if is_bare and base_slug in namespaced_bases:
-            continue
+        is_namespaced = "/" in m["key"]
+        
+        # If this is an unnamespaced entry (no '/') but its slug matches a known file base in a namespaced entry, skip it
+        if not is_namespaced:
+            slug = k_lower.replace('.gguf', '')
+            should_skip = False
+            for nf in namespaced_filenames:
+                if slug in nf or nf in slug:
+                    should_skip = True
+                    break
+            if should_skip:
+                continue
+
         if m["key"] not in seen_keys:
             seen_keys.add(m["key"])
             final_models.append(m)
@@ -1027,7 +1038,7 @@ def api_push(req: WorkspaceActionRequest):
     try:
         res = subprocess.run(["git", "-C", w_path, "push", "origin", req.branch], capture_output=True, text=True, timeout=25)
         if res.returncode == 0:
-            return {"status": "success", "message": f"Pushed to origin/{req.branch}!", "git_status": get_workspace_git_status(req.repo_dir_name)}
+            return {"status": "success", "message": f"Pushed to origin/{req.branch}!", "git_status": get_workspace_git_status(repo_dir_name=req.repo_dir_name)}
         return JSONResponse(status_code=500, content={"status": "error", "message": res.stderr or res.stdout})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})

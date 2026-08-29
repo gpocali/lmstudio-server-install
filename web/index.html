@@ -52,7 +52,7 @@
     <div class="flex items-center gap-3">
       <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-black text-sm text-white shadow">M</div>
       <h1 class="text-lg font-bold bg-gradient-to-r from-sky-400 to-indigo-300 bg-clip-text text-transparent">Madison</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.8</span>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.9</span>
     </div>
 
     <!-- Navigation Page Buttons with Activity & Unread Indicators -->
@@ -147,7 +147,6 @@
       </div>
     </aside>
 
-    <!-- Main Chat Feed & Input -->
     <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
       
       <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex justify-between items-center shrink-0 z-10">
@@ -477,18 +476,19 @@
     </section>
   </main>
 
-<!-- ==================== VIEW 5: MODEL MANAGER ==================== -->
+  <!-- ==================== VIEW 5: MODEL MANAGER ==================== -->
   <main id="viewModels" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-7xl mx-auto w-full select-text">
     <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
       <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
         <h2 id="catalogHeader" class="text-lg font-semibold">Available Models (Top GGUFs on Hugging Face)</h2>
-        <div class="flex flex-wrap gap-2 items-center">
-          <button onclick="resyncLmsModels(this)" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 text-xs px-3 py-1.5 rounded transition flex items-center gap-1" title="Rescan disk and resync imported models with engine dropdowns">
-            🔄 Resync Models
-          </button>
-          <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 text-xs px-2.5 py-1.5 rounded text-slate-300">🔥 All</button>
-          <button onclick="searchAuthor('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 text-xs px-2.5 py-1.5 rounded">🛡️ bartowski</button>
-          <button onclick="searchAuthor('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 text-xs px-3.5 py-1.5 rounded">🛡️ unsloth</button>
+        <div class="flex flex-wrap gap-1.5 text-xs items-center">
+          <span class="text-slate-400 mr-1">Filter:</span>
+          <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">🔥 All</button>
+          <button onclick="searchAuthor('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ bartowski</button>
+          <button onclick="searchAuthor('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ unsloth</button>
+          <button onclick="searchAuthor('TheBloke')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ TheBloke</button>
+          <button onclick="searchAuthor('Qwen')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen</button>
+          <button onclick="quickSearch('Llama-3')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Llama 3</button>
         </div>
       </div>
       
@@ -537,6 +537,10 @@
             <h2 class="text-lg font-semibold">Installed Models on Server</h2>
             <span id="diskSubStat" class="text-xs text-slate-400">-- / -- GB</span>
           </div>
+          <!-- Relocated Resync Models Button -->
+          <button onclick="resyncLmsModels(this)" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 text-xs px-3 py-1.5 rounded transition flex items-center gap-1" title="Rescan disk and resync imported models with engine dropdowns">
+            🔄 Resync Models
+          </button>
         </div>
         <div id="localList" class="space-y-2 text-sm text-slate-300">Scanning...</div>
       </section>
@@ -720,6 +724,26 @@
         const activeModelStr = loadedModelsList.length > 0 ? loadedModelsList[0] : "None Loaded (Auto-Load on demand)";
         document.getElementById('currentChatModelIndicator').textContent = "Active Model: " + activeModelStr;
       } catch(e) {}
+    }
+
+    async function resyncLmsModels(btn) {
+      const origText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = "⏳ Resyncing...";
+      try {
+        const res = await fetch('/api/lms/resync', { method: 'POST' });
+        if (res.ok) {
+          await syncLmsRegisteredModels();
+          await fetchLocalModels();
+          alert("Models resynced successfully with engine dropdowns!");
+        } else {
+          alert("Resync failed.");
+        }
+      } catch(e) {
+        alert("Resync communication error: " + e.message);
+      }
+      btn.disabled = false;
+      btn.innerHTML = origText;
     }
 
     async function onModelDropdownSelected(domain) {
@@ -1119,7 +1143,6 @@
       promptInput.value = '';
       autoResizeTextarea(promptInput);
 
-      // Optimistically render the User's prompt bubble & active progress card immediately
       let wrapper = chatWindow.querySelector('.max-w-4xl');
       if (!wrapper) {
         wrapper = document.createElement('div');
@@ -1139,9 +1162,7 @@
         '</div></div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(instruction) + '</p>';
       wrapper.appendChild(userMsgDiv);
 
-      const activeTempCardId = 'pending-agent-card-' + Date.now();
       const progressDiv = document.createElement('div');
-      progressDiv.id = activeTempCardId;
       progressDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-emerald-400 max-w-[95%] mr-auto shadow-md flex items-center gap-2 animate-pulse';
       progressDiv.innerHTML = '<svg class="animate-spin h-4 w-4 text-emerald-400 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>' +
         '<span>🤖 Analyzing workspace context & generating code changes in background...</span>';
@@ -2459,26 +2480,6 @@
       } catch(e) {
         list.innerHTML = '<span class="text-rose-400">Error loading local models: ' + escapeHtml(e.message) + '</span>';
       }
-    }
-    
-    async function resyncLmsModels(btn) {
-      const origText = btn.innerHTML;
-      btn.disabled = true;
-      btn.innerHTML = "⏳ Resyncing...";
-      try {
-        const res = await fetch('/api/lms/resync', { method: 'POST' });
-        if (res.ok) {
-          await syncLmsRegisteredModels();
-          await fetchLocalModels();
-          alert("Models resynced successfully with engine dropdowns!");
-        } else {
-          alert("Resync failed.");
-        }
-      } catch(e) {
-        alert("Resync communication error: " + e.message);
-      }
-      btn.disabled = false;
-      btn.innerHTML = origText;
     }
 
     // Startup Initialization & Schedulers
