@@ -1,6 +1,6 @@
 """
 Madison AI Core Server Entrypoint
-Direct LM Studio Registry Management, Background Task Queue, and Workspace Agent.
+Direct Absolute-Path Model Loading, Background Task Queue, and Workspace Agent.
 """
 
 import os
@@ -60,143 +60,36 @@ HF_HEADERS = {
 @app.on_event("startup")
 async def startup_event():
     TASK_QUEUE.start_worker()
-    ensure_models_indexed()
 
-# ---------------- Direct LMS Registry & Loading ----------------
+# ---------------- Direct Absolute-Path Model Loading ----------------
 
-def ensure_models_indexed():
-    """Indexes all local GGUF models into LM Studio's registry via symbolic links and import."""
-    lms = get_lms_bin()
-    lms_dirs = [
-        os.path.join(STORAGE_PATH, ".cache", "lm-studio", "models"),
-        os.path.join(STORAGE_PATH, ".lmstudio", "models")
-    ]
-    for d in lms_dirs:
-        os.makedirs(d, exist_ok=True)
-
+def list_local_gguf_models() -> list[dict]:
+    """Scans MODELS_PATH directly for .gguf files, ensuring robust, exact options for the UI."""
+    models = []
     if not os.path.exists(MODELS_PATH):
-        return
+        return models
 
     for root, _, files in os.walk(MODELS_PATH, followlinks=True):
         for f in files:
             if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
-                src_file = os.path.join(root, f)
-                rel = os.path.relpath(root, MODELS_PATH)
-                for base in lms_dirs:
-                    target_dir = os.path.join(base, rel)
-                    os.makedirs(target_dir, exist_ok=True)
-                    link_dest = os.path.join(target_dir, f)
-                    if not os.path.exists(link_dest):
-                        try: os.symlink(src_file, link_dest)
-                        except Exception: pass
-                try:
-                    subprocess.run([lms, "import", "--yes", "--symbolic-link", src_file], env=LMS_ENV, capture_output=True, timeout=5)
-                except Exception: pass
+                path = os.path.join(root, f)
+                parent_dir = os.path.basename(root)
+                clean_name = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', f)
+                display_label = f"{parent_dir} / {clean_name}" if parent_dir else clean_name
+                
+                models.append({
+                    "key": path,  # Use absolute path as key for 100% reliable lms load
+                    "display_name": display_label,
+                    "filename": f
+                })
+    
+    models.sort(key=lambda x: x["display_name"].lower())
+    return models
 
-def list_registered_lms_keys() -> list[dict]:
-    """
-    Retrieves model keys directly from LM Studio CLI, aggressively filtering out
-    any unnamespaced short slugs when a fully author-namespaced key exists.
-    """
+def execute_lms_load(target_path: str, context_length: int = 32768, gpu_offload: str = "max") -> tuple[bool, str]:
+    """Executes `lms load <absolute_path>` directly with context fallback."""
     lms = get_lms_bin()
-    ensure_models_indexed()
-    raw_models = []
-
-    # 1. Try JSON parsing
-    try:
-        res = subprocess.run([lms, "ls", "--json"], env=LMS_ENV, capture_output=True, text=True, timeout=6)
-        if res.returncode == 0 and res.stdout.strip().startswith("{"):
-            data = json.loads(res.stdout)
-            for m in data.get("models", data.get("llms", [])):
-                k = m.get("key") or m.get("identifier") or m.get("path")
-                if k:
-                    k_str = str(k).strip()
-                    raw_models.append({
-                        "key": k_str,
-                        "display_name": m.get("name") or k_str,
-                        "loaded": m.get("loaded", False)
-                    })
-    except Exception: pass
-
-    # 2. Text fallback parsing
-    if not raw_models:
-        try:
-            res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=6)
-            if res.returncode == 0:
-                in_llm = False
-                for line in res.stdout.splitlines():
-                    raw = line.strip()
-                    if "LLM" in raw.upper():
-                        in_llm = True
-                        continue
-                    if "EMBEDDING" in raw.upper() or raw.startswith("===") or raw.startswith("---"):
-                        in_llm = False
-                        continue
-                    if in_llm and raw:
-                        clean = re.sub(r'^[├│└─•\*\s\-\>\|]+', '', raw).strip()
-                        parts = clean.split()
-                        if parts:
-                            candidate_key = parts[0].strip()
-                            if candidate_key and not candidate_key.startswith("-") and candidate_key.upper() != "IDENTIFIER":
-                                raw_models.append({
-                                    "key": candidate_key,
-                                    "display_name": candidate_key,
-                                    "loaded": "LOADED" in raw.upper()
-                                })
-        except Exception: pass
-
-    # 3. Disk fallback scanning of MODELS_PATH
-    if not raw_models and os.path.exists(MODELS_PATH):
-        for root, _, files in os.walk(MODELS_PATH, followlinks=True):
-            for f in files:
-                if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
-                    parent_folder = os.path.basename(root)
-                    clean_name = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', f)
-                    if "_" in parent_folder:
-                        author, repo = parent_folder.split("_", 1)
-                        namespaced_key = f"{author}/{repo}/{clean_name}"
-                        raw_models.append({"key": namespaced_key, "display_name": namespaced_key, "loaded": False})
-                    else:
-                        raw_models.append({"key": clean_name, "display_name": clean_name, "loaded": False})
-
-    # Aggressive Deduplication Pass
-    # Collect all unique file basenames present in author-namespaced keys (e.g. "qwen3.8-27b-ud-q4_k_m")
-    namespaced_filenames = set()
-    for m in raw_models:
-        if "/" in m["key"]:
-            fname = os.path.basename(m["key"]).lower().replace('.gguf', '')
-            namespaced_filenames.add(fname)
-            # Also add parts of repo/model name
-            for part in m["key"].lower().split('/'):
-                if len(part) > 3: namespaced_filenames.add(part)
-
-    final_models = []
-    seen_keys = set()
-    for m in raw_models:
-        k_lower = m["key"].lower()
-        is_namespaced = "/" in m["key"]
-        
-        # If this is an unnamespaced entry (no '/') but its slug matches a known file base in a namespaced entry, skip it
-        if not is_namespaced:
-            slug = k_lower.replace('.gguf', '')
-            should_skip = False
-            for nf in namespaced_filenames:
-                if slug in nf or nf in slug:
-                    should_skip = True
-                    break
-            if should_skip:
-                continue
-
-        if m["key"] not in seen_keys:
-            seen_keys.add(m["key"])
-            final_models.append(m)
-
-    return final_models
-
-def execute_lms_load(target_key: str, context_length: int = 32768, gpu_offload: str = "max") -> tuple[bool, str]:
-    """Executes `lms load <key>` directly with fallback on context length if VRAM bounds are exceeded."""
-    lms = get_lms_bin()
-    if not target_key or target_key in ("auto", "default"):
+    if not target_path or target_path in ("auto", "default"):
         return True, "Auto mode active"
 
     ctx_ladder = [context_length]
@@ -207,7 +100,7 @@ def execute_lms_load(target_key: str, context_length: int = 32768, gpu_offload: 
     last_error = ""
     for ctx in ctx_ladder:
         cmd = [
-            lms, "load", target_key,
+            lms, "load", target_path,
             f"--gpu={gpu_offload}",
             f"--context-length={ctx}",
             "--ttl=3600",
@@ -216,33 +109,34 @@ def execute_lms_load(target_key: str, context_length: int = 32768, gpu_offload: 
         try:
             res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=90)
             if res.returncode == 0:
-                return True, f"Loaded {target_key} successfully ({ctx} context)."
+                return True, f"Loaded model successfully ({ctx} context)."
             last_error = (res.stderr or res.stdout or "").strip()
         except Exception as e:
             last_error = str(e)
 
     return False, last_error or "Failed to load model"
 
-def ensure_active_model(model_key: str = "", context_length: int = 32768) -> str:
+def ensure_active_model(model_path: str = "", context_length: int = 32768) -> str:
     loaded = get_loaded_models()
-    if model_key and model_key not in ("auto", "default"):
+    if model_path and model_path not in ("auto", "default"):
+        fname = os.path.basename(model_path).replace('.gguf', '').lower()
         for l in (loaded or []):
-            if model_key.lower() in l.lower() or l.lower() in model_key.lower():
+            if fname in l.lower() or l.lower() in fname:
                 return l
-        success, _ = execute_lms_load(model_key, context_length=context_length)
+        success, _ = execute_lms_load(model_path, context_length=context_length)
         if success:
             recheck = get_loaded_models()
-            return recheck[0] if recheck else model_key
+            return recheck[0] if recheck else model_path
 
     if loaded:
         return loaded[0]
 
-    reg = list_registered_lms_keys()
-    if reg:
-        first_key = reg[0]["key"]
-        execute_lms_load(first_key, context_length=context_length)
+    ggufs = list_local_gguf_models()
+    if ggufs:
+        first_path = ggufs[0]["key"]
+        execute_lms_load(first_path, context_length=context_length)
         recheck = get_loaded_models()
-        return recheck[0] if recheck else first_key
+        return recheck[0] if recheck else first_path
 
     return "default"
 
@@ -424,18 +318,17 @@ def serve_ui():
 @app.get("/api/lms/registered_models")
 def api_get_lms_models():
     return {
-        "models": list_registered_lms_keys(),
+        "models": list_local_gguf_models(),
         "loaded_models": get_loaded_models()
     }
 
 @app.post("/api/lms/resync")
 def api_resync_models():
-    ensure_models_indexed()
-    return {"status": "success", "models": list_registered_lms_keys()}
+    return {"status": "success", "models": list_local_gguf_models()}
 
 @app.post("/api/load_model")
 def api_load_model(req: LoadRequest):
-    target = req.model_key or req.model_path
+    target = req.model_path or req.model_key
     success, msg = execute_lms_load(target, context_length=req.context_length, gpu_offload=req.gpu_offload)
     if success:
         return {"status": "success", "loaded_target": target, "output": msg}
@@ -723,7 +616,6 @@ def api_get_tasks():
 
 @app.get("/api/local_models")
 def api_local_models():
-    ensure_models_indexed()
     files = []
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
