@@ -52,7 +52,7 @@
     <div class="flex items-center gap-3">
       <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-black text-sm text-white shadow">M</div>
       <h1 class="text-lg font-bold bg-gradient-to-r from-sky-400 to-indigo-300 bg-clip-text text-transparent">Madison</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.7</span>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.8</span>
     </div>
 
     <!-- Navigation Page Buttons with Activity & Unread Indicators -->
@@ -147,6 +147,7 @@
       </div>
     </aside>
 
+    <!-- Main Chat Feed & Input -->
     <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
       
       <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex justify-between items-center shrink-0 z-10">
@@ -1106,6 +1107,7 @@
       const instruction = promptInput.value.trim();
       const modelIdentifier = document.getElementById('studioModelSelector').value;
       const ctxLength = parseInt(document.getElementById('studioContextSelector').value) || 32768;
+      const chatWindow = document.getElementById('chatHistoryWindow');
 
       if (!currentWorkspaceDir) return alert('Select an active workspace from the left pane first.');
       if (!instruction) return alert('Please enter a task or coding instruction.');
@@ -1117,6 +1119,35 @@
 
       promptInput.value = '';
       autoResizeTextarea(promptInput);
+
+      // Optimistically render the User's prompt bubble & active progress card immediately
+      let wrapper = chatWindow.querySelector('.max-w-4xl');
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
+        chatWindow.innerHTML = '';
+        chatWindow.appendChild(wrapper);
+      }
+
+      const rawPromptEnc = encodeURIComponent(instruction);
+      const userMsgDiv = document.createElement('div');
+      userMsgDiv.className = 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md space-y-1 relative group';
+      userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between text-[11px] mb-1">' +
+        '<span>You</span>' +
+        '<div class="flex items-center gap-2">' +
+        '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml(selectedFiles.length > 0 ? selectedFiles.join(', ') : 'No files selected') + '</span>' +
+        '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawPromptEnc + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
+        '</div></div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(instruction) + '</p>';
+      wrapper.appendChild(userMsgDiv);
+
+      const activeTempCardId = 'pending-agent-card-' + Date.now();
+      const progressDiv = document.createElement('div');
+      progressDiv.id = activeTempCardId;
+      progressDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-emerald-400 max-w-[95%] mr-auto shadow-md flex items-center gap-2 animate-pulse';
+      progressDiv.innerHTML = '<svg class="animate-spin h-4 w-4 text-emerald-400 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>' +
+        '<span>🤖 Analyzing workspace context & generating code changes in background...</span>';
+      wrapper.appendChild(progressDiv);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
 
       try {
         const res = await fetch('/api/queue/submit_agent', {
@@ -1137,10 +1168,15 @@
           const compTargetId = `${targetRepoDir}:${targetThreadId}`;
           activeRunningTasks.set(data.task_id, { domain: 'coding', target_id: compTargetId });
           renderThreadsSidebar();
+          updateGlobalIndicatorDots();
           pollTaskStatus(data.task_id, 'coding', compTargetId);
+        } else {
+          progressDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
+          progressDiv.innerHTML = '❌ Submission Error: ' + (data.message || 'Failed to queue task');
         }
       } catch(e) {
-        alert('Failed to submit coding task: ' + e.message);
+        progressDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
+        progressDiv.innerHTML = '❌ Communication Error: ' + e.message;
       }
     }
 
@@ -1151,6 +1187,7 @@
           if (!res.ok) {
             clearInterval(interval);
             activeRunningTasks.delete(taskId);
+            updateGlobalIndicatorDots();
             return;
           }
           const task = await res.json();
@@ -1195,7 +1232,19 @@
                   unreadCompletedTasks.set(targetId, taskId);
                 }
               }
+            } else if (task.status === 'failed') {
+              if (domain === 'coding' && currentActiveView === 'studio') {
+                const chatWindow = document.getElementById('chatHistoryWindow');
+                const errDiv = document.createElement('div');
+                errDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
+                errDiv.innerHTML = '❌ Agent Task Execution Failed: ' + escapeHtml(task.error || 'Unknown error occurred');
+                chatWindow.appendChild(errDiv);
+                chatWindow.scrollTop = chatWindow.scrollHeight;
+              } else {
+                alert(`Task Failed [${domain}]: ` + (task.error || 'Unknown error'));
+              }
             }
+
             updateGlobalIndicatorDots();
             renderGeneralChatSidebar();
             renderThreadsSidebar();
@@ -1203,6 +1252,7 @@
         } catch(e) {
           clearInterval(interval);
           activeRunningTasks.delete(taskId);
+          updateGlobalIndicatorDots();
         }
       }, 1500);
     }
