@@ -1,6 +1,6 @@
 """
 Madison AI Core Server Entrypoint
-Asynchronous background job engine, model grouping, workspace deletion, and persona vault.
+Asynchronous background job engine, model grouping, safe model loading, and persona vault.
 """
 
 import os
@@ -61,11 +61,16 @@ HF_HEADERS = {
 async def startup_event():
     TASK_QUEUE.start_worker()
 
-# ---------------- Model Resolution Helper ----------------
+# ---------------- Hardened Model Loader ----------------
 
-def load_model_by_path_or_key(target_path: str = "", context_length: int = 32768, gpu_offload: str = "max") -> str:
-    """Strictly loads the requested target model. Falls back to registered keys only if target_path is blank."""
+def load_model_by_path_or_key(target_path: str = "", context_length: int = 32768, gpu_offload: str = "max") -> tuple[str, str]:
+    """
+    Robustly loads a model into LM Studio with automatic context reduction
+    fallback (32K -> 16K -> 8K -> 4K) if initial VRAM KV-cache allocation fails.
+    """
     lms = get_lms_bin()
+
+    # 1. Fetch registered keys from `lms ls`
     registered_keys = []
     try:
         ls_res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=8)
@@ -80,73 +85,90 @@ def load_model_by_path_or_key(target_path: str = "", context_length: int = 32768
                     if parts: registered_keys.append(parts[0])
     except Exception: pass
 
+    # 2. Ensure model is imported in LMS registry if target_path is provided
+    if target_path and os.path.exists(target_path):
+        try:
+            subprocess.run([lms, "import", "--yes", "--symbolic-link", target_path], env=LMS_ENV, capture_output=True, timeout=10)
+        except Exception: pass
+
     candidates = []
     if target_path:
         fname = os.path.basename(target_path)
         clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname, flags=re.IGNORECASE).lower()
         f_strip = re.sub(r'[^a-z0-9]', '', clean_fname)
 
-        # 1. Exact or strict substring match against registered keys
+        # Match exact key
         for key in registered_keys:
             k_strip = re.sub(r'[^a-z0-9]', '', key.lower())
             if k_strip == f_strip or k_strip in f_strip or f_strip in k_strip:
                 candidates.append(key)
                 break
-        
-        # 2. Add exact clean name, filename, and full absolute path
-        candidates.extend([clean_fname, fname, target_path])
+
+        candidates.extend([target_path, clean_fname, fname])
     else:
         candidates.extend(registered_keys)
 
     seen = set()
     dedup = [c for c in candidates if c and not (c in seen or seen.add(c))]
 
-    for candidate in dedup:
-        try:
-            cmd = [lms, "load", candidate, f"--gpu={gpu_offload}", f"--context-length={context_length}", "--ttl=3600", "--yes"]
-            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=60)
-            if res.returncode == 0:
-                loaded = get_loaded_models()
-                return loaded[0] if loaded else candidate
-        except Exception: pass
+    # Fallback ladder for context lengths
+    ctx_ladder = [context_length]
+    for fallback in [16384, 8192, 4096]:
+        if fallback < context_length:
+            ctx_ladder.append(fallback)
 
-    loaded_now = get_loaded_models()
-    return loaded_now[0] if loaded_now else ""
+    last_error = ""
+    for candidate in dedup:
+        for ctx in ctx_ladder:
+            try:
+                cmd = [
+                    lms, "load", candidate,
+                    f"--gpu={gpu_offload}",
+                    f"--context-length={ctx}",
+                    "--ttl=3600",
+                    "--yes"
+                ]
+                res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=90)
+                if res.returncode == 0:
+                    loaded = get_loaded_models()
+                    loaded_name = loaded[0] if loaded else candidate
+                    return loaded_name, ""
+                else:
+                    last_error = (res.stderr or res.stdout or "").strip()
+            except Exception as e:
+                last_error = str(e)
+
+    return "", last_error
 
 def ensure_active_model(model_identifier: str = "") -> str:
-    """Returns an active model identifier; loads specific model if requested or auto-loads first available."""
     loaded = get_loaded_models()
     
-    # Specific model requested
     if model_identifier and model_identifier not in ("default", "auto"):
         clean_req = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', os.path.basename(model_identifier), flags=re.IGNORECASE).lower()
         clean_req_strip = re.sub(r'[^a-z0-9]', '', clean_req)
 
-        # Check if already loaded
         for l in (loaded or []):
             l_clean = re.sub(r'[^a-z0-9]', '', l.lower())
             if clean_req_strip in l_clean or l_clean in clean_req_strip:
                 return l
 
-        # Not loaded -> load this specific requested model
-        loaded_key = load_model_by_path_or_key(model_identifier)
+        loaded_key, _ = load_model_by_path_or_key(model_identifier)
         if loaded_key: return loaded_key
         return model_identifier
 
-    # Auto mode: if a model is already loaded, use it
     if loaded:
         return loaded[0]
 
-    # Auto mode: load first model on disk
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
             for f in sorted(filenames):
                 if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
                     first_model_path = os.path.join(root, f)
-                    loaded_key = load_model_by_path_or_key(first_model_path)
+                    loaded_key, _ = load_model_by_path_or_key(first_model_path)
                     if loaded_key: return loaded_key
 
-    return load_model_by_path_or_key()
+    loaded_key, _ = load_model_by_path_or_key()
+    return loaded_key
 
 # ---------------- Execution Callables for Queue ----------------
 
@@ -555,7 +577,7 @@ def api_model_files(repo_id: str):
 
 @app.post("/api/load_model")
 def api_load_model(req: LoadRequest):
-    loaded_key = load_model_by_path_or_key(
+    loaded_key, err = load_model_by_path_or_key(
         target_path=req.model_path,
         context_length=req.context_length,
         gpu_offload=req.gpu_offload
@@ -563,7 +585,10 @@ def api_load_model(req: LoadRequest):
     if loaded_key:
         return {"status": "success", "loaded_target": loaded_key, "context_length": req.context_length, "output": f"Loaded {loaded_key} into GPU VRAM."}
     
-    return JSONResponse(status_code=400, content={"status": "error", "message": f"Could not load model '{os.path.basename(req.model_path)}' into GPU VRAM."})
+    return JSONResponse(
+        status_code=400,
+        content={"status": "error", "message": err or f"Could not load model '{os.path.basename(req.model_path)}' into GPU VRAM. Check context length / VRAM bounds."}
+    )
 
 @app.post("/api/unload_model")
 def api_unload_model():
