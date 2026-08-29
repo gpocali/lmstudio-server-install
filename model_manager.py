@@ -60,102 +60,121 @@ HF_HEADERS = {
 @app.on_event("startup")
 async def startup_event():
     TASK_QUEUE.start_worker()
+    ensure_models_indexed()
 
-# ---------------- Hardened Model Registry & Loader ----------------
+# ---------------- Model Registry & Linking ----------------
 
-def get_lms_registered_keys() -> list[str]:
-    """Retrieves clean model keys from LM Studio CLI, stripping tree and formatting artifacts."""
+def ensure_models_indexed():
+    """Ensures all GGUF models in MODELS_PATH are symlinked into LM Studio model search paths."""
+    lms_dirs = [
+        os.path.join(STORAGE_PATH, ".cache", "lm-studio", "models"),
+        os.path.join(STORAGE_PATH, ".lmstudio", "models")
+    ]
+    for d in lms_dirs:
+        os.makedirs(d, exist_ok=True)
+
+    if not os.path.exists(MODELS_PATH):
+        return
+
+    for root, dirs, files in os.walk(MODELS_PATH, followlinks=True):
+        for f in files:
+            if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
+                rel = os.path.relpath(root, MODELS_PATH)
+                for base in lms_dirs:
+                    target_dir = os.path.join(base, rel)
+                    os.makedirs(target_dir, exist_ok=True)
+                    link_dest = os.path.join(target_dir, f)
+                    src_file = os.path.join(root, f)
+                    if not os.path.exists(link_dest):
+                        try:
+                            os.symlink(src_file, link_dest)
+                        except Exception:
+                            pass
+
+def get_lms_registered_models() -> dict[str, str]:
+    """
+    Parses `lms ls` preserving hierarchical tree paths (parent repo + child GGUF).
+    Returns mapping of clean_lookup_key -> exact_lms_load_key.
+    """
     lms = get_lms_bin()
-    keys = []
+    model_map = {}
 
-    # 1. Try JSON output
     try:
-        res = subprocess.run([lms, "ls", "--json"], env=LMS_ENV, capture_output=True, text=True, timeout=6)
-        if res.returncode == 0 and res.stdout.strip().startswith("{"):
-            data = json.loads(res.stdout)
-            for item in data.get("models", data.get("llms", [])):
-                k = item.get("key") or item.get("identifier") or item.get("name") or item.get("path")
-                if k: keys.append(str(k).strip())
-            if keys:
-                return keys
-    except Exception: pass
-
-    # 2. Text parsing of lms ls
-    try:
-        res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=6)
+        res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=8)
         if res.returncode == 0:
             in_llm = False
+            current_parent = ""
+
             for line in res.stdout.splitlines():
-                raw = line.strip()
-                if "LLM" in raw.upper():
+                raw = line.rstrip()
+                clean = re.sub(r'^[├│└─\s•\*\-\>\|]+', '', raw).strip()
+
+                if "LLM" in clean.upper():
                     in_llm = True
                     continue
-                if "EMBEDDING" in raw.upper() or raw.startswith("===") or raw.startswith("---"):
+                if "EMBEDDING" in clean.upper() or clean.startswith("===") or clean.startswith("---"):
                     in_llm = False
                     continue
-                if in_llm and raw:
-                    # Strip box-drawing tree characters, bullets, and symbols
-                    clean = re.sub(r'^[├│└─•\*\s\-\>\|]+', '', raw).strip()
-                    parts = clean.split()
-                    if parts:
-                        candidate_key = parts[0].strip()
-                        if candidate_key and not candidate_key.startswith("-") and candidate_key.upper() != "IDENTIFIER":
-                            keys.append(candidate_key)
-                    # Extract parenthesized filenames if present
-                    paren = re.search(r'\(([^)]+\.gguf)\)', clean)
-                    if paren:
-                        keys.append(paren.group(1).strip())
-    except Exception: pass
 
-    return keys
+                if in_llm and clean:
+                    if "/" in clean and not clean.endswith(".gguf"):
+                        current_parent = clean.split()[0]
+                        model_map[current_parent.lower()] = current_parent
+                    else:
+                        token = clean.split()[0] if clean.split() else clean
+                        if current_parent:
+                            full_key = f"{current_parent}/{token}"
+                            model_map[full_key.lower()] = full_key
+                            model_map[token.lower()] = full_key
+                            model_map[token.replace('.gguf', '').lower()] = full_key
+                        else:
+                            model_map[token.lower()] = token
+                            model_map[token.replace('.gguf', '').lower()] = token
+    except Exception:
+        pass
+
+    return model_map
 
 def load_model_by_path_or_key(target_path: str = "", context_length: int = 32768, gpu_offload: str = "max") -> tuple[str, str]:
     """
-    Robustly loads a model into LM Studio with automatic context reduction
-    fallback (32K -> 16K -> 8K -> 4K) if initial VRAM KV-cache allocation fails.
+    Robustly resolves the model identifier and executes `lms load` with
+    context fallback (e.g. 32K -> 16K -> 8K -> 4K) if KV cache exceeds VRAM.
     """
     lms = get_lms_bin()
-    registered_keys = get_lms_registered_keys()
-
-    # Ensure symlinks and import exist
-    if target_path and os.path.exists(target_path):
-        parent_dir = os.path.dirname(target_path)
-        folder_name = os.path.basename(parent_dir)
-        for base in [os.path.join(STORAGE_PATH, ".cache", "lm-studio", "models"), os.path.join(STORAGE_PATH, ".lmstudio", "models")]:
-            os.makedirs(base, exist_ok=True)
-            link_target = os.path.join(base, folder_name)
-            if not os.path.exists(link_target):
-                try: os.symlink(parent_dir, link_target)
-                except Exception: pass
-
-        try:
-            subprocess.run([lms, "import", "--yes", "--symbolic-link", target_path], env=LMS_ENV, capture_output=True, timeout=10)
-            registered_keys = get_lms_registered_keys()
-        except Exception: pass
+    ensure_models_indexed()
+    model_map = get_lms_registered_models()
 
     candidates = []
+
     if target_path:
         fname = os.path.basename(target_path)
-        parent_dir = os.path.basename(os.path.dirname(target_path))
         clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname, flags=re.IGNORECASE).lower()
-        f_strip = re.sub(r'[^a-z0-9]', '', clean_fname)
+        parent_dir = os.path.basename(os.path.dirname(target_path)).lower()
+        
+        # 1. Match from registered model map
+        for k, v in model_map.items():
+            if clean_fname in k or k in clean_fname or (parent_dir and parent_dir in k):
+                candidates.append(v)
 
-        # Match registered keys containing the file slug
-        matched_keys = []
-        for key in registered_keys:
-            k_strip = re.sub(r'[^a-z0-9]', '', key.lower())
-            if f_strip and (f_strip in k_strip or k_strip in f_strip):
-                matched_keys.append(key)
+        # 2. Try registering path via `lms import`
+        if os.path.exists(target_path):
+            try:
+                imp_res = subprocess.run([lms, "import", "--yes", "--symbolic-link", target_path], env=LMS_ENV, capture_output=True, text=True, timeout=12)
+                # Check if import stdout specified a key
+                m = re.search(r'as:\s*([^\s]+)', imp_res.stdout or "")
+                if m:
+                    candidates.insert(0, m.group(1).strip())
+            except Exception:
+                pass
 
-        candidates.extend(matched_keys)
+        # 3. Direct key combinations
         candidates.append(f"{parent_dir}/{fname}")
         candidates.append(f"{parent_dir}/{clean_fname}")
-        candidates.append(parent_dir)
         candidates.append(clean_fname)
         candidates.append(fname)
         candidates.append(target_path)
     else:
-        candidates.extend(registered_keys)
+        candidates.extend(list(model_map.values()))
 
     seen = set()
     dedup = [c for c in candidates if c and not (c in seen or seen.add(c))]
@@ -636,7 +655,7 @@ def api_load_model(req: LoadRequest):
     
     return JSONResponse(
         status_code=400,
-        content={"status": "error", "message": err or f"Could not load model '{os.path.basename(req.model_path)}' into GPU VRAM. Check context length / VRAM bounds."}
+        content={"status": "error", "message": err or f"Could not load model '{os.path.basename(req.model_path)}' into GPU VRAM."}
     )
 
 @app.post("/api/unload_model")
@@ -677,6 +696,7 @@ def api_get_tasks():
 
 @app.get("/api/local_models")
 def api_local_models():
+    ensure_models_indexed()
     files = []
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
