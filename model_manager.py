@@ -579,7 +579,6 @@ def api_search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool =
 def api_model_files(repo_id: str):
     raw_files = {}
 
-    # Method 1: Hugging Face tree API
     try:
         resp = requests.get(f"https://huggingface.co/api/models/{repo_id}/tree/main?recursive=true", headers=HF_HEADERS, timeout=10)
         if resp.status_code == 200:
@@ -593,7 +592,6 @@ def api_model_files(repo_id: str):
                             raw_files[path] = sz
     except Exception: pass
 
-    # Method 2: Hugging Face model details API fallback
     if not raw_files:
         try:
             resp = requests.get(f"https://huggingface.co/api/models/{repo_id}", headers=HF_HEADERS, timeout=10)
@@ -879,8 +877,10 @@ def api_pull_upstream(req: WorkspaceActionRequest):
 
 @app.post("/api/github/clone")
 def api_clone_project(req: GithubCloneRequest):
-    token = get_token_for_user(account_username=req.account_username)
-    if not token: return JSONResponse(status_code=401, content={"status": "error", "message": "Auth required"})
+    token = get_token_for_user(req.account_username)
+    if not token:
+        return JSONResponse(status_code=401, content={"status": "error", "message": "No active GitHub token found for this account."})
+    
     dir_name = req.repo_full_name.replace("/", "_")
     dest_path = os.path.join(WORKSPACES_ROOT, dir_name)
     auth_url = f"https://oauth2:{token}@github.com/{req.repo_full_name}.git"
@@ -892,9 +892,9 @@ def api_clone_project(req: GithubCloneRequest):
             subprocess.run(["git", "-C", dest_path, "checkout", req.branch], capture_output=True, timeout=10)
             subprocess.run(["git", "-C", dest_path, "pull", "origin", req.branch], capture_output=True, timeout=10)
         else:
-            res = subprocess.run(["git", "clone", "-b", req.branch, auth_url, dest_path], capture_output=True, text=True, timeout=30)
+            res = subprocess.run(["git", "clone", "-b", req.branch, auth_url, dest_path], capture_output=True, text=True, timeout=45)
             if res.returncode != 0:
-                subprocess.run(["git", "clone", auth_url, dest_path], capture_output=True, text=True, timeout=30)
+                subprocess.run(["git", "clone", auth_url, dest_path], capture_output=True, text=True, timeout=45)
                 subprocess.run(["git", "-C", dest_path, "checkout", "-B", req.branch], capture_output=True, timeout=10)
 
         subprocess.run(["git", "-C", dest_path, "config", "user.name", req.account_username], capture_output=True)
@@ -902,7 +902,7 @@ def api_clone_project(req: GithubCloneRequest):
         os.chmod(dest_path, 0o777)
         return {"status": "success", "dir_name": dir_name, "branch": req.branch, "path": dest_path, "display_name": req.repo_full_name}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"Git clone failed: {str(e)}"})
 
 @app.get("/api/workspace/files")
 def api_workspace_files(repo_dir_name: str):
