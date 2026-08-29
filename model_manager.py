@@ -94,72 +94,93 @@ def ensure_models_indexed():
                 except Exception: pass
 
 def list_registered_lms_keys() -> list[dict]:
-    """Retrieves clean model keys directly from LM Studio CLI (`lms ls`)."""
+    """
+    Retrieves model keys directly from LM Studio CLI, deduplicating
+    unnamespaced slugs when author-namespaced keys exist.
+    """
     lms = get_lms_bin()
-    models = []
-    seen = set()
+    ensure_models_indexed()
+    raw_models = []
+    seen_keys = set()
 
-    # 1. Try parsing JSON
+    # 1. Try JSON parsing
     try:
         res = subprocess.run([lms, "ls", "--json"], env=LMS_ENV, capture_output=True, text=True, timeout=6)
         if res.returncode == 0 and res.stdout.strip().startswith("{"):
             data = json.loads(res.stdout)
             for m in data.get("models", data.get("llms", [])):
                 k = m.get("key") or m.get("identifier") or m.get("path")
-                if k and str(k).strip() not in seen:
-                    seen.add(str(k).strip())
-                    models.append({
-                        "key": str(k).strip(),
-                        "display_name": m.get("name") or str(k).strip(),
+                if k:
+                    k_str = str(k).strip()
+                    raw_models.append({
+                        "key": k_str,
+                        "display_name": m.get("name") or k_str,
                         "loaded": m.get("loaded", False)
                     })
-            if models:
-                return models
     except Exception: pass
 
-    # 2. Text fallback parsing of `lms ls`
-    try:
-        res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=6)
-        if res.returncode == 0:
-            in_llm = False
-            for line in res.stdout.splitlines():
-                raw = line.strip()
-                if "LLM" in raw.upper():
-                    in_llm = True
-                    continue
-                if "EMBEDDING" in raw.upper() or raw.startswith("===") or raw.startswith("---"):
-                    in_llm = False
-                    continue
-                if in_llm and raw:
-                    clean = re.sub(r'^[├│└─•\*\s\-\>\|]+', '', raw).strip()
-                    parts = clean.split()
-                    if parts:
-                        candidate_key = parts[0].strip()
-                        if candidate_key and not candidate_key.startswith("-") and candidate_key.upper() != "IDENTIFIER":
-                            if candidate_key not in seen:
-                                seen.add(candidate_key)
-                                models.append({
+    # 2. Text fallback parsing
+    if not raw_models:
+        try:
+            res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=6)
+            if res.returncode == 0:
+                in_llm = False
+                for line in res.stdout.splitlines():
+                    raw = line.strip()
+                    if "LLM" in raw.upper():
+                        in_llm = True
+                        continue
+                    if "EMBEDDING" in raw.upper() or raw.startswith("===") or raw.startswith("---"):
+                        in_llm = False
+                        continue
+                    if in_llm and raw:
+                        clean = re.sub(r'^[├│└─•\*\s\-\>\|]+', '', raw).strip()
+                        parts = clean.split()
+                        if parts:
+                            candidate_key = parts[0].strip()
+                            if candidate_key and not candidate_key.startswith("-") and candidate_key.upper() != "IDENTIFIER":
+                                raw_models.append({
                                     "key": candidate_key,
                                     "display_name": candidate_key,
                                     "loaded": "LOADED" in raw.upper()
                                 })
-    except Exception: pass
+        except Exception: pass
 
-    # 3. Disk fallback
-    if not models and os.path.exists(MODELS_PATH):
+    # 3. Disk fallback scanning of MODELS_PATH
+    if not raw_models and os.path.exists(MODELS_PATH):
         for root, _, files in os.walk(MODELS_PATH, followlinks=True):
             for f in files:
                 if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
-                    clean_name = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', f).lower()
-                    if clean_name not in seen:
-                        seen.add(clean_name)
-                        models.append({
-                            "key": clean_name,
-                            "display_name": clean_name,
-                            "loaded": False
-                        })
+                    parent_folder = os.path.basename(root)
+                    clean_name = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', f)
+                    if "_" in parent_folder:
+                        author, repo = parent_folder.split("_", 1)
+                        namespaced_key = f"{author}/{repo}/{clean_name}"
+                        raw_models.append({"key": namespaced_key, "display_name": namespaced_key, "loaded": False})
+                    else:
+                        raw_models.append({"key": clean_name, "display_name": clean_name, "loaded": False})
 
-    return models
+    # Deduplication pass: filter out unnamespaced keys if an author-namespaced version exists
+    namespaced_bases = set()
+    for m in raw_models:
+        if "/" in m["key"]:
+            parts = m["key"].split("/")
+            if len(parts) >= 2:
+                namespaced_bases.add(parts[-1].lower().replace('.gguf', ''))
+
+    final_models = []
+    for m in raw_models:
+        k_lower = m["key"].lower()
+        # If this is a bare slug (no '/') but we have a namespaced version for it, skip it
+        is_bare = "/" not in m["key"]
+        base_slug = k_lower.replace('.gguf', '')
+        if is_bare and base_slug in namespaced_bases:
+            continue
+        if m["key"] not in seen_keys:
+            seen_keys.add(m["key"])
+            final_models.append(m)
+
+    return final_models
 
 def execute_lms_load(target_key: str, context_length: int = 32768, gpu_offload: str = "max") -> tuple[bool, str]:
     """Executes `lms load <key>` directly with fallback on context length if VRAM bounds are exceeded."""
@@ -396,6 +417,11 @@ def api_get_lms_models():
         "loaded_models": get_loaded_models()
     }
 
+@app.post("/api/lms/resync")
+def api_resync_models():
+    ensure_models_indexed()
+    return {"status": "success", "models": list_registered_lms_keys()}
+
 @app.post("/api/load_model")
 def api_load_model(req: LoadRequest):
     target = req.model_key or req.model_path
@@ -578,7 +604,6 @@ def api_search_hf(q: str = "", sort_by: str = "downloads", verified_only: bool =
 @app.get("/api/model_files")
 def api_model_files(repo_id: str):
     raw_files = {}
-
     try:
         resp = requests.get(f"https://huggingface.co/api/models/{repo_id}/tree/main?recursive=true", headers=HF_HEADERS, timeout=10)
         if resp.status_code == 200:

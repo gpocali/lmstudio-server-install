@@ -477,19 +477,18 @@
     </section>
   </main>
 
-  <!-- ==================== VIEW 5: MODEL MANAGER ==================== -->
+<!-- ==================== VIEW 5: MODEL MANAGER ==================== -->
   <main id="viewModels" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-7xl mx-auto w-full select-text">
     <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
       <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
         <h2 id="catalogHeader" class="text-lg font-semibold">Available Models (Top GGUFs on Hugging Face)</h2>
-        <div class="flex flex-wrap gap-1.5 text-xs items-center">
-          <span class="text-slate-400 mr-1">Filter:</span>
-          <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">🔥 All</button>
-          <button onclick="searchAuthor('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ bartowski</button>
-          <button onclick="searchAuthor('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ unsloth</button>
-          <button onclick="searchAuthor('TheBloke')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ TheBloke</button>
-          <button onclick="searchAuthor('Qwen')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen</button>
-          <button onclick="quickSearch('Llama-3')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Llama 3</button>
+        <div class="flex flex-wrap gap-2 items-center">
+          <button onclick="resyncLmsModels(this)" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 text-xs px-3 py-1.5 rounded transition flex items-center gap-1" title="Rescan disk and resync imported models with engine dropdowns">
+            🔄 Resync Models
+          </button>
+          <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 text-xs px-2.5 py-1.5 rounded text-slate-300">🔥 All</button>
+          <button onclick="searchAuthor('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 text-xs px-2.5 py-1.5 rounded">🛡️ bartowski</button>
+          <button onclick="searchAuthor('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 text-xs px-3.5 py-1.5 rounded">🛡️ unsloth</button>
         </div>
       </div>
       
@@ -2460,6 +2459,26 @@
       } catch(e) {
         list.innerHTML = '<span class="text-rose-400">Error loading local models: ' + escapeHtml(e.message) + '</span>';
       }
+    }
+    
+    async function resyncLmsModels(btn) {
+      const origText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = "⏳ Resyncing...";
+      try {
+        const res = await fetch('/api/lms/resync', { method: 'POST' });
+        if (res.ok) {
+          await syncLmsRegisteredModels();
+          await fetchLocalModels();
+          alert("Models resynced successfully with engine dropdowns!");
+        } else {
+          alert("Resync failed.");
+        }
+      } catch(e) {
+        alert("Resync communication error: " + e.message);
+      }
+      btn.disabled = false;
+      btn.innerHTML = origText;
     }
 
     // Startup Initialization & Schedulers
