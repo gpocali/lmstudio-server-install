@@ -64,7 +64,7 @@ async def startup_event():
 # ---------------- Direct Absolute-Path Model Loading ----------------
 
 def list_local_gguf_models() -> list[dict]:
-    """Scans MODELS_PATH directly for .gguf files, ensuring robust, exact options for the UI."""
+    """Scans MODELS_PATH directly for existing .gguf files, omitting any stale or deleted paths."""
     models = []
     if not os.path.exists(MODELS_PATH):
         return models
@@ -73,12 +73,15 @@ def list_local_gguf_models() -> list[dict]:
         for f in files:
             if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
                 path = os.path.join(root, f)
+                # Strict verification that the file actually exists on disk
+                if not os.path.exists(path):
+                    continue
                 parent_dir = os.path.basename(root)
                 clean_name = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', f)
                 display_label = f"{parent_dir} / {clean_name}" if parent_dir else clean_name
                 
                 models.append({
-                    "key": path,  # Use absolute path as key for 100% reliable lms load
+                    "key": path,  # Absolute path as key for reliable lms load
                     "display_name": display_label,
                     "filename": f
                 })
