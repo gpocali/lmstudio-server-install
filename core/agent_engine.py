@@ -1,11 +1,11 @@
 """
-Madison Agent Engine (Plan-and-Execute Workflow)
-Handles repository file discovery, structured plan generation, user feedback revision,
-and precise file patching.
+Madison Agent Engine
+Handles autonomous multi-file generation, Git diff analysis, and commit message synthesis.
 """
 
 import os
 import re
+import json
 import datetime
 import requests
 import subprocess
@@ -122,7 +122,6 @@ def generate_agent_plan(repo_dir_name: str, instruction: str, model_id: str = ""
             return {"status": "error", "message": f"LLM Plan Error: {resp.text}"}
 
         content = resp.json()["choices"][0]["message"]["content"].strip()
-        # Clean markdown code blocks if present
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0].strip()
         elif "```" in content:
@@ -135,7 +134,6 @@ def generate_agent_plan(repo_dir_name: str, instruction: str, model_id: str = ""
             "plan_summary": plan_data.get("plan_summary", "Review plan before execution.")
         }
     except Exception as e:
-        # Fallback plan using all files or direct execution
         return {
             "status": "success",
             "target_files": file_tree[:5],
@@ -274,3 +272,16 @@ def execute_approved_plan(
         }
     except Exception as e:
         return {"status": "error", "message": f"Execution error: {str(e)}"}
+
+# Backwards compatibility alias for queue workers
+def process_agent_task(repo_dir_name: str, target_files: list = None, instruction: str = "", thread_id: str = "", persona_id: str = "coding", custom_system_prompt: str = "", model_id: str = "", **kwargs):
+    return execute_approved_plan(
+        repo_dir_name=repo_dir_name,
+        target_files=target_files or [],
+        instruction=instruction,
+        thread_id=thread_id,
+        persona_id=persona_id,
+        custom_system_prompt=custom_system_prompt,
+        model_id=model_id,
+        **kwargs
+    )
