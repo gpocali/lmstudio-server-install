@@ -107,3 +107,39 @@ def get_system_hardware_info():
         "storage": get_storage_usage(),
         "loaded_models": get_loaded_models()
     }
+
+def calculate_optimal_context(model_size_gb: float, vram_total_gb: float = 0.0, max_cap: int = 131072) -> int:
+    """
+    Computes the maximum safe context length that fits in GPU VRAM without OOM or spilling to RAM.
+    """
+    if vram_total_gb <= 0:
+        hw = get_system_hardware_info()
+        vram_total_gb = hw.get("gpu", {}).get("total_vram_gb", 0.0)
+
+    if vram_total_gb > 0:
+        headroom = vram_total_gb - model_size_gb - 1.2
+        if headroom >= 7.5 and max_cap >= 131072:
+            return 131072
+        elif headroom >= 3.8 and max_cap >= 65536:
+            return 65536
+        elif headroom >= 1.8 and max_cap >= 32768:
+            return 32768
+        elif headroom >= 0.9 and max_cap >= 16384:
+            return 16384
+        elif headroom >= 0.4 and max_cap >= 8192:
+            return 8192
+        else:
+            return min(4096, max_cap)
+    else:
+        # Fallback for CPU-only systems based on available System RAM
+        hw = get_system_hardware_info()
+        avail_ram = hw.get("system_ram", {}).get("available_gb", 8.0)
+        ram_headroom = avail_ram - model_size_gb
+        if ram_headroom >= 12.0 and max_cap >= 65536:
+            return 65536
+        elif ram_headroom >= 6.0 and max_cap >= 32768:
+            return 32768
+        elif ram_headroom >= 3.0 and max_cap >= 16384:
+            return 16384
+        else:
+            return min(8192, max_cap)
