@@ -50,123 +50,110 @@
   <!-- Global Top Navbar with Global Unload Button -->
   <header class="bg-slate-950 border-b border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-4 shrink-0 z-20">
     <div class="flex items-center gap-3">
-      <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-black text-sm text-white shadow">M</div >
+      <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-black text-sm text-white shadow">M</div>
       <h1 class="text-lg font-bold bg-gradient-to-r from-sky-400 to-indigo-300 bg-clip-text text-transparent">Madison</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.9</span >
-    </div >
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.9</span>
+    </div>
 
     <!-- Navigation Page Buttons with Activity & Unread Indicators -->
     <div class="flex items-center gap-2">
       <button onclick="switchView('chat')" id="navBtnChat" class="relative px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5">
-        <span>💬 Chat</span >
+        <span>💬 Chat</span>
         <span id="chatTabSpinner" class="hidden">
-          <svg class="animate-spin h-3.5 w-3.5 text-sky-200" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg >
+          <svg class="animate-spin h-3.5 w-3.5 text-sky-200" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
         </span>
-        <span id="chatTabUnreadDot" class="hidden w-2 h-2 rounded-full bg-emerald-400 unread-pulse"></span >
-      </button >
+        <span id="chatTabUnreadDot" class="hidden w-2 h-2 rounded-full bg-emerald-400 unread-pulse"></span>
+      </button>
 
       <button onclick="switchView('studio')" id="navBtnStudio" class="relative px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
-        <span>💻 Code Studio</span >
+        <span>💻 Code Studio</span>
         <span id="studioTabSpinner" class="hidden">
-          <svg class="animate-spin h-3.5 w-3.5 text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg >
+          <svg class="animate-spin h-3.5 w-3.5 text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
         </span>
-        <span id="studioTabUnreadDot" class="hidden w-2 h-2 rounded-full bg-emerald-400 unread-pulse"></span >
-      </button >
+        <span id="studioTabUnreadDot" class="hidden w-2 h-2 rounded-full bg-emerald-400 unread-pulse"></span>
+      </button>
 
       <button onclick="switchView('history')" id="navBtnHistory" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
         📜 Timeline
-      </button >
+      </button>
 
       <button onclick="switchView('github')" id="navBtnGithub" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
         🔑 Accounts
-      </button >
+      </button>
 
       <button onclick="switchView('models')" id="navBtnModels" class="px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5">
         📦 Models
-      </button >
-    </div >
+      </button>
+    </div>
 
     <!-- Hardware Readouts & Global Unload Action -->
     <div class="flex items-center gap-3 text-xs">
-      <!-- Context Selection Pill (Moved from Chat Footer) -->
-      <div class="bg-slate-900 px-3 py-1 rounded border border-slate-800 flex items-center gap-2">
-        <span class="text-slate-500 font-bold uppercase text-[10px] tracking-wider">Ctx</span>
-        <select id="chatContextSelector" onchange="onModelDropdownSelected('chat')" 
-                class="bg-transparent text-emerald-400 font-mono focus:outline-none cursor-pointer appearance-none">
-          <option value="8192">8K</option>
-          <option value="16384">16K</option>
-          <option value="32768" selected>32K</option>
-          <option value="65536">64K</option>
-          <option value="131072">128K</option>
-        </select>
-      </div>
-
       <div class="bg-slate-900 px-3 py-1 rounded border border-slate-800 text-slate-400">
         VRAM: <span id="vramStat" class="font-semibold text-emerald-400">--</span>
-      </div >
+      </div>
       <div class="bg-slate-900 px-3 py-1 rounded border border-slate-800 text-slate-400">
         Storage: <span id="storageStat" class="font-semibold text-amber-400">--</span>
-      </div >
+      </div>
       <button onclick="unloadAllModelsGlobal(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-rose-300 px-2.5 py-1 rounded font-medium transition" title="Unload all active models from VRAM">
         ⏹ Unload
       </button>
-    </div >
-  </header >
+    </div>
+  </header>
 
   <!-- ==================== VIEW 1: GENERAL CHAT ==================== -->
   <main id="viewChat" class="flex-1 flex overflow-hidden relative select-text">
     
     <aside class="w-80 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0 overflow-hidden">
       <div class="p-3.5 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
-        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Conversations</h2 >
+        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Conversations</h2>
         <div class="flex items-center gap-1">
           <button onclick="exportCurrentChat('markdown')" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700" title="Export as Markdown">MD</button>
           <button onclick="exportCurrentChat('json')" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700" title="Export as JSON">JSON</button>
           <button onclick="createNewChatSession()" class="text-xs bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded font-medium transition ml-1">
             + New
           </button>
-        </div >
-      </div >
+        </div>
+      </div>
 
       <div id="generalChatSessionsList" class="flex-1 overflow-y-auto p-2.5 space-y-1.5 text-xs">
         <p class="text-slate-500">Loading chats...</p>
-      </div >
+      </div>
       
       <div class="p-3.5 border-t border-slate-800 bg-slate-950/70 shrink-0 space-y-3">
         <div class="flex items-center justify-between">
           <label class="text-[11px] font-bold text-slate-300">Live Web Search (RAG):</label>
           <label class="relative inline-flex items-center cursor-pointer">
             <input type="checkbox" id="enableWebSearchToggle" checked class="sr-only peer">
-            <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div >
+            <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
           </label>
-        </div >
+        </div>
 
         <div class="space-y-1">
           <div class="flex justify-between items-center">
             <label class="text-[11px] font-bold text-slate-400">Persona Template:</label>
             <button onclick="resetGeneralChatPersona()" class="text-[10px] text-sky-400 hover:underline">Reset Default</button>
-          </div >
+          </div>
           <select id="chatPersonaSelect" onchange="onChatPersonaChanged()" class="w-full bg-slate-900 border border-slate-700 text-sky-300 rounded px-2.5 py-1.5 text-xs">
             <option value="chat">General Assistant (Grounded)</option>
             <option value="chat_analytical">Technical Analyst & Architect</option>
           </select>
-        </div >
+        </div>
 
         <div class="space-y-1">
           <label class="text-[11px] font-bold text-slate-400 block">System Persona Prompt (Override):</label>
           <textarea id="generalChatSystemPrompt" rows="3" 
                     class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs focus:border-sky-500 focus:outline-none resize-none font-mono text-slate-300"></textarea>
-        </div >
-      </div >
-    </aside >
+        </div>
+      </div>
+    </aside>
 
     <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
       
       <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex justify-between items-center shrink-0 z-10">
-        <div >
-          <h2 class="text-sm font-bold text-slate-100" id="currentChatSessionTitle">General Conversation</h2 >
+        <div>
+          <h2 class="text-sm font-bold text-slate-100" id="currentChatSessionTitle">General Conversation</h2>
           <span class="text-[11px] text-slate-400" id="currentChatModelIndicator">Active Model: Checking...</span>
-        </div >
+        </div>
         <div class="flex items-center gap-2">
           <button onclick="copyEntireChatHistory()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded border border-slate-700 transition flex items-center gap-1">
             📋 Copy Chat
@@ -174,17 +161,17 @@
           <button onclick="clearCurrentChatMessages()" class="text-xs bg-slate-800 hover:bg-slate-700 text-rose-300 px-3 py-1.5 rounded border border-slate-700 transition">
             🧹 Clear
           </button>
-        </div >
-      </div >
+        </div>
+      </div>
 
       <div id="generalChatMessagesWindow" class="flex-1 overflow-y-auto p-4 md:p-6">
         <div class="max-w-4xl mx-auto w-full space-y-3.5">
           <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
-            <div class="font-bold text-sky-400 mb-1">💬 Grounded Madison Assistant</div >
+            <div class="font-bold text-sky-400 mb-1">💬 Grounded Madison Assistant</div>
             Scaled 125% typography, background agent queue, and direct engine controls active.
-          </div >
-        </div >
-      </div >
+          </div>
+        </div>
+      </div>
 
       <div class="p-4 md:px-6 md:pb-6 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
@@ -196,10 +183,20 @@
                 <select id="chatModelSelector" onchange="onModelDropdownSelected('chat')" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2.5 py-1 focus:border-sky-500 focus:outline-none">
                   <option value="auto">Auto (Use Loaded)</option>
                 </select>
-              </div >
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-slate-300">Context:</span>
+                <select id="chatContextSelector" onchange="onModelDropdownSelected('chat')" class="bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs rounded px-2 py-1 focus:border-sky-500 focus:outline-none">
+                  <option value="8192">8K (8192)</option>
+                  <option value="16384">16K (16384)</option>
+                  <option value="32768" selected>32K (32768)</option>
+                  <option value="65536">64K (65536)</option>
+                  <option value="131072">128K (131072)</option>
+                </select>
+              </div>
             </div>
             <span class="text-slate-500 italic">Press Enter to send, Shift+Enter for new line</span>
-          </div >
+          </div>
 
           <div class="flex items-end gap-2 bg-slate-900 border border-slate-700 rounded-xl p-2 focus-within:border-sky-500 transition shadow-inner">
             <textarea id="generalChatInput" rows="1" 
@@ -210,11 +207,11 @@
             <button id="generalChatSendBtn" onclick="executeGeneralChatSend()" class="bg-sky-600 hover:bg-sky-500 px-5 py-2.5 rounded-lg font-bold text-xs transition shrink-0 flex items-center justify-center self-end shadow">
               Send
             </button>
-          </div >
-        </div >
-      </div >
-    </section >
-  </main >
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
 
   <!-- ==================== VIEW 2: PROJECT STUDIO ==================== -->
   <main id="viewStudio" class="hidden flex-1 flex overflow-hidden relative select-text">
@@ -223,15 +220,15 @@
       
       <div id="sectionWorkspaces" class="flex flex-col h-48 min-h-[100px] overflow-hidden">
         <div class="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
-          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Workspaces</h2 >
+          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Workspaces</h2>
           <button onclick="switchView('github')" class="text-xs text-sky-400 hover:text-sky-300 hover:underline">+ Clone</button>
-        </div >
+        </div>
         <div id="sidebarProjectList" class="flex-1 overflow-y-auto p-2.5 space-y-2 text-xs">
           <p class="text-slate-500">Loading workspaces...</p>
-        </div >
-      </div >
+        </div>
+      </div>
 
-      <div id="resizerV1" class="gutter-v bg-slate-800 shrink-0 hidden"></div >
+      <div id="resizerV1" class="gutter-v bg-slate-800 shrink-0 hidden"></div>
 
       <div id="sectionThreads" class="flex-1 flex flex-col min-h-[100px] overflow-hidden hidden">
         <div class="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
@@ -239,17 +236,2478 @@
           <button onclick="createNewThreadDialog()" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-sky-300 px-2 py-0.5 rounded border border-slate-700">
             + New Thread
           </button>
-        </div >
+        </div>
         <div id="threadsList" class="flex-1 overflow-y-auto p-2.5 space-y-1.5 text-xs">
           <p class="text-slate-500">No threads created</p>
-        </div >
-      </div >
+        </div>
+      </div>
 
-      <div id="resizerV2" class="gutter-v bg-slate-800 shrink-0 hidden"></div >
+      <div id="resizerV2" class="gutter-v bg-slate-800 shrink-0 hidden"></div>
 
       <div id="sectionFiles" class="flex flex-col h-48 min-h-[100px] bg-slate-950 overflow-hidden hidden">
         <div class="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
           <h3 class="text-xs font-bold text-slate-300">Context Files</h3>
           <button onclick="openNewFileDialog()" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-sky-300 px-2 py-0.5 rounded border border-slate-700">
+            + New File
+          </button>
+        </div>
+        <div id="filesCheckboxList" class="flex-1 overflow-y-auto p-2.5 space-y-1.5 font-mono text-[11px] text-slate-300">
+          <p class="text-slate-500">Select a project</p>
+        </div>
+      </div>
+
+    </aside>
+
+    <div id="resizerH" class="gutter-h bg-slate-800 shrink-0"></div>
+
+    <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
+      
+      <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex flex-wrap justify-between items-center gap-3 shrink-0 z-10">
+        <div>
+          <div class="flex items-center gap-3">
+            <span class="text-base font-bold text-slate-100 truncate" id="studioProjectHeader">Select a Project from Left Pane</span>
+            
+            <div id="studioBranchContainer" class="hidden flex items-center gap-1.5">
+              <span class="text-xs text-slate-400">🌿 Branch:</span>
+              <select id="studioBranchSelect" onchange="onStudioBranchChanged()" class="bg-slate-900 border border-slate-700 text-sky-300 px-2.5 py-1 rounded text-xs font-mono focus:border-sky-500 focus:outline-none">
+                <option value="main">main</option>
+              </select>
+            </div>
+          </div>
+          <span class="text-[11px] text-slate-400 truncate" id="studioAccountSubtitle">--</span>
+        </div>
+
+        <div id="studioActionsGroup" class="hidden flex items-center gap-2">
+          <button onclick="pullUpstreamChanges()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs px-3 py-1.5 rounded text-sky-300 transition flex items-center gap-1" title="Pull remote changes into local branch">
+            ⬇ Pull
+          </button>
+          <button onclick="runSyntaxValidation()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs px-3 py-1.5 rounded text-slate-200 transition">
+            🧪 Validate
+          </button>
+          <button id="studioPushBtn" onclick="pushCurrentBranch()" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-3.5 py-1.5 rounded font-medium transition flex items-center gap-1">
+            🚀 Push to GitHub
+          </button>
+        </div>
+      </div>
+
+      <div id="pendingChangesBanner" class="hidden bg-amber-950/40 border-b border-amber-800/80 px-6 py-2 flex justify-between items-center text-xs shrink-0 z-10">
+        <div class="flex items-center gap-2 overflow-hidden">
+          <span class="text-amber-400 font-bold">⚠️ Pending Changes on Disk:</span>
+          <span id="pendingFilesCount" class="text-slate-300 truncate">0 files</span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button onclick="showPendingDiffModal()" class="bg-slate-800 hover:bg-slate-700 text-amber-300 px-2.5 py-1 rounded border border-slate-700 text-xs">
+            Review & Commit
+          </button>
+          <button onclick="discardAllWorkingChanges()" class="bg-slate-800 hover:bg-slate-700 text-rose-300 px-2.5 py-1 rounded border border-slate-700 text-xs">
+            Discard
+          </button>
+        </div>
+      </div>
+
+      <div id="chatHistoryWindow" class="flex-1 overflow-y-auto p-4 md:p-6">
+        <div class="max-w-4xl mx-auto w-full space-y-3.5">
+          <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
+            <div class="font-bold text-sky-400 mb-1">🤖 Madison AI Software Architect</div>
+            Select context files, choose your target branch, and run background code modifications.
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4 md:px-6 md:pb-6 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
+        <div class="max-w-4xl mx-auto w-full space-y-2">
+          
+          <div class="flex flex-wrap items-center justify-between text-[11px] text-slate-400 px-1 gap-2">
+            <div class="flex flex-wrap items-center gap-3">
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-slate-300">Engine:</span>
+                <select id="studioModelSelector" onchange="onModelDropdownSelected('studio')" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2.5 py-1 focus:border-sky-500 focus:outline-none">
+                  <option value="auto">Auto (Use Loaded)</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-slate-300">Context:</span>
+                <select id="studioContextSelector" onchange="onModelDropdownSelected('studio')" class="bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs rounded px-2 py-1 focus:border-sky-500 focus:outline-none">
+                  <option value="8192">8K (8192)</option>
+                  <option value="16384">16K (16384)</option>
+                  <option value="32768" selected>32K (32768)</option>
+                  <option value="65536">64K (65536)</option>
+                  <option value="131072">128K (131072)</option>
+                </select>
+              </div>
+            </div>
+            <span id="selectedFilesSummary" class="text-slate-400 italic">0 files selected for context</span>
+          </div>
+
+          <div class="flex items-end gap-2 bg-slate-900 border border-slate-700 rounded-xl p-2 focus-within:border-sky-500 transition shadow-inner">
+            <textarea id="studioPromptInput" rows="1" 
+                      oninput="autoResizeTextarea(this)"
+                      onkeydown="handleStudioKeyDown(event)"
+                      placeholder="e.g. Implement background task monitoring with unread badges... (Auto-expands as you type)"
+                      class="auto-expand-textarea flex-1 bg-transparent px-3 py-2 text-sm focus:outline-none font-mono text-slate-100 placeholder-slate-500"></textarea>
+            <button id="studioSendBtn" onclick="executeStudioTask()" class="bg-sky-600 hover:bg-sky-500 px-5 py-2.5 rounded-lg font-bold text-xs transition shrink-0 flex items-center justify-center self-end shadow">
+              ⚡ Run
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==================== VIEW 3: WORKSPACE HISTORY & TIMELINE ==================== -->
+  <main id="viewHistory" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-5xl mx-auto w-full select-text">
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-slate-700 pb-4">
+      <div class="space-y-1">
+        <h2 class="text-lg font-bold text-slate-100 flex items-center gap-2">
+          <span>📜 Workspace Action & Commit Timeline</span>
+        </h2>
+        <p class="text-xs text-slate-400">Summaries generated by the AI model along with Git commit logs.</p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <label for="timelineProjectSelect" class="text-xs text-slate-400 font-medium">Project:</label>
+        <select id="timelineProjectSelect" onchange="onTimelineProjectChanged()" class="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-xs text-sky-300 font-mono focus:border-sky-500 focus:outline-none">
+          <option value="">-- Select Project --</option>
+        </select>
+        <button onclick="loadWorkspaceTimeline()" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded border border-slate-700 text-slate-300 transition flex items-center gap-1">
+          🔄 Refresh
+        </button>
+      </div>
+    </div>
+
+    <div id="timelineEventsContainer" class="space-y-6 relative before:absolute before:inset-0 before:left-3.5 before:w-0.5 before:bg-slate-800">
+      <p class="text-xs text-slate-500">Select a project in the dropdown above to inspect its history timeline.</p>
+    </div>
+  </main>
+
+  <!-- ==================== VIEW 4: GITHUB ACCOUNTS & REPOS ==================== -->
+  <main id="viewGithub" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-6xl mx-auto w-full select-text">
+    <section class="bg-slate-800 p-5 rounded-lg border border-slate-700 space-y-3">
+      <div class="flex justify-between items-center cursor-pointer" onclick="togglePatGuide()">
+        <div class="flex items-center gap-2">
+          <span class="text-lg">📖</span>
+          <h2 class="text-sm font-bold text-sky-300 uppercase tracking-wide">How to Generate a GitHub Personal Access Token (PAT)</h2>
+        </div>
+        <button id="toggleGuideBtn" class="text-xs text-slate-400 hover:text-slate-200">Show Instructions ▼</button>
+      </div>
+      
+      <div id="patGuideContent" class="hidden text-xs text-slate-300 space-y-2 border-t border-slate-700 pt-3">
+        <ol class="list-decimal list-inside space-y-1.5 text-slate-300">
+          <li>Log into your GitHub account.</li>
+          <li>Click <strong>Profile Photo</strong> ➔ <strong>Settings</strong> ➔ <strong>Developer settings</strong>.</li>
+          <li>Click <strong>Personal access tokens</strong> ➔ <strong>Tokens (classic)</strong>.</li>
+          <li>Click <strong>Generate new token (classic)</strong>.</li>
+          <li>Check the <strong><code class="text-emerald-400 font-semibold">repo</code></strong> scope.</li>
+          <li>Click <strong>Generate token</strong> and paste the token below.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
+      <div class="flex justify-between items-center border-b border-slate-700 pb-3">
+        <div>
+          <h2 class="text-base font-semibold text-slate-100">Registered GitHub Accounts</h2>
+          <p class="text-xs text-slate-400">Add or manage multiple personal or organizational accounts.</p>
+        </div>
+        <button onclick="toggleAddAccountForm()" class="bg-sky-600 hover:bg-sky-500 text-xs px-3.5 py-1.5 rounded font-medium transition">
+          + Register New Account
+        </button>
+      </div>
+
+      <div id="addAccountForm" class="hidden bg-slate-950 p-4 rounded border border-slate-700 space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Account Label / Alias:</label>
+            <input id="newAccountLabel" type="text" placeholder="e.g. Personal or Work" 
+                   class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs focus:border-sky-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">GitHub Personal Access Token (PAT):</label>
+            <input id="newAccountToken" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" 
+                   class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs focus:border-sky-500 focus:outline-none font-mono">
+          </div>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button onclick="toggleAddAccountForm()" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded">Cancel</button>
+          <button onclick="submitAddAccount()" class="bg-emerald-600 hover:bg-emerald-500 text-xs px-4 py-1.5 rounded font-medium">Verify & Save Account</button>
+        </div>
+      </div>
+
+      <div id="accountsList" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <p class="text-xs text-slate-500">Loading accounts...</p>
+      </div>
+    </section>
+
+    <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
+      <div class="border-b border-slate-700 pb-3">
+        <h2 class="text-base font-semibold text-slate-100">Clone Repository to Workspace</h2>
+        <p class="text-xs text-slate-400">Select an account, choose a repository and branch, and clone it locally.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">1. Choose Account:</label>
+          <select id="cloneAccountDropdown" onchange="onCloneAccountSelected()" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
+            <option value="">-- Choose Account --</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">2. Select Repository:</label>
+          <select id="cloneRepoDropdown" onchange="fetchBranchesForCloneRepo()" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
+            <option value="">-- Select account first --</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">3. Branch:</label>
+          <select id="cloneBranchDropdown" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
+            <option value="main">main</option>
+            <option value="dev">dev</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-2">
+        <button onclick="submitCloneProject()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded text-xs font-bold transition">
+          📥 Clone & Open in Studio
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==================== VIEW 5: MODEL MANAGER ==================== -->
+  <main id="viewModels" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-7xl mx-auto w-full select-text">
+    <section class="bg-slate-800 p-6 rounded-lg shadow space-y-4">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+        <h2 id="catalogHeader" class="text-lg font-semibold">Available Models (Top GGUFs on Hugging Face)</h2>
+        <div class="flex flex-wrap gap-1.5 text-xs items-center">
+          <span class="text-slate-400 mr-1">Filter:</span>
+          <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">🔥 All</button>
+          <button onclick="searchAuthor('bartowski')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ bartowski</button>
+          <button onclick="searchAuthor('unsloth')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ unsloth</button>
+          <button onclick="searchAuthor('TheBloke')" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 px-2 py-1 rounded">🛡️ TheBloke</button>
+          <button onclick="searchAuthor('Qwen')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Qwen</button>
+          <button onclick="quickSearch('Llama-3')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Llama 3</button>
+        </div>
+      </div>
+      
+      <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
+        <input id="searchInput" type="text" placeholder="Search models or creators..." 
+               onkeydown="if(event.key === 'Enter') searchModels()"
+               class="flex-1 bg-slate-950 border border-slate-700 rounded px-4 py-2 focus:outline-none focus:border-sky-500 text-sm">
         
-... [File truncated for context limit] ...
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none bg-slate-950 px-3 py-2 rounded border border-slate-700">
+            <input type="checkbox" id="verifiedOnly" onchange="searchModels()" class="rounded bg-slate-900 border-slate-700 text-sky-600 focus:ring-0">
+            <span>🛡️ Verified Creators Only</span>
+          </label>
+
+          <div class="flex items-center gap-2">
+            <label for="sortSelect" class="text-xs text-slate-400 shrink-0">Sort:</label>
+            <select id="sortSelect" onchange="searchModels()" class="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
+              <option value="downloads">Most Downloads</option>
+              <option value="trust">⭐ Trust Score</option>
+              <option value="likes">Most Likes</option>
+              <option value="lastModified">Recent Release</option>
+              <option value="alphabetical">Alphabetical (A-Z)</option>
+            </select>
+          </div>
+
+          <button onclick="searchModels()" class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded font-medium text-sm transition">Search</button>
+          <button onclick="quickSearch('')" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded font-medium text-sm text-slate-300 transition">Reset</button>
+        </div>
+      </div>
+      
+      <div id="searchResults" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+        <p class="text-slate-400">Loading models...</p>
+      </div>
+    </section>
+
+    <!-- Active Tasks & Local Models -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <section class="bg-slate-800 p-6 rounded-lg">
+        <h2 class="text-lg font-semibold mb-4">Download Tasks</h2>
+        <div id="tasksList" class="space-y-3 text-sm text-slate-300">No active downloads</div>
+      </section>
+
+      <section class="bg-slate-800 p-6 rounded-lg space-y-4">
+        <div class="flex justify-between items-center">
+          <div>
+            <h2 class="text-lg font-semibold">Installed Models on Server</h2>
+            <span id="diskSubStat" class="text-xs text-slate-400">-- / -- GB</span>
+          </div>
+          <!-- Relocated Resync Models Button -->
+          <button onclick="resyncLmsModels(this)" class="bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-300 text-xs px-3 py-1.5 rounded transition flex items-center gap-1" title="Rescan disk and resync imported models with engine dropdowns">
+            🔄 Resync Models
+          </button>
+        </div>
+        <div id="localList" class="space-y-2 text-sm text-slate-300">Scanning...</div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ==================== MODEL TUNER MODAL ==================== -->
+  <div id="modelTunerModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 select-text">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl p-6 max-w-lg w-full shadow-2xl space-y-5">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <div>
+          <h3 class="font-bold text-slate-100 text-base" id="tunerModelName">Tune Model Settings</h3>
+          <p class="text-xs text-slate-400" id="tunerModelFilename">filename.gguf</p>
+        </div>
+        <button onclick="closeModelTuner()" class="text-slate-400 hover:text-slate-200 text-sm">✕</button>
+      </div>
+
+      <div class="space-y-2">
+        <div class="flex justify-between items-center text-xs">
+          <label class="font-bold text-slate-300">Context Length (Tokens):</label>
+          <span id="tunerContextVal" class="font-mono text-sky-400 font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">32768 (32K)</span>
+        </div>
+        <input type="range" id="tunerContextSlider" min="2048" max="131072" step="2048" value="32768" 
+               oninput="updateTunerContextDisplay()"
+               class="w-full accent-sky-500 bg-slate-950 cursor-pointer">
+        <div class="flex justify-between text-[10px] text-slate-500 font-mono">
+          <span id="tunerMinContext">2K (2048)</span>
+          <span id="tunerMaxContext">131K (131072 Max Capacity)</span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 text-xs">
+        <div>
+          <label class="block font-bold text-slate-300 mb-1">GPU Offload:</label>
+          <select id="tunerGpuOffload" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-slate-200">
+            <option value="max">Max (Full VRAM)</option>
+            <option value="off">Off (CPU Only)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block font-bold text-slate-300 mb-1">TTL (Keep-alive):</label>
+          <select id="tunerTtl" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-slate-200">
+            <option value="3600">1 Hour (3600s)</option>
+            <option value="86400">24 Hours</option>
+            <option value="-1">Indefinite (No Auto-unload)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <button onclick="closeModelTuner()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded text-xs text-slate-300 transition">Cancel</button>
+        <button id="tunerApplyBtn" onclick="applyTunerAndLoad()" class="px-5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold transition flex items-center gap-1.5">
+          🚀 Save Preset & Load in VRAM
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var currentActiveView = "chat";
+    var lmsRegisteredKeys = [];
+    var localModelSet = new Set();
+    var activeTasksMap = {};
+    var loadedModelsList = [];
+    var currentWorkspaceDir = "";
+    var currentBranch = "main";
+    var currentDisplayName = "";
+    var activeThreadId = "thread-default";
+    var currentHistoryData = null;
+
+    // General Chat & Persona State
+    var personaVault = {};
+    var generalChatSessions = [];
+    var activeChatSessionId = "session-" + Date.now();
+    var currentChatMessages = [];
+
+    // Model Tuner State
+    var currentTunerModel = null;
+
+    // Background Tracker
+    var activeRunningTasks = new Map();
+    var unreadCompletedTasks = new Map();
+
+    function escapeHtml(text) {
+      if (!text) return "";
+      return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function autoResizeTextarea(el) {
+      if (!el) return;
+      el.style.height = 'auto';
+      const newHeight = Math.min(Math.max(el.scrollHeight, 48), 240);
+      el.style.height = newHeight + 'px';
+    }
+
+    function switchView(viewName) {
+      currentActiveView = viewName;
+      document.getElementById('viewChat').classList.toggle('hidden', viewName !== 'chat');
+      document.getElementById('viewStudio').classList.toggle('hidden', viewName !== 'studio');
+      document.getElementById('viewHistory').classList.toggle('hidden', viewName !== 'history');
+      document.getElementById('viewGithub').classList.toggle('hidden', viewName !== 'github');
+      document.getElementById('viewModels').classList.toggle('hidden', viewName !== 'models');
+
+      ['Chat', 'Studio', 'History', 'Github', 'Models'].forEach(v => {
+        const btn = document.getElementById('navBtn' + v);
+        if (btn) {
+          const isSelected = (viewName.toLowerCase() === v.toLowerCase());
+          btn.className = isSelected
+            ? 'relative px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5'
+            : 'relative px-3.5 py-1.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5';
+        }
+      });
+
+      if (viewName === 'chat') {
+        loadPersonas();
+        loadGeneralChatSessions();
+        syncLmsRegisteredModels();
+        clearUnreadForCurrentChat();
+      } else if (viewName === 'studio') {
+        loadSidebarWorkspaces();
+        syncLmsRegisteredModels();
+        if (currentWorkspaceDir) {
+          refreshWorkspaceStatus();
+          clearUnreadForCurrentStudioThread();
+        }
+      } else if (viewName === 'history') {
+        populateTimelineProjectDropdown();
+        loadWorkspaceTimeline();
+      } else if (viewName === 'github') {
+        loadAccounts();
+      } else if (viewName === 'models') {
+        fetchLocalModels();
+        searchModels();
+      }
+    }
+
+    function copyToClipboard(text, btn) {
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.innerHTML;
+        btn.innerHTML = '✓ Copied';
+        setTimeout(() => { btn.innerHTML = orig; }, 1800);
+      });
+    }
+
+    // ---------------- Direct LMS Registry Sync ----------------
+
+    async function syncLmsRegisteredModels() {
+      try {
+        const res = await fetch('/api/lms/registered_models');
+        const data = await res.json();
+        lmsRegisteredKeys = data.models || [];
+        loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
+
+        const chatSel = document.getElementById('chatModelSelector');
+        const studioSel = document.getElementById('studioModelSelector');
+
+        const chatVal = chatSel ? chatSel.value : "auto";
+        const studioVal = studioSel ? studioSel.value : "auto";
+
+        const optionsHtml = '<option value="auto">Auto (Use Loaded)</option>' + 
+          lmsRegisteredKeys.map(m => {
+            const isLoaded = loadedModelsList.some(l => l.includes(m.key.toLowerCase()));
+            const tag = isLoaded ? '⚡ ' : '';
+            return `<option value="${escapeHtml(m.key)}">${tag}${escapeHtml(m.display_name)}</option>`;
+          }).join('');
+
+        if (chatSel) {
+          chatSel.innerHTML = optionsHtml;
+          chatSel.value = chatVal;
+        }
+        if (studioSel) {
+          studioSel.innerHTML = optionsHtml;
+          studioSel.value = studioVal;
+        }
+
+        const activeModelStr = loadedModelsList.length > 0 ? loadedModelsList[0] : "None Loaded (Auto-Load on demand)";
+        document.getElementById('currentChatModelIndicator').textContent = "Active Model: " + activeModelStr;
+      } catch(e) {}
+    }
+
+    async function resyncLmsModels(btn) {
+      const origText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = "⏳ Resyncing...";
+      try {
+        const res = await fetch('/api/lms/resync', { method: 'POST' });
+        if (res.ok) {
+          await syncLmsRegisteredModels();
+          await fetchLocalModels();
+          alert("Models resynced successfully with engine dropdowns!");
+        } else {
+          alert("Resync failed.");
+        }
+      } catch(e) {
+        alert("Resync communication error: " + e.message);
+      }
+      btn.disabled = false;
+      btn.innerHTML = origText;
+    }
+
+    async function onModelDropdownSelected(domain) {
+      const modelKey = document.getElementById(domain + 'ModelSelector').value;
+      const ctxLen = parseInt(document.getElementById(domain + 'ContextSelector').value) || 32768;
+
+      if (modelKey === 'auto') return;
+
+      const ind = document.getElementById('currentChatModelIndicator');
+      if (ind) ind.textContent = `Active Model: Loading ${modelKey}...`;
+
+      try {
+        const res = await fetch('/api/load_model', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            model_key: modelKey,
+            context_length: ctxLen,
+            gpu_offload: 'max'
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          await initHardwareInfo();
+          await syncLmsRegisteredModels();
+        } else {
+          alert('Load failure: ' + (data.message || JSON.stringify(data)));
+        }
+      } catch(e) {
+        alert('Communication error: ' + e.message);
+      }
+    }
+
+    async function unloadAllModelsGlobal(btn) {
+      if (btn) btn.textContent = '⏳ ...';
+      try {
+        await fetch('/api/unload_model', {method: 'POST'});
+      } catch(e) {}
+      if (btn) btn.textContent = '⏹ Unload';
+      await initHardwareInfo();
+      await syncLmsRegisteredModels();
+      await fetchLocalModels();
+    }
+
+    // ---------------- Personas Vault ----------------
+
+    async function loadPersonas() {
+      try {
+        const res = await fetch('/api/personas');
+        personaVault = await res.json();
+        
+        const chatSelect = document.getElementById('chatPersonaSelect');
+        chatSelect.innerHTML = Object.entries(personaVault)
+          .filter(([k, v]) => v.domain === 'chat')
+          .map(([k, v]) => `<option value="${k}">${v.name}</option>`)
+          .join('');
+
+        if (!document.getElementById('generalChatSystemPrompt').value.trim()) {
+          resetGeneralChatPersona();
+        }
+      } catch(e) {}
+    }
+
+    function onChatPersonaChanged() {
+      const pId = document.getElementById('chatPersonaSelect').value;
+      if (personaVault[pId]) {
+        document.getElementById('generalChatSystemPrompt').value = personaVault[pId].system_prompt;
+        saveCurrentChatSession();
+      }
+    }
+
+    function resetGeneralChatPersona() {
+      const pId = document.getElementById('chatPersonaSelect').value || 'chat';
+      if (personaVault[pId]) {
+        document.getElementById('generalChatSystemPrompt').value = personaVault[pId].system_prompt;
+      } else {
+        document.getElementById('generalChatSystemPrompt').value = 
+          "You are a helpful, knowledgeable AI assistant. Respond in clear, clean GitHub-flavored Markdown. Use fenced code blocks with language identifiers for source code, format tables where comparative data is helpful, and use bold/bulleted lists for readability.";
+      }
+      saveCurrentChatSession();
+    }
+
+    // ---------------- General Chat Engine ----------------
+
+    function handleGeneralChatKeyDown(event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        executeGeneralChatSend();
+      }
+    }
+
+    function handleStudioKeyDown(event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        executeStudioTask();
+      }
+    }
+
+    async function loadGeneralChatSessions() {
+      const container = document.getElementById('generalChatSessionsList');
+      try {
+        const res = await fetch('/api/chat/sessions');
+        const data = await res.json();
+        generalChatSessions = data.sessions || [];
+
+        if (generalChatSessions.length === 0) {
+          createNewChatSession();
+          return;
+        }
+
+        renderGeneralChatSidebar();
+        const activeSess = generalChatSessions.find(s => s.id === activeChatSessionId) || generalChatSessions[0];
+        selectChatSession(activeSess.id);
+      } catch(e) {
+        container.innerHTML = '<p class="text-rose-400 p-2">Error loading chat sessions.</p>';
+      }
+    }
+
+    function renderGeneralChatSidebar() {
+      const container = document.getElementById('generalChatSessionsList');
+      container.innerHTML = generalChatSessions.map(s => {
+        const isSel = (s.id === activeChatSessionId);
+        const bg = isSel ? 'bg-sky-950/60 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700';
+        
+        const isRunning = Array.from(activeRunningTasks.values()).some(t => t.domain === 'chat' && t.target_id === s.id);
+        const isUnread = unreadCompletedTasks.has(s.id);
+
+        let badge = '';
+        if (isRunning) {
+          badge = '<span class="ml-1.5"><svg class="animate-spin h-3.5 w-3.5 text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg></span>';
+        } else if (isUnread) {
+          badge = '<span class="ml-1.5 w-2 h-2 rounded-full bg-emerald-400 unread-pulse"></span>';
+        }
+
+        return '<div class="p-2 rounded border ' + bg + ' flex justify-between items-center cursor-pointer group">' +
+          '<span onclick="selectChatSession(\'' + s.id + '\')" class="truncate flex-1 flex items-center">💬 ' + escapeHtml(s.title) + badge + '</span>' +
+          '<button onclick="deleteChatSession(\'' + s.id + '\')" class="text-slate-500 hover:text-rose-400 ml-1 text-xs opacity-0 group-hover:opacity-100 transition">✕</button>' +
+          '</div>';
+      }).join('');
+    }
+
+    function selectChatSession(sessionId) {
+      activeChatSessionId = sessionId;
+      const sess = generalChatSessions.find(s => s.id === sessionId);
+      if (!sess) return;
+
+      document.getElementById('currentChatSessionTitle').textContent = sess.title || "General Conversation";
+      currentChatMessages = sess.messages || [];
+
+      if (sess.persona_id && document.getElementById('chatPersonaSelect')) {
+        document.getElementById('chatPersonaSelect').value = sess.persona_id;
+      }
+      if (sess.custom_system_prompt !== undefined) {
+        document.getElementById('generalChatSystemPrompt').value = sess.custom_system_prompt;
+      } else {
+        resetGeneralChatPersona();
+      }
+
+      clearUnreadForCurrentChat();
+      renderGeneralChatMessages();
+      renderGeneralChatSidebar();
+    }
+
+    function clearUnreadForCurrentChat() {
+      if (unreadCompletedTasks.has(activeChatSessionId)) {
+        const tid = unreadCompletedTasks.get(activeChatSessionId);
+        fetch('/api/queue/mark_read', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({task_id: tid})
+        });
+        unreadCompletedTasks.delete(activeChatSessionId);
+        renderGeneralChatSidebar();
+      }
+    }
+
+    function createNewChatSession() {
+      const newId = "session-" + Date.now();
+      const pId = document.getElementById('chatPersonaSelect') ? document.getElementById('chatPersonaSelect').value : "chat";
+      const sysPrompt = document.getElementById('generalChatSystemPrompt') ? document.getElementById('generalChatSystemPrompt').value : "";
+
+      const newSess = {
+        id: newId,
+        title: "New Conversation",
+        persona_id: pId,
+        custom_system_prompt: sysPrompt,
+        created_at: new Date().toISOString(),
+        messages: []
+      };
+      generalChatSessions.unshift(newSess);
+      activeChatSessionId = newId;
+      selectChatSession(newId);
+      saveCurrentChatSession();
+    }
+
+    async function deleteChatSession(sessionId) {
+      generalChatSessions = generalChatSessions.filter(s => s.id !== sessionId);
+      try {
+        await fetch('/api/chat/sessions/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({session_id: sessionId})
+        });
+      } catch(e) {}
+
+      if (generalChatSessions.length === 0) {
+        createNewChatSession();
+      } else {
+        selectChatSession(generalChatSessions[0].id);
+      }
+    }
+
+    function clearCurrentChatMessages() {
+      if (!confirm("Clear all messages in this conversation?")) return;
+      currentChatMessages = [];
+      renderGeneralChatMessages();
+      saveCurrentChatSession();
+    }
+
+    async function saveCurrentChatSession() {
+      const sess = generalChatSessions.find(s => s.id === activeChatSessionId);
+      if (!sess) return;
+
+      sess.messages = currentChatMessages;
+      sess.persona_id = document.getElementById('chatPersonaSelect').value;
+      sess.custom_system_prompt = document.getElementById('generalChatSystemPrompt').value;
+
+      if (currentChatMessages.length > 0 && sess.title === "New Conversation") {
+        sess.title = currentChatMessages[0].content.slice(0, 26) + "...";
+      }
+
+      try {
+        await fetch('/api/chat/sessions/save', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            session_id: sess.id,
+            title: sess.title,
+            persona_id: sess.persona_id,
+            custom_system_prompt: sess.custom_system_prompt,
+            messages: sess.messages
+          })
+        });
+        renderGeneralChatSidebar();
+      } catch(e) {}
+    }
+
+    function copyMessageContent(index, btn) {
+      if (!currentChatMessages[index]) return;
+      copyToClipboard(currentChatMessages[index].content, btn);
+    }
+
+    function copyEntireChatHistory() {
+      if (currentChatMessages.length === 0) return alert('Chat history is empty.');
+      const formatted = currentChatMessages.map(m => {
+        const author = m.role === 'user' ? 'User' : 'Assistant';
+        return `### ${author}\n${m.content}\n`;
+      }).join('\n---\n\n');
+      
+      navigator.clipboard.writeText(formatted).then(() => {
+        alert('Entire conversation copied to clipboard as Markdown!');
+      });
+    }
+
+    function exportCurrentChat(format) {
+      const sess = generalChatSessions.find(s => s.id === activeChatSessionId);
+      if (!sess || currentChatMessages.length === 0) return alert('No conversation data to export.');
+      
+      let dataStr = "";
+      let filename = (sess.title || "conversation").toLowerCase().replace(/[^a-z0-9]/g, "_");
+
+      if (format === 'markdown') {
+        dataStr = `# ${sess.title}\n*Exported on ${new Date().toLocaleString()}*\n\n` + 
+          currentChatMessages.map(m => `### ${m.role === 'user' ? 'User' : 'Assistant'}\n\n${m.content}`).join('\n\n---\n\n');
+        filename += ".md";
+      } else {
+        dataStr = JSON.stringify(sess, null, 2);
+        filename += ".json";
+      }
+
+      const blob = new Blob([dataStr], { type: format === 'markdown' ? 'text/markdown' : 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function renderGeneralChatMessages() {
+      const windowEl = document.getElementById('generalChatMessagesWindow');
+      
+      if (currentChatMessages.length === 0) {
+        windowEl.innerHTML = '<div class="max-w-4xl mx-auto w-full space-y-3.5"><div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">' +
+          '<div class="font-bold text-sky-400 mb-1">💬 Grounded Madison Assistant</div>' +
+          'Scaled 125% typography, background agent queue, and direct engine controls active.</div></div>';
+        return;
+      }
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
+
+      currentChatMessages.forEach((msg, idx) => {
+        const isUser = (msg.role === 'user');
+        const div = document.createElement('div');
+        div.className = isUser 
+          ? 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md relative group' 
+          : 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-200 markdown-body max-w-[95%] mr-auto shadow-md relative group';
+
+        const copyBtn = `<button onclick="copyMessageContent(${idx}, this)" class="text-[10px] bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700 px-2 py-0.5 rounded transition" title="Copy raw text">📋 Copy</button>`;
+
+        if (isUser) {
+          div.innerHTML = `<div class="flex justify-between items-center text-sky-300 text-[11px] mb-1">` +
+            `<span class="font-bold">You</span>${copyBtn}</div><p class="whitespace-pre-wrap font-sans">${escapeHtml(msg.content)}</p>`;
+        } else {
+          div.innerHTML = `<div class="flex justify-between items-center text-emerald-400 text-[11px] mb-1.5 border-b border-slate-800 pb-1">` +
+            `<span class="font-bold">🤖 Assistant</span>${copyBtn}</div>${marked.parse(msg.content || '')}`;
+        }
+        wrapper.appendChild(div);
+      });
+
+      windowEl.innerHTML = '';
+      windowEl.appendChild(wrapper);
+
+      document.querySelectorAll('#generalChatMessagesWindow pre code').forEach((el) => {
+        hljs.highlightElement(el);
+      });
+
+      windowEl.scrollTop = windowEl.scrollHeight;
+    }
+
+    // ---------------- Background Task Submissions ----------------
+
+    async function executeGeneralChatSend() {
+      const inputEl = document.getElementById('generalChatInput');
+      const text = inputEl.value.trim();
+      const personaId = document.getElementById('chatPersonaSelect').value;
+      const sysPrompt = document.getElementById('generalChatSystemPrompt').value.trim();
+      const isWebSearchEnabled = document.getElementById('enableWebSearchToggle').checked;
+      const modelIdentifier = document.getElementById('chatModelSelector').value;
+      const ctxLength = parseInt(document.getElementById('chatContextSelector').value) || 32768;
+
+      if (!text) return;
+
+      currentChatMessages.push({role: "user", content: text});
+      renderGeneralChatMessages();
+      saveCurrentChatSession();
+
+      const targetSessionId = activeChatSessionId;
+      inputEl.value = '';
+      autoResizeTextarea(inputEl);
+
+      try {
+        const res = await fetch('/api/queue/submit_chat', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            session_id: targetSessionId,
+            messages: currentChatMessages,
+            persona_id: personaId,
+            custom_system_prompt: sysPrompt,
+            enable_web_search: isWebSearchEnabled,
+            model_identifier: modelIdentifier === 'auto' ? '' : modelIdentifier,
+            context_length: ctxLength,
+            temperature: 0.7,
+            max_tokens: 4096
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.task_id) {
+          activeRunningTasks.set(data.task_id, { domain: 'chat', target_id: targetSessionId });
+          renderGeneralChatSidebar();
+          pollTaskStatus(data.task_id, 'chat', targetSessionId);
+        }
+      } catch(e) {
+        alert('Failed to submit chat task: ' + e.message);
+      }
+    }
+
+    async function executeStudioTask() {
+      const promptInput = document.getElementById('studioPromptInput');
+      const instruction = promptInput.value.trim();
+      const modelIdentifier = document.getElementById('studioModelSelector').value;
+      const chatWindow = document.getElementById('chatHistoryWindow');
+
+      if (!currentWorkspaceDir) return alert('Select an active workspace from the left pane first.');
+      if (!instruction) return alert('Please enter a task or coding instruction.');
+
+      const targetRepoDir = currentWorkspaceDir;
+      promptInput.value = '';
+      autoResizeTextarea(promptInput);
+
+      let wrapper = chatWindow.querySelector('.max-w-4xl');
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
+        chatWindow.innerHTML = '';
+        chatWindow.appendChild(wrapper);
+      }
+
+      const userMsgDiv = document.createElement('div');
+      userMsgDiv.className = 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md space-y-1 relative group';
+      userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between text-[11px] mb-1"><span>You</span></div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(instruction) + '</p>';
+      wrapper.appendChild(userMsgDiv);
+
+      const planCardId = 'plan-card-' + Date.now();
+      const planDiv = document.createElement('div');
+      planDiv.id = planCardId;
+      planDiv.className = 'bg-slate-950 p-4 rounded-xl border border-sky-800/80 text-xs text-slate-200 space-y-3 font-mono max-w-[95%] mr-auto shadow-md';
+      planDiv.innerHTML = '<div class="flex items-center gap-2 text-sky-400 font-bold animate-pulse"><svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg><span>Analyzing repository structure & formulating execution plan...</span></div>';
+      wrapper.appendChild(planDiv);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+
+      try {
+        const res = await fetch('/api/agent/plan', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            repo_dir_name: targetRepoDir,
+            instruction: instruction,
+            model_identifier: modelIdentifier === 'auto' ? '' : modelIdentifier
+          })
+        });
+
+        let data;
+        try {
+          data = await res.json();
+        } catch (err) {
+          throw new Error(`Server returned HTTP ${res.status}: ${res.statusText || 'Invalid non-JSON response'}`);
+        }
+
+        if (res.ok && data.status !== 'error') {
+          const targetFiles = data.target_files || [];
+          const changeName = data.change_name || instruction.split('\n')[0].slice(0, 50);
+          planDiv.dataset.targetFiles = JSON.stringify(targetFiles);
+          const instructionEnc = encodeURIComponent(instruction);
+
+          const filesChips = targetFiles.length > 0
+            ? targetFiles.map((f, idx) => `
+                <span class="inline-flex items-center gap-1 bg-slate-950 border border-slate-700 px-2 py-0.5 rounded text-[11px] text-emerald-300 font-mono" id="fileChip-${planCardId}-${idx}">
+                  <span>${escapeHtml(f)}</span>
+                  <button type="button" onclick="removePlanFile('${planCardId}', ${idx})" class="text-slate-400 hover:text-rose-400 text-xs ml-0.5 leading-none" title="Remove file">×</button>
+                </span>
+              `).join('')
+            : '<span class="text-slate-500 italic text-[11px]">No specific existing files identified. New files will be created as needed.</span>';
+
+          planDiv.innerHTML = `
+            <div class="font-bold text-sky-400 border-b border-slate-800 pb-2 flex justify-between items-center">
+              <span class="flex items-center gap-1.5">
+                <span>📋</span>
+                <span>Proposed Changes & Implementation Plan</span>
+              </span>
+              <span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800/80 px-2 py-0.5 rounded font-mono">Step 1: Review & Confirm</span>
+            </div>
+
+            <div class="space-y-3 mt-2 text-slate-200">
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">🏷️ Proposed Change Name / Title:</label>
+                <input type="text" id="planChangeName-${planCardId}" value="${escapeHtml(changeName)}" placeholder="e.g. feat(auth): add token refresh" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-sky-300 font-mono focus:border-sky-500 focus:outline-none">
+              </div>
+
+              <div>
+                <div class="flex justify-between items-center mb-1">
+                  <label class="block text-[11px] font-semibold text-slate-300">📁 Required Target Files (${targetFiles.length}):</label>
+                  <span class="text-[10px] text-emerald-400">✓ Auto-determined</span>
+                </div>
+                <div id="planFilesList-${planCardId}" class="flex flex-wrap gap-1.5 p-2 bg-slate-900 rounded border border-slate-800">
+                  ${filesChips}
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">📝 Implementation Plan:</label>
+                <div class="whitespace-pre-wrap bg-slate-900 p-3 rounded border border-slate-800 text-[11px] text-slate-200 leading-relaxed font-mono">${escapeHtml(data.plan_summary || 'Execute proposed modifications.')}</div>
+              </div>
+            </div>
+
+            <div class="space-y-2 mt-3 pt-3 border-t border-slate-800">
+              <label class="block text-[11px] text-slate-400">Provide Feedback / Request Revisions (Optional):</label>
+              <input type="text" id="planFeedback-${planCardId}" placeholder="e.g. Also make sure to update related unit tests..." class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 focus:border-sky-500 focus:outline-none">
+              <div class="flex justify-end gap-2 pt-1">
+                <button type="button" onclick="revisePlan('${targetRepoDir}', '${planCardId}', decodeURIComponent('${instructionEnc}'))" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded text-xs text-amber-300 transition flex items-center gap-1">🔄 Revise Plan</button>
+                <button type="button" onclick="approveAndExecutePlan('${targetRepoDir}', '${planCardId}', decodeURIComponent('${instructionEnc}'))" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1.5 rounded text-xs transition flex items-center gap-1.5 shadow">✓ Confirm & Implement Changes</button>
+              </div>
+            </div>`;
+        } else {
+          planDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
+          planDiv.innerHTML = '❌ Plan Generation Error: ' + escapeHtml(data.message || 'Unknown error occurred');
+        }
+      } catch(e) {
+        planDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
+        planDiv.innerHTML = '❌ Communication Error: ' + escapeHtml(e.message);
+      }
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    function removePlanFile(cardId, fileIdx) {
+      const card = document.getElementById(cardId);
+      if (!card) return;
+      const chip = document.getElementById(`fileChip-${cardId}-${fileIdx}`);
+      if (chip) chip.remove();
+      try {
+        let files = JSON.parse(card.dataset.targetFiles || '[]');
+        files.splice(fileIdx, 1);
+        card.dataset.targetFiles = JSON.stringify(files);
+      } catch(e) {}
+    }
+
+    async function revisePlan(repoDir, cardId, originalInstruction) {
+      const feedbackInput = document.getElementById('planFeedback-' + cardId);
+      const feedback = feedbackInput ? feedbackInput.value.trim() : "";
+      const combinedInstruction = feedback ? `${originalInstruction}\n\nUser Feedback/Revision: ${feedback}` : originalInstruction;
+      
+      const card = document.getElementById(cardId);
+      if (card) {
+        card.innerHTML = '<div class="flex items-center gap-2 text-amber-400 font-bold animate-pulse"><svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg><span>Revising plan based on feedback...</span></div>';
+      }
+
+      document.getElementById('studioPromptInput').value = combinedInstruction;
+      await executeStudioTask();
+      if (card) card.remove();
+    }
+
+    async function approveAndExecutePlan(repoDir, cardId, instruction) {
+      const card = document.getElementById(cardId);
+      if (!card) return;
+
+      const changeNameInput = document.getElementById('planChangeName-' + cardId);
+      const changeName = changeNameInput ? changeNameInput.value.trim() : "";
+      
+      let targetFiles = [];
+      try {
+        targetFiles = JSON.parse(card.dataset.targetFiles || '[]');
+      } catch(e) {
+        targetFiles = [];
+      }
+
+      const modelIdentifier = document.getElementById('studioModelSelector').value;
+      const ctxLength = parseInt(document.getElementById('studioContextSelector').value) || 32768;
+
+      card.className = 'bg-slate-950 p-4 rounded-xl border border-emerald-800/80 text-xs text-emerald-300 space-y-3 font-mono max-w-[95%] mr-auto shadow-md';
+      card.innerHTML = '<div class="flex items-center gap-2 font-bold text-emerald-400 animate-pulse"><svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg><span>⚙️ Implementing changes & modifying files on disk...</span></div>';
+
+      try {
+        const res = await fetch('/api/agent/execute_plan', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            repo_dir_name: repoDir,
+            target_files: targetFiles,
+            instruction: instruction,
+            change_name: changeName,
+            thread_id: activeThreadId,
+            persona_id: "coding",
+            model_identifier: modelIdentifier === 'auto' ? '' : modelIdentifier,
+            context_length: ctxLength
+          })
+        });
+
+        let data;
+        try {
+          data = await res.json();
+        } catch(err) {
+          throw new Error(`Server returned HTTP ${res.status}: ${res.statusText || 'Invalid non-JSON response'}`);
+        }
+
+        if (res.ok && data.status !== 'error') {
+          const modFiles = data.message.modified_files || [];
+          card.dataset.modfiles = JSON.stringify(modFiles);
+          card.dataset.summary = changeName || data.message.summary || instruction;
+
+          const proposedCommitMsg = data.message.proposed_commit_msg || changeName || (modFiles.length > 0 ? `Update ${modFiles.join(', ')}` : 'Update workspace');
+
+          let commitReviewBox = `
+            <div class="review-box bg-slate-900 p-3 rounded-lg border border-slate-700 space-y-2 mt-3 text-slate-200">
+              <div class="flex justify-between items-center text-xs">
+                <span class="font-bold text-emerald-300">✓ Plan Executed Successfully (${modFiles.length} files modified)</span>
+                <span class="text-[10px] bg-slate-800 px-2 py-0.5 rounded font-mono text-amber-300">Branch: ${currentBranch}</span>
+              </div>
+              ${modFiles.length > 0 && data.git_status && data.git_status.diff ? `
+              <details class="bg-slate-950 p-2 rounded border border-slate-800 text-xs">
+                <summary class="cursor-pointer font-bold text-sky-400">View Git Diff</summary>
+                <pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre font-mono">${escapeHtml(data.git_status.diff)}</pre>
+              </details>` : ''}
+              <div>
+                <label class="block text-[11px] text-slate-400 mb-1">Proposed Commit Message:</label>
+                <input type="text" value="${escapeHtml(proposedCommitMsg)}" class="commit-msg-input w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-sky-500 focus:outline-none">
+              </div>
+              <div class="flex justify-end gap-2 pt-1">
+                <button type="button" onclick="commitProposedChanges('${cardId}')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-1.5 rounded text-xs transition flex items-center gap-1 shadow">✓ Commit Changes</button>
+              </div>
+            </div>`;
+
+          card.innerHTML = '<div class="font-bold text-emerald-400 border-b border-slate-800 pb-1.5 flex justify-between items-center"><span>✓ Changes Implemented</span><span class="text-[10px] text-slate-400 font-mono">' + escapeHtml(changeName) + '</span></div><div class="text-slate-200 whitespace-pre-wrap mt-2 font-mono text-xs">' + escapeHtml(data.message.ai_response || '') + '</div>' + commitReviewBox;
+          await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
+          await loadWorkspaceHistoryAndRender();
+        } else {
+          card.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
+          card.innerHTML = '❌ Execution Error: ' + escapeHtml(data.message || 'Unknown execution error');
+        }
+      } catch(e) {
+        card.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
+        card.innerHTML = '❌ Communication Error: ' + escapeHtml(e.message);
+      }
+    }
+
+    async function commitProposedChanges(cardId) {
+      const card = document.getElementById(cardId);
+      if (!card) return;
+
+      const commitMsgInput = card.querySelector('.commit-msg-input');
+      const commitMsg = commitMsgInput ? commitMsgInput.value.trim() : "";
+      if (!commitMsg) return alert('Please enter a commit message.');
+
+      let targetFiles = [];
+      try {
+        targetFiles = JSON.parse(card.dataset.modfiles || '[]');
+      } catch(e) {
+        targetFiles = [];
+      }
+      const summary = card.dataset.summary || commitMsg;
+
+      try {
+        const res = await fetch('/api/workspace/commit', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            repo_dir_name: currentWorkspaceDir,
+            commit_message: commitMsg,
+            target_files: targetFiles,
+            instruction_summary: summary
+          })
+        });
+
+        let data;
+        try {
+          data = await res.json();
+        } catch(err) {
+          throw new Error(`Server returned HTTP ${res.status}: ${res.statusText || 'Invalid response'}`);
+        }
+
+        if (res.ok && data.status !== 'error') {
+          const reviewBox = card.querySelector('.review-box');
+          if (reviewBox) {
+            reviewBox.innerHTML = `
+              <div class="flex items-center justify-between p-2.5 bg-emerald-950/60 border border-emerald-800/80 rounded text-emerald-300 text-xs">
+                <span class="font-bold">✓ Committed to branch '${escapeHtml(data.branch || currentBranch)}'</span>
+                <span class="text-[10px] text-slate-400 font-mono">${escapeHtml(commitMsg)}</span>
+              </div>`;
+          }
+          loadSidebarWorkspaces();
+          await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
+          await loadWorkspaceHistoryAndRender();
+        } else {
+          alert('Commit failed: ' + (data.message || 'Unknown error'));
+        }
+      } catch(e) {
+        alert('Commit Error: ' + e.message);
+      }
+    }
+
+    async function pollTaskStatus(taskId, domain, targetId) {
+      const interval = setInterval(async () => {
+        try {
+          const res = await fetch('/api/queue/task_status?task_id=' + encodeURIComponent(taskId));
+          if (!res.ok) {
+            clearInterval(interval);
+            activeRunningTasks.delete(taskId);
+            updateGlobalIndicatorDots();
+            return;
+          }
+          const task = await res.json();
+          if (task.status === 'completed' || task.status === 'failed') {
+            clearInterval(interval);
+            activeRunningTasks.delete(taskId);
+
+            if (task.status === 'completed' && task.result) {
+              if (domain === 'chat') {
+                const sess = generalChatSessions.find(s => s.id === targetId);
+                if (sess) {
+                  const reply = task.result.choices[0].message.content;
+                  sess.messages.push({role: "assistant", content: reply});
+                  if (targetId === activeChatSessionId && currentActiveView === 'chat') {
+                    currentChatMessages = sess.messages;
+                    renderGeneralChatMessages();
+                    fetch('/api/queue/mark_read', {
+                      method: 'POST',
+                      headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({task_id: taskId})
+                    });
+                  } else {
+                    unreadCompletedTasks.set(targetId, taskId);
+                  }
+                  saveCurrentChatSession();
+                }
+              } else if (domain === 'coding') {
+                const parts = targetId.split(':');
+                const repoDir = parts[0];
+                const threadId = parts[1];
+
+                if (repoDir === currentWorkspaceDir && threadId === activeThreadId && currentActiveView === 'studio') {
+                  await loadWorkspaceFiles();
+                  await refreshWorkspaceStatus();
+                  await loadWorkspaceHistoryAndRender();
+                  fetch('/api/queue/mark_read', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({task_id: taskId})
+                  });
+                } else {
+                  unreadCompletedTasks.set(targetId, taskId);
+                }
+              }
+            } else if (task.status === 'failed') {
+              if (domain === 'coding' && currentActiveView === 'studio') {
+                const chatWindow = document.getElementById('chatHistoryWindow');
+                const errDiv = document.createElement('div');
+                errDiv.className = 'bg-slate-950 p-4 rounded-xl border border-rose-800 text-xs text-rose-400 max-w-[95%] mr-auto shadow-md';
+                errDiv.innerHTML = '❌ Agent Task Execution Failed: ' + escapeHtml(task.error || 'Unknown error occurred');
+                chatWindow.appendChild(errDiv);
+                chatWindow.scrollTop = chatWindow.scrollHeight;
+              } else {
+                alert(`Task Failed [${domain}]: ` + (task.error || 'Unknown error'));
+              }
+            }
+
+            updateGlobalIndicatorDots();
+            renderGeneralChatSidebar();
+            renderThreadsSidebar();
+          }
+        } catch(e) {
+          clearInterval(interval);
+          activeRunningTasks.delete(taskId);
+          updateGlobalIndicatorDots();
+        }
+      }, 1500);
+    }
+
+    function clearUnreadForCurrentStudioThread() {
+      const compTargetId = `${currentWorkspaceDir}:${activeThreadId}`;
+      if (unreadCompletedTasks.has(compTargetId)) {
+        const tid = unreadCompletedTasks.get(compTargetId);
+        fetch('/api/queue/mark_read', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({task_id: tid})
+        });
+        unreadCompletedTasks.delete(compTargetId);
+        renderThreadsSidebar();
+      }
+    }
+
+    async function syncQueueStates() {
+      try {
+        const res = await fetch('/api/queue/states');
+        const data = await res.json();
+
+        const chatRunning = data.running.some(t => t.domain === 'chat');
+        const studioRunning = data.running.some(t => t.domain === 'coding');
+
+        document.getElementById('chatTabSpinner').classList.toggle('hidden', !chatRunning);
+        document.getElementById('studioTabSpinner').classList.toggle('hidden', !studioRunning);
+
+        const chatUnread = data.unread.some(t => t.domain === 'chat' && t.target_id !== activeChatSessionId);
+        const studioUnread = data.unread.some(t => t.domain === 'coding' && t.target_id !== `${currentWorkspaceDir}:${activeThreadId}`);
+
+        document.getElementById('chatTabUnreadDot').classList.toggle('hidden', !chatUnread);
+        document.getElementById('studioTabUnreadDot').classList.toggle('hidden', !studioUnread);
+      } catch(e) {}
+    }
+
+    function updateGlobalIndicatorDots() {
+      syncQueueStates();
+    }
+
+    // ---------------- Model Tuner Modal Engine ----------------
+
+    function openModelTuner(model) {
+      currentTunerModel = model;
+      document.getElementById('tunerModelName').textContent = "Preset Settings: " + model.filename;
+      document.getElementById('tunerModelFilename').textContent = model.path;
+
+      const slider = document.getElementById('tunerContextSlider');
+      const maxCap = model.max_context || 131072;
+      slider.max = maxCap;
+      slider.value = Math.min(32768, maxCap);
+
+      document.getElementById('tunerMinContext').textContent = "2K (2048)";
+      document.getElementById('tunerMaxContext').textContent = Math.round(maxCap / 1024) + "K (" + maxCap + " Max Capacity)";
+
+      updateTunerContextDisplay();
+      document.getElementById('modelTunerModal').classList.remove('hidden');
+    }
+
+    function closeModelTuner() {
+      document.getElementById('modelTunerModal').classList.add('hidden');
+    }
+
+    function updateTunerContextDisplay() {
+      const val = parseInt(document.getElementById('tunerContextSlider').value);
+      const kVal = Math.round(val / 1024);
+      document.getElementById('tunerContextVal').textContent = val + " (" + kVal + "K Tokens)";
+    }
+
+    async function applyTunerAndLoad() {
+      if (!currentTunerModel) return;
+      const btn = document.getElementById('tunerApplyBtn');
+      const ctxLen = parseInt(document.getElementById('tunerContextSlider').value);
+      const gpuOffload = document.getElementById('tunerGpuOffload').value;
+
+      btn.disabled = true;
+      btn.textContent = "⏳ Offloading & Loading...";
+
+      try {
+        const cleanName = currentTunerModel.filename.replace('.gguf', '');
+        const res = await fetch('/api/load_model', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            model_key: cleanName,
+            model_path: currentTunerModel.path,
+            context_length: ctxLen,
+            gpu_offload: gpuOffload
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert(`Preset saved and model loaded into VRAM!`);
+          closeModelTuner();
+          await initHardwareInfo();
+          await syncLmsRegisteredModels();
+          await fetchLocalModels();
+        } else {
+          alert('Load failure: ' + (data.message || JSON.stringify(data)));
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+
+      btn.disabled = false;
+      btn.textContent = "🚀 Save Preset & Load in VRAM";
+    }
+
+    // ---------------- Resizable Panels Engine ----------------
+
+    function initResizers() {
+      const resizerH = document.getElementById('resizerH');
+      const sidebar = document.getElementById('studioSidebar');
+      let isResizingH = false;
+
+      if (resizerH) {
+        resizerH.addEventListener('mousedown', () => {
+          isResizingH = true;
+          resizerH.classList.add('resizing');
+        });
+      }
+
+      const resizerV1 = document.getElementById('resizerV1');
+      const sectionW = document.getElementById('sectionWorkspaces');
+      let isResizingV1 = false;
+
+      if (resizerV1) {
+        resizerV1.addEventListener('mousedown', () => {
+          isResizingV1 = true;
+          resizerV1.classList.add('resizing');
+        });
+      }
+
+      const resizerV2 = document.getElementById('resizerV2');
+      const sectionF = document.getElementById('sectionFiles');
+      let isResizingV2 = false;
+
+      if (resizerV2) {
+        resizerV2.addEventListener('mousedown', () => {
+          isResizingV2 = true;
+          resizerV2.classList.add('resizing');
+        });
+      }
+
+      window.addEventListener('mousemove', (e) => {
+        if (isResizingH) {
+          const newW = Math.max(200, Math.min(600, e.clientX));
+          sidebar.style.width = newW + 'px';
+        } else if (isResizingV1) {
+          const topOffset = sidebar.getBoundingClientRect().top;
+          const newH = Math.max(80, Math.min(400, e.clientY - topOffset));
+          sectionW.style.height = newH + 'px';
+        } else if (isResizingV2) {
+          const bottomOffset = sidebar.getBoundingClientRect().bottom;
+          const newH = Math.max(80, Math.min(350, bottomOffset - e.clientY));
+          sectionF.style.height = newH + 'px';
+        }
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isResizingH || isResizingV1 || isResizingV2) {
+          isResizingH = false;
+          isResizingV1 = false;
+          isResizingV2 = false;
+          if (resizerH) resizerH.classList.remove('resizing');
+          if (resizerV1) resizerV1.classList.remove('resizing');
+          if (resizerV2) resizerV2.classList.remove('resizing');
+        }
+      });
+    }
+
+    // ---------------- Hardware & Stats ----------------
+
+    async function initHardwareInfo() {
+      try {
+        const res = await fetch('/api/system_info');
+        const data = await res.json();
+        
+        if (data.gpu && data.gpu.has_gpu) {
+          const freeStr = data.gpu.free_vram_gb > 0 ? (data.gpu.free_vram_gb + ' GB Free / ') : '';
+          document.getElementById('vramStat').innerHTML = freeStr + data.gpu.total_vram_gb + ' GB';
+        } else {
+          document.getElementById('vramStat').textContent = 'No GPU';
+        }
+
+        if (data.storage) renderStorageMetrics(data.storage);
+      } catch(e) {}
+    }
+
+    function renderStorageMetrics(storage) {
+      const mainStat = document.getElementById('storageStat');
+      const subStat = document.getElementById('diskSubStat');
+      if (mainStat && storage) mainStat.innerHTML = storage.used_gb + ' / ' + storage.total_gb + ' GB';
+      if (subStat && storage) subStat.innerHTML = 'Storage: <span class="text-amber-300">' + storage.used_gb + ' GB</span> / ' + storage.total_gb + ' GB (' + storage.percent_used + '%)';
+    }
+
+    // ---------------- Studio Left Sidebar, Threads & Workspaces ----------------
+
+    async function loadSidebarWorkspaces() {
+      const container = document.getElementById('sidebarProjectList');
+      try {
+        const res = await fetch('/api/workspaces/active');
+        const workspaces = await res.json();
+
+        if (!workspaces || workspaces.length === 0) {
+          container.innerHTML = '<p class="text-slate-500 p-2">No local workspaces.<br><button onclick="switchView(\'github\')" class="text-sky-400 underline">Clone from GitHub</button></p>';
+          return;
+        }
+
+        container.innerHTML = workspaces.map(w => {
+          const isSelected = (currentWorkspaceDir === w.dir_name);
+          const bgClass = isSelected ? 'bg-sky-950/40 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700';
+          const pendingBadge = w.has_pending_changes ? '<span class="bg-amber-950 text-amber-300 border border-amber-800 px-1 py-0.2 rounded font-mono text-[9px]">Pending</span>' : '';
+          const pushBadge = w.unpushed_commits > 0 ? ('<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-1 py-0.2 rounded font-mono text-[9px]">' + w.unpushed_commits + ' Unpushed</span>') : '';
+
+          return '<div class="p-2 rounded-lg border ' + bgClass + ' transition group relative flex justify-between items-center cursor-pointer">' +
+                 '<div onclick="selectStudioProject(\'' + w.dir_name + '\', \'' + escapeHtml(w.display_name) + '\', \'' + w.branch + '\')" class="flex-1 truncate pr-2">' +
+                 '<div class="font-bold truncate">' + escapeHtml(w.display_name) + '</div>' +
+                 '<div class="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400 mt-1">' +
+                 '<span class="bg-slate-800 px-1.5 py-0.5 rounded font-mono">' + w.branch + '</span> ' +
+                 pendingBadge + ' ' + pushBadge +
+                 '</div></div>' +
+                 '<button onclick="deleteWorkspace(\'' + w.dir_name + '\', \'' + escapeHtml(w.display_name) + '\')" class="text-slate-500 hover:text-rose-400 p-1 rounded hover:bg-slate-800 transition opacity-0 group-hover:opacity-100 shrink-0" title="Delete Workspace from Disk">🗑️</button>' +
+                 '</div>';
+        }).join('');
+      } catch(e) {
+        container.innerHTML = '<p class="text-rose-400 p-2">Error loading workspaces.</p>';
+      }
+    }
+
+    async function deleteWorkspace(dirName, displayName) {
+      if (!confirm(`Are you sure you want to permanently delete workspace "${displayName}" from disk (/storage/lmstudio/workspaces/${dirName})?`)) {
+        return;
+      }
+      try {
+        const res = await fetch('/api/workspace/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: dirName})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (currentWorkspaceDir === dirName) {
+            currentWorkspaceDir = "";
+            currentDisplayName = "";
+            document.getElementById('studioProjectHeader').textContent = "Select a Project from Left Pane";
+            document.getElementById('studioBranchContainer').classList.add('hidden');
+            document.getElementById('studioAccountSubtitle').textContent = "--";
+            document.getElementById('studioActionsGroup').classList.add('hidden');
+            document.getElementById('sectionThreads').classList.add('hidden');
+            document.getElementById('sectionFiles').classList.add('hidden');
+            document.getElementById('resizerV1').classList.add('hidden');
+            document.getElementById('resizerV2').classList.add('hidden');
+            document.getElementById('chatHistoryWindow').innerHTML = `
+              <div class="max-w-4xl mx-auto w-full space-y-3.5">
+                <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
+                  <div class="font-bold text-sky-400 mb-1">🤖 Madison AI Software Architect</div>
+                  Workspace deleted. Select another workspace from the left pane.
+                </div>
+              </div>`;
+          }
+          await loadSidebarWorkspaces();
+        } else {
+          alert('Delete failed: ' + data.message);
+        }
+      } catch(e) {
+        alert('Communication error: ' + e.message);
+      }
+    }
+
+    async function selectStudioProject(dirName, displayName, branch) {
+      currentWorkspaceDir = dirName;
+      currentDisplayName = displayName;
+      currentBranch = branch;
+
+      document.getElementById('studioProjectHeader').textContent = displayName;
+      document.getElementById('studioBranchContainer').classList.remove('hidden');
+      document.getElementById('studioAccountSubtitle').textContent = 'Workspace Path: /storage/lmstudio/workspaces/' + dirName;
+      document.getElementById('studioActionsGroup').classList.remove('hidden');
+
+      document.getElementById('sectionThreads').classList.remove('hidden');
+      document.getElementById('sectionFiles').classList.remove('hidden');
+      document.getElementById('resizerV1').classList.remove('hidden');
+      document.getElementById('resizerV2').classList.remove('hidden');
+
+      loadSidebarWorkspaces();
+      await loadStudioBranches();
+      await loadWorkspaceFiles();
+      await loadWorkspaceHistoryAndRender();
+      await refreshWorkspaceStatus();
+    }
+
+    async function refreshWorkspaceStatus() {
+      if (!currentWorkspaceDir) return;
+      try {
+        const res = await fetch('/api/workspace/status?repo_dir_name=' + encodeURIComponent(currentWorkspaceDir));
+        const status = await res.json();
+        
+        const banner = document.getElementById('pendingChangesBanner');
+        const pushBtn = document.getElementById('studioPushBtn');
+
+        if (status.has_pending_changes) {
+          banner.classList.remove('hidden');
+          document.getElementById('pendingFilesCount').textContent = status.pending_files ? status.pending_files.join(', ') : 'Uncommitted file changes';
+        } else {
+          banner.classList.add('hidden');
+        }
+
+        if (status.unpushed_commits > 0) {
+          pushBtn.textContent = '🚀 Push (' + status.unpushed_commits + ')';
+          pushBtn.className = 'bg-emerald-600 hover:bg-emerald-500 text-xs px-3.5 py-1.5 rounded font-bold transition flex items-center gap-1 animate-pulse';
+        } else {
+          pushBtn.textContent = '🚀 Push to GitHub';
+          pushBtn.className = 'bg-emerald-600 hover:bg-emerald-500 text-xs px-3.5 py-1.5 rounded font-medium transition flex items-center gap-1';
+        }
+      } catch(e) {}
+    }
+
+    async function loadWorkspaceHistoryAndRender() {
+      if (!currentWorkspaceDir) return;
+      try {
+        const res = await fetch('/api/workspace/history?repo_dir_name=' + encodeURIComponent(currentWorkspaceDir));
+        currentHistoryData = await res.json();
+        activeThreadId = currentHistoryData.active_thread_id || "thread-default";
+        
+        clearUnreadForCurrentStudioThread();
+        renderThreadsSidebar();
+        renderActiveThreadChat();
+      } catch(e) {
+        console.error("Load History Error:", e);
+      }
+    }
+
+    function renderThreadsSidebar() {
+      const container = document.getElementById('threadsList');
+      if (!currentHistoryData || !currentHistoryData.threads || currentHistoryData.threads.length === 0) {
+        container.innerHTML = '<p class="text-slate-500">No threads created</p>';
+        return;
+      }
+
+      container.innerHTML = currentHistoryData.threads.map(t => {
+        const isSel = (t.id === activeThreadId);
+        const bg = isSel ? 'bg-sky-950/60 border-sky-600 text-sky-200' : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700';
+        const count = (t.messages || []).length;
+
+        const compTargetId = `${currentWorkspaceDir}:${t.id}`;
+        const isRunning = Array.from(activeRunningTasks.values()).some(task => task.domain === 'coding' && task.target_id === compTargetId);
+        const isUnread = unreadCompletedTasks.has(compTargetId);
+
+        let badge = '';
+        if (isRunning) {
+          badge = '<span class="ml-1.5"><svg class="animate-spin h-3.5 w-3.5 text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg></span>';
+        } else if (isUnread) {
+          badge = '<span class="ml-1.5 w-2 h-2 rounded-full bg-emerald-400 unread-pulse"></span>';
+        }
+
+        return '<div onclick="switchActiveThread(\'' + t.id + '\')" class="p-2 rounded border ' + bg + ' cursor-pointer truncate flex justify-between items-center">' +
+               '<span class="truncate flex items-center">💬 ' + escapeHtml(t.title) + badge + '</span>' +
+               '<span class="text-[9px] text-slate-500 ml-1 font-mono">' + count + '</span></div>';
+      }).join('');
+    }
+
+    async function switchActiveThread(threadId) {
+      if (!currentWorkspaceDir) return;
+      activeThreadId = threadId;
+      try {
+        await fetch('/api/workspace/switch_thread', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, thread_id: threadId})
+        });
+        clearUnreadForCurrentStudioThread();
+        renderThreadsSidebar();
+        renderActiveThreadChat();
+      } catch(e) {}
+    }
+
+    async function createNewThreadDialog() {
+      if (!currentWorkspaceDir) return;
+      const title = prompt("Enter a title for the new chat thread (e.g. 'Refactor Auth Pipeline'):");
+      if (!title) return;
+
+      try {
+        const res = await fetch('/api/workspace/create_thread', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, title: title})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          currentHistoryData = data.history;
+          activeThreadId = data.thread.id;
+          renderThreadsSidebar();
+          renderActiveThreadChat();
+        }
+      } catch(e) {
+        alert('Failed to create thread: ' + e.message);
+      }
+    }
+
+    function renderActiveThreadChat() {
+      const chatWindow = document.getElementById('chatHistoryWindow');
+      
+      const activeThread = (currentHistoryData && currentHistoryData.threads) ? currentHistoryData.threads.find(t => t.id === activeThreadId) : null;
+      if (!activeThread || !activeThread.messages || activeThread.messages.length === 0) {
+        chatWindow.innerHTML = '<div class="max-w-4xl mx-auto w-full space-y-3.5"><div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">' +
+          '<div class="font-bold text-sky-400 mb-1">💬 Thread: ' + escapeHtml(activeThread ? activeThread.title : 'New Thread') + '</div>' +
+          'Fresh context ready. Select your files and run coding tasks.</div></div>';
+        return;
+      }
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'max-w-4xl mx-auto w-full space-y-3.5';
+
+      activeThread.messages.forEach(msg => {
+        const userMsgDiv = document.createElement('div');
+        userMsgDiv.className = 'bg-slate-800 p-3.5 rounded-xl border border-slate-700 text-xs text-slate-100 max-w-[85%] ml-auto shadow-md space-y-1 relative group';
+        
+        const rawUserPrompt = encodeURIComponent(msg.instruction || '');
+        const targetSummary = (msg.target_files && msg.target_files.length > 0)
+          ? `${msg.target_files.length} files: ` + msg.target_files.join(', ')
+          : 'Auto-scoped';
+
+        userMsgDiv.innerHTML = '<div class="font-bold text-sky-300 flex items-center justify-between text-[11px] mb-1">' +
+          '<span>You</span>' +
+          '<div class="flex items-center gap-2">' +
+          '<span class="text-[10px] text-slate-400 font-normal truncate max-w-[280px]" title="' + escapeHtml(targetSummary) + '">' + escapeHtml(targetSummary) + '</span>' +
+          '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawUserPrompt + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
+          '</div></div><p class="whitespace-pre-wrap font-mono mt-1">' + escapeHtml(msg.instruction) + '</p>';
+        wrapper.appendChild(userMsgDiv);
+
+        const modFiles = msg.modified_files || [];
+        const aiMsgDiv = document.createElement('div');
+        aiMsgDiv.className = 'bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-emerald-300 space-y-3 font-mono max-w-[95%] mr-auto shadow-md relative group';
+        
+        let reviewDiff = '';
+        if (modFiles.length > 0 && msg.diff) {
+          reviewDiff = '<details class="bg-slate-900 p-2.5 rounded border border-slate-800 text-xs text-slate-200 mt-2">' +
+            '<summary class="cursor-pointer font-bold text-sky-400">View Staged Diff</summary>' +
+            '<pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre font-mono">' + escapeHtml(msg.diff) + '</pre></details>';
+        }
+
+        const rawAiOutput = encodeURIComponent(msg.ai_response || '');
+        const modText = modFiles.length > 0 ? ('Modified: ' + modFiles.join(', ')) : 'Advisory Response';
+        const titleBadge = msg.change_name ? `<span class="text-[10px] text-sky-400 font-normal bg-sky-950/80 px-2 py-0.5 rounded border border-sky-800/60 mr-2">${escapeHtml(msg.change_name)}</span>` : '';
+
+        aiMsgDiv.innerHTML = '<div class="font-bold text-emerald-400 flex justify-between items-center border-b border-slate-800 pb-1.5">' +
+          '<div class="flex items-center gap-1.5"><span>🤖 Madison Architect</span>' + titleBadge + '</div>' +
+          '<div class="flex items-center gap-2">' +
+          '<span class="text-[10px] text-slate-400 font-normal">' + escapeHtml(modText) + '</span>' +
+          '<button onclick="copyToClipboard(decodeURIComponent(\'' + rawAiOutput + '\'), this)" class="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 px-1.5 py-0.5 rounded border border-slate-700 transition">📋 Copy</button>' +
+          '</div></div><div class="text-slate-200 whitespace-pre-wrap mt-2">' + escapeHtml(msg.ai_response || '') + '</div>' + reviewDiff;
+        
+        wrapper.appendChild(aiMsgDiv);
+      });
+
+      chatWindow.innerHTML = '';
+      chatWindow.appendChild(wrapper);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    async function loadStudioBranches() {
+      const select = document.getElementById('studioBranchSelect');
+      if (!currentWorkspaceDir) return;
+      try {
+        const res = await fetch('/api/workspace/branches?repo_dir_name=' + encodeURIComponent(currentWorkspaceDir));
+        const data = await res.json();
+        currentBranch = data.current || "main";
+
+        select.innerHTML = data.branches.map(b => {
+          const sel = (b === currentBranch) ? 'selected' : '';
+          return '<option value="' + b + '" ' + sel + '>' + b + '</option>';
+        }).join('') + '<option value="__NEW_BRANCH__">+ New Branch...</option>';
+      } catch(e) {}
+    }
+
+    async function onStudioBranchChanged() {
+      const select = document.getElementById('studioBranchSelect');
+      const val = select.value;
+
+      if (val === "__NEW_BRANCH__") {
+        const newBranchName = prompt("Enter new branch name (e.g. feature/background-queue):");
+        if (!newBranchName) {
+          select.value = currentBranch;
+          return;
+        }
+        try {
+          const res = await fetch('/api/workspace/create_branch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch_name: newBranchName})
+          });
+          const data = await res.json();
+          if (res.ok) {
+            currentBranch = data.active_branch;
+            await loadStudioBranches();
+            loadSidebarWorkspaces();
+            await refreshWorkspaceStatus();
+          } else {
+            alert('Branch creation failed: ' + data.message);
+            select.value = currentBranch;
+          }
+        } catch(e) {
+          alert('Error: ' + e.message);
+          select.value = currentBranch;
+        }
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/workspace/switch_branch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: val})
+        });
+        if (res.ok) {
+          currentBranch = data.active_branch;
+          loadSidebarWorkspaces();
+          await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
+        } else {
+          alert('Switch branch failed: ' + data.message);
+          select.value = currentBranch;
+        }
+      } catch(e) {
+        alert('Error: ' + e.message);
+        select.value = currentBranch;
+      }
+    }
+
+    async function pullUpstreamChanges() {
+      if (!currentWorkspaceDir) return alert('Select an active project first.');
+      try {
+        const res = await fetch('/api/workspace/pull', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert('Pull Result:\n\n' + data.message);
+          await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
+        } else {
+          alert('Pull failed: ' + data.message);
+        }
+      } catch(e) {
+        alert('Error: ' + e.message);
+      }
+    }
+
+    async function loadWorkspaceFiles() {
+      const container = document.getElementById('filesCheckboxList');
+      container.innerHTML = '<p class="text-slate-500">Scanning files...</p>';
+      try {
+        const res = await fetch('/api/workspace/files?repo_dir_name=' + encodeURIComponent(currentWorkspaceDir));
+        const files = await res.json();
+
+        if (!files || files.length === 0) {
+          container.innerHTML = '<p class="text-slate-500">No editable files found.</p>';
+          updateSelectedFilesCount();
+          return;
+        }
+
+        container.innerHTML = files.map(f => {
+          return '<label class="flex items-center gap-2 hover:bg-slate-900 p-1 rounded cursor-pointer select-none">' +
+                 '<input type="checkbox" value="' + f + '" onchange="updateSelectedFilesCount()" class="rounded bg-slate-900 border-slate-700 text-sky-600 focus:ring-0">' +
+                 '<span class="truncate" title="' + f + '">' + f + '</span></label>';
+        }).join('');
+        updateSelectedFilesCount();
+      } catch(e) {
+        container.innerHTML = '<p class="text-rose-400">Error loading files.</p>';
+      }
+    }
+
+    function updateSelectedFilesCount() {
+      const checked = document.querySelectorAll('#filesCheckboxList input[type="checkbox"]:checked');
+      const count = checked.length;
+      const summary = document.getElementById('selectedFilesSummary');
+      if (count === 0) {
+        summary.textContent = '⚡ Auto-Scope Active: Architect will automatically determine required files';
+      } else if (count === 1) {
+        summary.textContent = '1 file pinned for context: ' + checked[0].value;
+      } else {
+        summary.textContent = count + ' files pinned for context';
+      }
+    }
+
+    async function openNewFileDialog() {
+      if (!currentWorkspaceDir) return alert('Please select an active project first.');
+      const path = prompt('Enter relative path for the new file (e.g. tests/test_runner.py or deploy.sh):');
+      if (!path) return;
+
+      try {
+        const res = await fetch('/api/workspace/create_file', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, file_path: path, initial_content: ""})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
+          alert('Created file: ' + data.file_path);
+        } else {
+          alert('Error: ' + data.message);
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+    }
+
+    async function showPendingDiffModal() {
+      const promptMsg = prompt("Enter commit message for currently pending changes:");
+      if (!promptMsg) return;
+
+      try {
+        const res = await fetch('/api/workspace/commit', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            repo_dir_name: currentWorkspaceDir,
+            commit_message: promptMsg,
+            target_files: [],
+            instruction_summary: "Manual workspace commit"
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert("Committed successfully to branch '" + data.branch + "'!");
+          loadSidebarWorkspaces();
+          await refreshWorkspaceStatus();
+          await loadWorkspaceHistoryAndRender();
+        } else {
+          alert('Commit failed: ' + data.message);
+        }
+      } catch(e) {
+        alert('Error: ' + e.message);
+      }
+    }
+
+    async function discardAllWorkingChanges() {
+      if (!confirm("Discard all pending uncommitted working tree changes?")) return;
+      try {
+        const res = await fetch('/api/workspace/discard', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, target_files: []})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          await loadWorkspaceFiles();
+          await refreshWorkspaceStatus();
+        }
+      } catch(e) {
+        alert('Error: ' + e.message);
+      }
+    }
+
+    async function pushCurrentBranch() {
+      if (!currentWorkspaceDir) return alert('Select an active project first.');
+      if (!confirm("Push committed changes on branch '" + currentBranch + "' to GitHub origin/" + currentBranch + "?")) return;
+      
+      try {
+        const res = await fetch('/api/push', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert('✓ Push Successful: ' + data.message);
+          await refreshWorkspaceStatus();
+        } else {
+          alert('❌ Push Failed: ' + data.message);
+        }
+      } catch(e) {
+        alert('Push Error: ' + e.message);
+      }
+    }
+
+    async function runSyntaxValidation() {
+      if (!currentWorkspaceDir) return alert('Select an active project first.');
+      try {
+        const res = await fetch('/api/workspace/validate', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
+        });
+        const data = await res.json();
+        alert((data.passed ? '✓ Checks Passed:\n\n' : '❌ Checks Failed:\n\n') + data.logs);
+      } catch(e) {
+        alert('Validator Error: ' + e.message);
+      }
+    }
+
+    // ---------------- Timeline Dropdown & Actions ----------------
+
+    async function populateTimelineProjectDropdown() {
+      const select = document.getElementById('timelineProjectSelect');
+      if (!select) return;
+      try {
+        const res = await fetch('/api/workspaces/active');
+        const workspaces = await res.json();
+        
+        const currentVal = select.value || currentWorkspaceDir;
+        select.innerHTML = '<option value="">-- Select Project --</option>' + 
+          (workspaces || []).map(w => {
+            const isSel = (w.dir_name === currentVal) ? 'selected' : '';
+            return `<option value="${w.dir_name}" ${isSel}>${escapeHtml(w.display_name)} (${w.branch})</option>`;
+          }).join('');
+      } catch(e) {}
+    }
+
+    function onTimelineProjectChanged() {
+      const select = document.getElementById('timelineProjectSelect');
+      if (select && select.value) {
+        currentWorkspaceDir = select.value;
+        const selOption = select.selectedOptions[0];
+        currentDisplayName = selOption ? selOption.text : select.value;
+        loadWorkspaceTimeline();
+      }
+    }
+
+    async function loadWorkspaceTimeline() {
+      const container = document.getElementById('timelineEventsContainer');
+      const select = document.getElementById('timelineProjectSelect');
+      const targetDir = (select && select.value) ? select.value : currentWorkspaceDir;
+
+      if (!targetDir) {
+        container.innerHTML = '<p class="text-xs text-slate-500">Please select a project in the dropdown above to inspect its history timeline.</p>';
+        return;
+      }
+
+      container.innerHTML = '<p class="text-xs text-slate-500">Loading timeline events from .lmstudio_history.json...</p>';
+
+      try {
+        const res = await fetch('/api/workspace/timeline?repo_dir_name=' + encodeURIComponent(targetDir));
+        const data = await res.json();
+        const events = data.events || [];
+
+        if (events.length === 0) {
+          container.innerHTML = '<p class="text-xs text-slate-500">No events recorded in this workspace history yet.</p>';
+          return;
+        }
+
+        container.innerHTML = events.map(evt => {
+          const isCommit = (evt.type === 'commit');
+          const dotColor = isCommit ? 'bg-emerald-500 ring-emerald-950' : 'bg-sky-500 ring-sky-950';
+          const typeBadge = isCommit 
+            ? '<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-mono text-[10px]">GIT COMMIT</span>'
+            : '<span class="bg-sky-950 text-sky-300 border border-sky-800 px-2 py-0.5 rounded font-mono text-[10px]">AI CODE EDIT</span>';
+
+          const timeStr = evt.timestamp ? new Date(evt.timestamp).toLocaleString() : 'Recent';
+          const modFiles = evt.modified_files || [];
+          const filesBadge = modFiles.length > 0 ? ('<div class="text-[11px] text-slate-400 mt-1">Files: ' + modFiles.map(f => '<code class="bg-slate-900 px-1 py-0.5 rounded text-sky-300">' + escapeHtml(f) + '</code>').join(' ') + '</div>') : '';
+
+          let diffBox = '';
+          if (evt.diff && evt.diff.length > 10) {
+            diffBox = '<details class="mt-2.5 bg-slate-900 p-2.5 rounded border border-slate-800 text-xs">' +
+              '<summary class="cursor-pointer font-bold text-sky-400">View Staged Diff</summary>' +
+              '<pre class="text-[11px] text-emerald-400 mt-2 overflow-x-auto whitespace-pre font-mono">' + escapeHtml(evt.diff) + '</pre>' +
+              '</details>';
+          }
+
+          const titleText = evt.commit_msg || evt.instruction || 'Task';
+          const summaryText = evt.summary || evt.instruction;
+
+          return '<div class="relative pl-8 space-y-1 text-xs">' +
+            '<div class="absolute left-2 top-1 w-3 h-3 ' + dotColor + ' rounded-full ring-4"></div>' +
+            '<div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2 shadow-md">' +
+            '<div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-800/80 pb-2">' +
+            '<div class="flex items-center gap-2">' + typeBadge + '<span class="font-bold text-slate-200 text-sm">' + escapeHtml(titleText) + '</span></div>' +
+            '<span class="text-[11px] text-slate-500 font-mono">' + timeStr + '</span>' +
+            '</div>' +
+            '<p class="text-slate-300 text-xs leading-relaxed mt-1"><strong>Summary:</strong> ' + escapeHtml(summaryText) + '</p>' +
+            filesBadge + diffBox +
+            '</div></div>';
+        }).join('');
+      } catch(e) {
+        container.innerHTML = '<p class="text-xs text-rose-400">Error loading timeline: ' + escapeHtml(e.message) + '</p>';
+      }
+    }
+
+    // ---------------- Accounts & Git Management ----------------
+
+    function togglePatGuide() {
+      const el = document.getElementById('patGuideContent');
+      const btn = document.getElementById('toggleGuideBtn');
+      if (el.classList.contains('hidden')) {
+        el.classList.remove('hidden');
+        btn.textContent = 'Hide Instructions ▲';
+      } else {
+        el.classList.add('hidden');
+        btn.textContent = 'Show Instructions ▼';
+      }
+    }
+
+    function toggleAddAccountForm() {
+      document.getElementById('addAccountForm').classList.toggle('hidden');
+    }
+
+    async function loadAccounts() {
+      const container = document.getElementById('accountsList');
+      const dropdown = document.getElementById('cloneAccountDropdown');
+      
+      try {
+        const res = await fetch('/api/github/accounts');
+        const accounts = await res.json();
+        
+        if (!accounts || accounts.length === 0) {
+          container.innerHTML = '<p class="text-xs text-slate-500 col-span-3">No GitHub accounts registered yet. Click "+ Register New Account" above.</p>';
+          dropdown.innerHTML = '<option value="">-- No accounts available --</option>';
+          return;
+        }
+
+        container.innerHTML = accounts.map(a => {
+          return '<div class="bg-slate-950 p-3 rounded-lg border border-slate-700 flex justify-between items-center text-xs shadow-md">' +
+            '<div class="flex items-center gap-2.5 overflow-hidden">' +
+            '<img src="' + (a.avatar_url || 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png') + '" class="w-7 h-7 rounded-full border border-slate-700">' +
+            '<div class="truncate">' +
+            '<div class="font-bold text-slate-200 truncate">' + escapeHtml(a.label) + '</div>' +
+            '<div class="text-[11px] text-slate-400">@' + escapeHtml(a.username) + ' • <span class="font-mono text-[10px] text-slate-500">' + a.masked_token + '</span></div>' +
+            '</div></div>' +
+            '<button onclick="removeAccount(\'' + a.username + '\')" class="text-rose-400 hover:text-rose-300 px-2 py-1 bg-slate-900 rounded border border-slate-800 text-[11px] shrink-0" title="Remove Account">✕</button>' +
+            '</div>';
+        }).join('');
+
+        dropdown.innerHTML = '<option value="">-- Choose Account --</option>' + accounts.map(a => {
+          return '<option value="' + a.username + '">' + escapeHtml(a.label) + ' (@' + a.username + ')</option>';
+        }).join('');
+      } catch(e) {
+        container.innerHTML = '<p class="text-xs text-rose-400">Error loading accounts.</p>';
+      }
+    }
+
+    async function submitAddAccount() {
+      const label = document.getElementById('newAccountLabel').value.trim();
+      const token = document.getElementById('newAccountToken').value.trim();
+      if (!token) return alert('Please enter a valid GitHub token');
+
+      try {
+        const res = await fetch('/api/github/accounts/add', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({token: token, label: label})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert('Account @' + data.username + ' registered successfully!');
+          document.getElementById('newAccountLabel').value = '';
+          document.getElementById('newAccountToken').value = '';
+          toggleAddAccountForm();
+          loadAccounts();
+        } else {
+          alert('Failed to add account: ' + data.message);
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+    }
+
+    async function removeAccount(username) {
+      if (!confirm("Are you sure you want to remove account @" + username + "?")) return;
+      try {
+        const res = await fetch('/api/github/accounts/remove', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({username: username})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          loadAccounts();
+        } else {
+          alert('Error: ' + data.message);
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+    }
+
+    async function onCloneAccountSelected() {
+      const username = document.getElementById('cloneAccountDropdown').value;
+      const repoDropdown = document.getElementById('cloneRepoDropdown');
+      if (!username) {
+        repoDropdown.innerHTML = '<option value="">-- Select account first --</option>';
+        return;
+      }
+
+      repoDropdown.innerHTML = '<option value="">Loading repositories...</option>';
+      try {
+        const res = await fetch('/api/github/repos?account_username=' + encodeURIComponent(username));
+        const repos = await res.json();
+        if (Array.isArray(repos) && repos.length > 0) {
+          repoDropdown.innerHTML = repos.map(r => {
+            const priv = r.is_private ? '🔒 ' : '';
+            return '<option value="' + r.full_name + '">' + priv + r.full_name + '</option>';
+          }).join('');
+          fetchBranchesForCloneRepo();
+        } else {
+          repoDropdown.innerHTML = '<option value="">No repositories found</option>';
+        }
+      } catch(e) {
+        repoDropdown.innerHTML = '<option value="">Error loading repos</option>';
+      }
+    }
+
+    async function fetchBranchesForCloneRepo() {
+      const username = document.getElementById('cloneAccountDropdown').value;
+      const repoFullName = document.getElementById('cloneRepoDropdown').value;
+      const branchSelect = document.getElementById('cloneBranchDropdown');
+      if (!repoFullName || !username) return;
+
+      try {
+        const res = await fetch('/api/github/branches?account_username=' + encodeURIComponent(username) + '&repo_full_name=' + encodeURIComponent(repoFullName));
+        const branches = await res.json();
+        branchSelect.innerHTML = branches.map(b => '<option value="' + b + '">' + b + '</option>').join('');
+      } catch(e) {}
+    }
+
+    async function submitCloneProject() {
+      const username = document.getElementById('cloneAccountDropdown').value;
+      const repoFullName = document.getElementById('cloneRepoDropdown').value;
+      const branch = document.getElementById('cloneBranchDropdown').value;
+
+      if (!username || !repoFullName) return alert('Please select both an account and a repository');
+
+      try {
+        const res = await fetch('/api/github/clone', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({account_username: username, repo_full_name: repoFullName, branch: branch})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          switchView('studio');
+          selectStudioProject(data.dir_name, data.display_name, data.branch);
+        } else {
+          alert('Clone failed: ' + data.message);
+        }
+      } catch(e) {
+        alert('Communication Error: ' + e.message);
+      }
+    }
+
+    // ---------------- Model Manager Logic ----------------
+
+    function quickSearch(tag) {
+      document.getElementById('searchInput').value = tag;
+      searchModels();
+    }
+
+    function searchAuthor(author) {
+      document.getElementById('searchInput').value = author;
+      document.getElementById('verifiedOnly').checked = false;
+      searchModels();
+    }
+
+    async function searchModels() {
+      const qInput = document.getElementById('searchInput');
+      const sortEl = document.getElementById('sortSelect');
+      const verifiedEl = document.getElementById('verifiedOnly');
+      const container = document.getElementById('searchResults');
+      const header = document.getElementById('catalogHeader');
+
+      if (!container || !sortEl) return;
+
+      const q = qInput ? qInput.value.trim() : "";
+      const sortBy = sortEl.value;
+      const verifiedOnly = verifiedEl ? verifiedEl.checked : false;
+      const sortLabel = sortEl.selectedOptions[0].text;
+      
+      header.textContent = (q === "") ? ('All Available Models (' + sortLabel + ')') : ('Search Results for "' + q + '" (' + sortLabel + ')');
+      container.innerHTML = '<p class="text-slate-400 p-2">Loading catalog from Hugging Face...</p>';
+      
+      try {
+        const res = await fetch('/api/search?q=' + encodeURIComponent(q) + '&sort_by=' + encodeURIComponent(sortBy) + '&verified_only=' + verifiedOnly);
+        const models = await res.json();
+        container.innerHTML = '';
+        
+        if (!models || models.length === 0) {
+          container.innerHTML = '<p class="text-slate-400 p-2">No GGUF models found.</p>';
+          return;
+        }
+
+        models.forEach(m => {
+          const card = document.createElement('div');
+          card.className = 'bg-slate-950 p-4 rounded-xl border border-slate-700 space-y-3 shadow-md';
+          
+          const verifiedBadge = m.is_verified 
+            ? '<button onclick="searchAuthor(\'' + escapeHtml(m.maker) + '\')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition cursor-pointer">🛡️ ' + escapeHtml(m.maker) + '</button>'
+            : '<button onclick="searchAuthor(\'' + escapeHtml(m.maker) + '\')" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 transition cursor-pointer">' + escapeHtml(m.maker) + '</button>';
+
+          const trustBadge = '<span class="text-[10px] bg-slate-800 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono">⭐ ' + m.trust_score + '/100</span>';
+
+          card.innerHTML = '<div class="flex justify-between items-start">' +
+            '<div class="overflow-hidden pr-2">' +
+            '<div class="flex items-center gap-1.5">' + verifiedBadge + ' ' + trustBadge + '</div>' +
+            '<h3 class="font-bold text-slate-100 text-base mt-1.5 truncate" title="' + escapeHtml(m.model_name) + '">' + escapeHtml(m.model_name) + '</h3>' +
+            '<div class="text-[11px] text-slate-400 mt-0.5">Author: <button onclick="searchAuthor(\'' + escapeHtml(m.maker) + '\')" class="font-semibold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer">' + escapeHtml(m.maker) + '</button> • Updated: ' + (m.lastModified || 'Recent') + '</div>' +
+            '</div>' +
+            '<div class="text-right text-xs text-slate-400 shrink-0">' +
+            '<div>⬇ ' + (m.downloads || 0).toLocaleString() + '</div>' +
+            '<div>❤ ' + (m.likes || 0).toLocaleString() + '</div>' +
+            '</div></div>' +
+            '<button onclick="toggleFiles(\'' + encodeURIComponent(m.id) + '\', this)" class="toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition">Inspect Quantizations & Memory Fit</button>' +
+            '<div class="file-container mt-3 hidden space-y-2"></div>';
+
+          container.appendChild(card);
+        });
+      } catch(err) {
+        container.innerHTML = '<p class="text-rose-400 p-2">Error retrieving models from Hugging Face: ' + escapeHtml(err.message) + '</p>';
+      }
+    }
+
+    async function toggleFiles(repoIdEnc, btn) {
+      const repoId = decodeURIComponent(repoIdEnc);
+      const parent = btn.parentElement;
+      const fileContainer = parent.querySelector('.file-container');
+      
+      if (!fileContainer.classList.contains('hidden')) {
+        fileContainer.classList.add('hidden');
+        btn.textContent = 'Inspect Quantizations & Memory Fit';
+        btn.className = 'toggle-btn w-full text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded transition';
+        return;
+      }
+
+      fileContainer.classList.remove('hidden');
+      btn.textContent = '▲ Minimize Quantizations';
+      btn.className = 'toggle-btn w-full text-xs bg-slate-700 hover:bg-slate-600 border border-slate-500 text-sky-300 px-3 py-1.5 rounded transition';
+      fileContainer.innerHTML = '<span class="text-xs text-slate-500">Fetching file metadata & calculating VRAM footprint...</span>';
+      
+      try {
+        const res = await fetch('/api/model_files?repo_id=' + encodeURIComponent(repoId));
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || `Server returned ${res.status}`);
+        }
+        const data = await res.json();
+        fileContainer.innerHTML = '';
+
+        if (!data.files || data.files.length === 0) {
+          fileContainer.innerHTML = '<span class="text-xs text-slate-500">No .gguf files found in repository.</span>';
+          return;
+        }
+
+        const table = document.createElement('div');
+        table.className = 'space-y-2';
+
+        data.files.forEach((f, idx) => {
+          let fitBadge = '';
+          if (f.fit_status === 'fits_gpu') {
+            fitBadge = '<span class="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded font-medium">Fits GPU VRAM</span>';
+          } else if (f.fit_status === 'split_gpu_ram') {
+            fitBadge = '<span class="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-1.5 py-0.5 rounded font-medium">Split GPU + RAM</span>';
+          } else if (f.fit_status === 'fits_ram') {
+            fitBadge = '<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded font-medium">Fits System RAM</span>';
+          } else if (f.fit_status === 'exceeds') {
+            fitBadge = '<span class="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-medium">Exceeds Memory</span>';
+          }
+
+          const isDownloaded = f.is_downloaded || localModelSet.has(f.group_name);
+          const isDownloading = f.is_downloading || (activeTasksMap[f.group_name] && activeTasksMap[f.group_name].status === 'downloading');
+
+          let btnHtml = '';
+          const btnId = 'btn-' + encodeURIComponent(f.group_name).replace(/[^a-zA-Z0-9]/g, '');
+          const filesPayload = encodeURIComponent(JSON.stringify(f.paths));
+          const groupNameEnc = encodeURIComponent(f.group_name);
+          const repoIdEncSafe = encodeURIComponent(repoId);
+
+          if (isDownloaded) {
+            btnHtml = '<button id="' + btnId + '" disabled class="bg-slate-800 text-slate-400 border border-slate-700 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed flex items-center gap-1">✓ Installed</button>';
+          } else if (isDownloading) {
+            btnHtml = '<button id="' + btnId + '" disabled class="bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1.5 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1">⏳ Downloading...</button>';
+          } else {
+            btnHtml = '<button id="' + btnId + '" onclick="triggerDownloadSafe(\'' + repoIdEncSafe + '\', \'' + groupNameEnc + '\', \'' + filesPayload + '\', this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded text-xs shrink-0 transition">Download</button>';
+          }
+
+          const shardBadge = f.is_sharded ? ('<span class="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.5 rounded ml-1 font-mono">' + f.shard_count + ' Shards</span>') : '';
+
+          const row = document.createElement('div');
+          row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
+          row.innerHTML = '<div class="space-y-1 overflow-hidden pr-2">' +
+            '<div class="font-medium text-sky-200 truncate flex items-center" title="' + escapeHtml(f.display_name) + '">' +
+            '<span class="truncate">' + escapeHtml(f.group_name) + '</span> ' + shardBadge +
+            '</div>' +
+            '<div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">' +
+            '<span>Weight: <strong class="text-slate-200">' + f.weight + '</strong></span>' +
+            '<span>•</span>' +
+            '<span>Variant: <strong class="text-slate-200">' + f.variant + '</strong></span>' +
+            '<span>•</span>' +
+            '<span>Size: <strong class="text-emerald-400">' + f.size_gb + '</strong></span>' +
+            '<span>(' + f.est_vram + ' Req)</span>' +
+            fitBadge +
+            '</div>' +
+            '<div class="text-[11px] text-slate-400 italic bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/80">ℹ ' + escapeHtml(f.description) + '</div>' +
+            '</div>' + btnHtml;
+
+          table.appendChild(row);
+        });
+        fileContainer.appendChild(table);
+      } catch(e) {
+        fileContainer.innerHTML = '<span class="text-xs text-rose-400">Error inspecting files: ' + escapeHtml(e.message) + '</span>';
+      }
+    }
+
+    async function triggerDownloadSafe(repoIdEnc, groupNameEnc, filesPayloadEncoded, btn) {
+      const repoId = decodeURIComponent(repoIdEnc);
+      const groupName = decodeURIComponent(groupNameEnc);
+      btn.disabled = true;
+      btn.className = "bg-sky-950 text-sky-300 border border-sky-800 font-medium px-3 py-1 rounded text-xs shrink-0 cursor-not-allowed animate-pulse flex items-center gap-1";
+      btn.innerHTML = "⏳ Downloading...";
+
+      const filePaths = JSON.parse(decodeURIComponent(filesPayloadEncoded));
+      await fetch('/api/download', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({repo_id: repoId, group_name: groupName, files: filePaths})
+      });
+      updateTasks();
+    }
+
+    async function deleteModel(filename) {
+      if (!confirm("Are you sure you want to delete " + filename + " to free up space?")) return;
+      try {
+        const res = await fetch('/api/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({filename: filename})
+        });
+        const data = await res.json();
+        localModelSet.delete(filename);
+        if (data.storage) renderStorageMetrics(data.storage);
+        fetchLocalModels();
+        syncLmsRegisteredModels();
+      } catch(e) {}
+    }
+
+    async function updateTasks() {
+      try {
+        const res = await fetch('/api/tasks');
+        const data = await res.json();
+        activeTasksMap = data;
+        const list = document.getElementById('tasksList');
+        if (!list) return;
+        
+        if (Object.keys(data).length === 0) {
+          list.innerHTML = '<span class="text-slate-500">No active downloads</span>';
+          return;
+        }
+
+        list.innerHTML = Object.entries(data).map(([file, info]) => {
+          const pct = info.percent || 0;
+          const isDone = info.status === 'completed';
+          const barColor = isDone ? 'bg-emerald-500' : 'bg-sky-500';
+
+          return '<div class="bg-slate-950 p-3 rounded-lg border border-slate-700 space-y-2 shadow-sm">' +
+            '<div class="flex justify-between items-center text-xs">' +
+            '<div class="font-medium truncate pr-2">' + escapeHtml(file) + '</div>' +
+            '<div class="text-sky-300 font-mono shrink-0">' + (info.progress_str || info.status) + '</div>' +
+            '</div>' +
+            '<div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">' +
+            '<div class="' + barColor + ' h-1.5 rounded-full transition-all duration-300" style="width: ' + pct + '%"></div>' +
+            '</div></div>';
+        }).join('');
+      } catch(e) {}
+    }
+
+    async function fetchLocalModels() {
+      const list = document.getElementById('localList');
+      if (!list) return;
+
+      try {
+        const res = await fetch('/api/local_models');
+        const data = await res.json();
+
+        if (data.storage) renderStorageMetrics(data.storage);
+
+        if (!data.files || data.files.length === 0) {
+          list.innerHTML = '<span class="text-slate-500">No GGUF models on disk (/storage/lmstudio/models)</span>';
+          return;
+        }
+
+        localModelSet.clear();
+        data.files.forEach(m => localModelSet.add(m.filename));
+
+        list.innerHTML = data.files.map(m => {
+          const fClean = m.filename.replace('.gguf', '').toLowerCase();
+          const isLoaded = (loadedModelsList || []).some(loaded => loaded.includes(fClean) || fClean.includes(loaded));
+
+          const borderClass = isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700';
+          const modelJson = encodeURIComponent(JSON.stringify(m));
+
+          const statusBadge = isLoaded 
+            ? '<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2.5 py-1 rounded text-xs flex items-center gap-1 font-semibold">⚡ Loaded in VRAM</span>'
+            : '<span class="bg-slate-800 text-slate-400 px-2 py-1 rounded text-xs">Installed</span>';
+
+          return '<div class="flex justify-between items-center bg-slate-950 p-3 rounded-lg border ' + borderClass + ' text-xs gap-3 shadow-sm">' +
+            '<div class="truncate pr-2">' +
+            '<div class="font-medium text-slate-200 truncate" title="' + escapeHtml(m.filename) + '">' + escapeHtml(m.filename) + '</div>' +
+            '<div class="text-slate-400 text-[10px] mt-0.5">Weight: ' + m.weight + ' | Variant: ' + m.variant + ' | Cap: ' + Math.round((m.max_context || 32768)/1024) + 'K Ctx</div>' +
+            '</div>' +
+            '<div class="flex items-center gap-2 shrink-0">' +
+            '<span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">' + m.size_gb + '</span>' +
+            statusBadge +
+            '<button onclick="openModelTuner(JSON.parse(decodeURIComponent(\'' + modelJson + '\')))" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sky-300 px-2.5 py-1 rounded text-xs transition" title="Tune Context & Parameters">🎛️ Tune</button>' +
+            '<button onclick="deleteModel(\'' + m.filename + '\')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">🗑️</button>' +
+            '</div></div>';
+        }).join('');
+      } catch(e) {
+        list.innerHTML = '<span class="text-rose-400">Error loading local models: ' + escapeHtml(e.message) + '</span>';
+      }
+    }
+
+    // Startup Initialization & Schedulers
+    initHardwareInfo();
+    initResizers();
+    syncLmsRegisteredModels();
+    fetchLocalModels();
+    switchView('chat');
+    setInterval(updateTasks, 1000);
+    setInterval(syncQueueStates, 1000);
+    setInterval(initHardwareInfo, 5000);
+    setInterval(syncLmsRegisteredModels, 4000);
+    setInterval(() => { if (currentWorkspaceDir) refreshWorkspaceStatus(); }, 3000);
+  </script>
+</body>
+</html>
