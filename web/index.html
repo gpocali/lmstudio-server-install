@@ -30,7 +30,6 @@
     .markdown-body th { background: #0f172a; color: #38bdf8; }
     .markdown-body blockquote { border-left: 3px solid #38bdf8; padding-left: 0.75rem; color: #94a3b8; font-style: italic; margin: 0.5rem 0; }
 
-    /* Elastic Textarea constraints */
     .auto-expand-textarea {
       min-height: 48px;
       max-height: 240px;
@@ -48,15 +47,15 @@
 </head>
 <body class="bg-slate-900 text-slate-100 h-screen w-screen flex flex-col font-sans overflow-hidden select-none">
   
-  <!-- Global Top Navbar (Pinned) -->
+  <!-- Global Top Navbar -->
   <header class="bg-slate-950 border-b border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-4 shrink-0 z-20">
     <div class="flex items-center gap-3">
       <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-black text-sm text-white shadow">M</div>
       <h1 class="text-lg font-bold bg-gradient-to-r from-sky-400 to-indigo-300 bg-clip-text text-transparent">Madison</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.2</span>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.3</span>
     </div>
 
-    <!-- Navigation Page Buttons -->
+    <!-- Navigation Page Buttons with Activity & Unread Indicators -->
     <div class="flex items-center gap-2">
       <!-- Chat Tab -->
       <button onclick="switchView('chat')" id="navBtnChat" class="relative px-3.5 py-1.5 text-xs font-semibold rounded bg-sky-600 text-white transition flex items-center gap-1.5">
@@ -106,7 +105,7 @@
   <!-- ==================== VIEW 1: GENERAL CHAT ==================== -->
   <main id="viewChat" class="flex-1 flex overflow-hidden relative select-text">
     
-    <!-- Left Sidebar: Chat Sessions & Persona Configuration -->
+    <!-- Left Sidebar -->
     <aside class="w-80 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0 overflow-hidden">
       <div class="p-3.5 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
         <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Conversations</h2>
@@ -155,7 +154,7 @@
     <!-- Main Chat Feed & Input -->
     <section class="flex-1 flex flex-col bg-slate-900 overflow-hidden min-w-0">
       
-      <!-- Chat Header with Session Actions -->
+      <!-- Chat Header -->
       <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex justify-between items-center shrink-0 z-10">
         <div>
           <h2 class="text-sm font-bold text-slate-100" id="currentChatSessionTitle">General Conversation</h2>
@@ -176,16 +175,21 @@
         <div class="max-w-4xl mx-auto w-full space-y-3.5">
           <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
             <div class="font-bold text-sky-400 mb-1">💬 Grounded Madison Assistant</div>
-            Elastic auto-expanding text box, background agent queue, temporal grounding, and auto-model loading are active.
+            Background agent queue, temporal grounding, and dynamic engine selection are active.
           </div>
         </div>
       </div>
 
-      <!-- Chat Input Bar (Elastic Auto-Expanding) -->
+      <!-- Chat Input Bar (Interactive Model Selector + Elastic Textarea) -->
       <div class="p-4 md:px-6 md:pb-6 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
-          <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
-            <span>Engine: <strong class="generalChatModelBadge text-sky-400 font-mono">Auto (Auto-Load on demand)</strong></span>
+          <div class="flex flex-wrap items-center justify-between text-[11px] text-slate-400 px-1 gap-2">
+            <div class="flex items-center gap-1.5">
+              <span>Engine:</span>
+              <select id="chatModelSelector" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2 py-0.5 focus:border-sky-500 focus:outline-none">
+                <option value="auto">Auto (Auto-Load on demand)</option>
+              </select>
+            </div>
             <span class="text-slate-500 italic">Press Enter to send, Shift+Enter for new line</span>
           </div>
           <div class="flex items-end gap-2 bg-slate-900 border border-slate-700 rounded-xl p-2 focus-within:border-sky-500 transition shadow-inner">
@@ -309,11 +313,16 @@
         </div>
       </div>
 
-      <!-- Studio Input Bar (Elastic Auto-Expanding) -->
+      <!-- Studio Input Bar (Interactive Model Selector + Elastic Textarea) -->
       <div class="p-4 md:px-6 md:pb-6 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
-          <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
-            <span>Engine: <strong class="generalChatModelBadge text-sky-400 font-mono">Auto (Auto-Load on demand)</strong></span>
+          <div class="flex flex-wrap items-center justify-between text-[11px] text-slate-400 px-1 gap-2">
+            <div class="flex items-center gap-1.5">
+              <span>Engine:</span>
+              <select id="studioModelSelector" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2 py-0.5 focus:border-sky-500 focus:outline-none">
+                <option value="auto">Auto (Auto-Load on demand)</option>
+              </select>
+            </div>
             <span id="selectedFilesSummary" class="text-slate-400 italic">0 files selected for context</span>
           </div>
           <div class="flex items-end gap-2 bg-slate-900 border border-slate-700 rounded-xl p-2 focus-within:border-sky-500 transition shadow-inner">
@@ -334,20 +343,27 @@
   <!-- ==================== VIEW 3: WORKSPACE HISTORY & TIMELINE ==================== -->
   <main id="viewHistory" class="hidden flex-1 p-6 md:p-8 overflow-y-auto space-y-6 max-w-5xl mx-auto w-full select-text">
     <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-slate-700 pb-4">
-      <div>
+      <div class="space-y-1">
         <h2 class="text-lg font-bold text-slate-100 flex items-center gap-2">
           <span>📜 Workspace Action & Commit Timeline</span>
-          <span id="timelineWorkspaceName" class="text-sm font-mono text-sky-300">--</span>
         </h2>
         <p class="text-xs text-slate-400">Summaries generated by the AI model along with Git commit logs.</p>
       </div>
-      <button onclick="loadWorkspaceTimeline()" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded border border-slate-700 text-slate-300 transition">
-        🔄 Refresh Timeline
-      </button>
+
+      <!-- Interactive Timeline Project Selector Dropdown -->
+      <div class="flex flex-wrap items-center gap-2">
+        <label for="timelineProjectSelect" class="text-xs text-slate-400 font-medium">Project:</label>
+        <select id="timelineProjectSelect" onchange="onTimelineProjectChanged()" class="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-xs text-sky-300 font-mono focus:border-sky-500 focus:outline-none">
+          <option value="">-- Select Project --</option>
+        </select>
+        <button onclick="loadWorkspaceTimeline()" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded border border-slate-700 text-slate-300 transition flex items-center gap-1">
+          🔄 Refresh
+        </button>
+      </div>
     </div>
 
     <div id="timelineEventsContainer" class="space-y-6 relative before:absolute before:inset-0 before:left-3.5 before:w-0.5 before:bg-slate-800">
-      <p class="text-xs text-slate-500">Select a project in Studio to inspect its history timeline.</p>
+      <p class="text-xs text-slate-500">Select a project in the dropdown above to inspect its history timeline.</p>
     </div>
   </main>
 
@@ -572,6 +588,7 @@
   <script>
     var currentActiveView = "chat";
     var localModelSet = new Set();
+    var localModelObjects = [];
     var activeTasksMap = {};
     var loadedModelsList = [];
     var currentWorkspaceDir = "";
@@ -603,7 +620,6 @@
         .replace(/'/g, "&#039;");
     }
 
-    // Dynamic Elastic Textarea Auto-Resizer
     function autoResizeTextarea(el) {
       if (!el) return;
       el.style.height = 'auto';
@@ -640,6 +656,7 @@
           clearUnreadForCurrentStudioThread();
         }
       } else if (viewName === 'history') {
+        populateTimelineProjectDropdown();
         loadWorkspaceTimeline();
       } else if (viewName === 'github') {
         loadAccounts();
@@ -655,6 +672,31 @@
         btn.innerHTML = '✓ Copied';
         setTimeout(() => { btn.innerHTML = orig; }, 1800);
       });
+    }
+
+    // ---------------- Model Dropdown Selectors Sync ----------------
+
+    function syncModelDropdownSelectors() {
+      const chatSel = document.getElementById('chatModelSelector');
+      const studioSel = document.getElementById('studioModelSelector');
+
+      const chatVal = chatSel ? chatSel.value : "auto";
+      const studioVal = studioSel ? studioSel.value : "auto";
+
+      const optionsHtml = '<option value="auto">Auto (Auto-Load on demand)</option>' + 
+        localModelObjects.map(m => {
+          const cleanFname = m.filename.replace('.gguf', '');
+          return `<option value="${m.path}">${escapeHtml(cleanFname)} (${m.size_gb})</option>`;
+        }).join('');
+
+      if (chatSel) {
+        chatSel.innerHTML = optionsHtml;
+        chatSel.value = chatVal;
+      }
+      if (studioSel) {
+        studioSel.innerHTML = optionsHtml;
+        studioSel.value = studioVal;
+      }
     }
 
     // ---------------- Personas Vault ----------------
@@ -910,7 +952,7 @@
       if (currentChatMessages.length === 0) {
         windowEl.innerHTML = '<div class="max-w-4xl mx-auto w-full space-y-3.5"><div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">' +
           '<div class="font-bold text-sky-400 mb-1">💬 Grounded Madison Assistant</div>' +
-          'Elastic auto-expanding text box, background agent queue, temporal grounding, and auto-model loading are active.</div></div>';
+          'Background agent queue, temporal grounding, and dynamic engine selection are active.</div></div>';
         return;
       }
 
@@ -954,6 +996,7 @@
       const personaId = document.getElementById('chatPersonaSelect').value;
       const sysPrompt = document.getElementById('generalChatSystemPrompt').value.trim();
       const isWebSearchEnabled = document.getElementById('enableWebSearchToggle').checked;
+      const modelIdentifier = document.getElementById('chatModelSelector').value;
 
       if (!text) return;
 
@@ -975,6 +1018,7 @@
             persona_id: personaId,
             custom_system_prompt: sysPrompt,
             enable_web_search: isWebSearchEnabled,
+            model_identifier: modelIdentifier === 'auto' ? '' : modelIdentifier,
             temperature: 0.7,
             max_tokens: 4096
           })
@@ -993,6 +1037,8 @@
     async function executeStudioTask() {
       const promptInput = document.getElementById('studioPromptInput');
       const instruction = promptInput.value.trim();
+      const modelIdentifier = document.getElementById('studioModelSelector').value;
+
       if (!currentWorkspaceDir) return alert('Select an active workspace from the left pane first.');
       if (!instruction) return alert('Please enter a task or coding instruction.');
 
@@ -1013,7 +1059,8 @@
             target_files: selectedFiles,
             instruction: instruction,
             thread_id: targetThreadId,
-            persona_id: "coding"
+            persona_id: "coding",
+            model_identifier: modelIdentifier === 'auto' ? '' : modelIdentifier
           })
         });
         const data = await res.json();
@@ -1277,8 +1324,7 @@
 
         if (data.storage) renderStorageMetrics(data.storage);
 
-        const primaryModel = loadedModelsList.length > 0 ? loadedModelsList[0] : "Auto (Auto-Load on demand)";
-        document.querySelectorAll('.generalChatModelBadge').forEach(el => el.textContent = primaryModel);
+        const primaryModel = loadedModelsList.length > 0 ? loadedModelsList[0] : "Auto";
         document.getElementById('currentChatModelIndicator').textContent = "Model: " + primaryModel;
       } catch(e) {}
     }
@@ -1753,7 +1799,7 @@
       if (!confirm("Push committed changes on branch '" + currentBranch + "' to GitHub origin/" + currentBranch + "?")) return;
       
       try {
-        const res = await fetch('/api/workspace/push', {
+        const res = await fetch('/api/push', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: currentBranch})
@@ -1785,23 +1831,48 @@
       }
     }
 
-    // ---------------- Timeline, Accounts & Models ----------------
+    // ---------------- Timeline Dropdown & Actions ----------------
+
+    async function populateTimelineProjectDropdown() {
+      const select = document.getElementById('timelineProjectSelect');
+      if (!select) return;
+      try {
+        const res = await fetch('/api/workspaces/active');
+        const workspaces = await res.json();
+        
+        const currentVal = select.value || currentWorkspaceDir;
+        select.innerHTML = '<option value="">-- Select Project --</option>' + 
+          (workspaces || []).map(w => {
+            const isSel = (w.dir_name === currentVal) ? 'selected' : '';
+            return `<option value="${w.dir_name}" ${isSel}>${escapeHtml(w.display_name)} (${w.branch})</option>`;
+          }).join('');
+      } catch(e) {}
+    }
+
+    function onTimelineProjectChanged() {
+      const select = document.getElementById('timelineProjectSelect');
+      if (select && select.value) {
+        currentWorkspaceDir = select.value;
+        const selOption = select.selectedOptions[0];
+        currentDisplayName = selOption ? selOption.text : select.value;
+        loadWorkspaceTimeline();
+      }
+    }
 
     async function loadWorkspaceTimeline() {
       const container = document.getElementById('timelineEventsContainer');
-      const titleLabel = document.getElementById('timelineWorkspaceName');
+      const select = document.getElementById('timelineProjectSelect');
+      const targetDir = (select && select.value) ? select.value : currentWorkspaceDir;
 
-      if (!currentWorkspaceDir) {
-        titleLabel.textContent = "No Project Selected";
-        container.innerHTML = '<p class="text-xs text-slate-500">Please select a project in Studio first to inspect its history timeline.</p>';
+      if (!targetDir) {
+        container.innerHTML = '<p class="text-xs text-slate-500">Please select a project in the dropdown above to inspect its history timeline.</p>';
         return;
       }
 
-      titleLabel.textContent = currentDisplayName;
       container.innerHTML = '<p class="text-xs text-slate-500">Loading timeline events from .lmstudio_history.json...</p>';
 
       try {
-        const res = await fetch('/api/workspace/timeline?repo_dir_name=' + encodeURIComponent(currentWorkspaceDir));
+        const res = await fetch('/api/workspace/timeline?repo_dir_name=' + encodeURIComponent(targetDir));
         const data = await res.json();
         const events = data.events || [];
 
@@ -1847,6 +1918,8 @@
         container.innerHTML = '<p class="text-xs text-rose-400">Error loading timeline: ' + escapeHtml(e.message) + '</p>';
       }
     }
+
+    // ---------------- Accounts & Git Management ----------------
 
     function togglePatGuide() {
       const el = document.getElementById('patGuideContent');
@@ -2142,7 +2215,7 @@
           row.className = 'flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 p-2.5 rounded border border-slate-800 text-xs gap-2';
           row.innerHTML = '<div class="space-y-1 overflow-hidden pr-2">' +
             '<div class="font-medium text-sky-200 truncate flex items-center" title="' + escapeHtml(f.display_name) + '">' +
-            '<span class="truncate">${f.group_name}</span> ' + shardBadge +
+            '<span class="truncate">' + escapeHtml(f.group_name) + '</span> ' + shardBadge +
             '</div>' +
             '<div class="flex flex-wrap items-center gap-2 text-slate-400 text-[11px]">' +
             '<span>Weight: <strong class="text-slate-200">' + f.weight + '</strong></span>' +
@@ -2243,9 +2316,12 @@
         const res = await fetch('/api/local_models');
         const data = await res.json();
         localModelSet.clear();
+        localModelObjects = data.files || [];
         loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
 
         if (data.storage) renderStorageMetrics(data.storage);
+
+        syncModelDropdownSelectors();
 
         if (!data.files || data.files.length === 0) {
           list.innerHTML = '<span class="text-slate-500">No GGUF models on disk (/storage/lmstudio/models)</span>';
@@ -2288,7 +2364,7 @@
             '<div class="text-slate-400 text-[10px] mt-0.5">Weight: ' + m.weight + ' | Variant: ' + m.variant + ' | Cap: ' + Math.round((m.max_context || 32768)/1024) + 'K Ctx</div>' +
             '</div>' +
             '<div class="flex items-center gap-2 shrink-0">' +
-            '<span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">${m.size_gb}</span>' +
+            '<span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">' + m.size_gb + '</span>' +
             actionBtn +
             '<button onclick="deleteModel(\'' + m.filename + '\')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">🗑️</button>' +
             '</div></div>';

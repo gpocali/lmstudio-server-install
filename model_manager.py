@@ -64,6 +64,7 @@ async def startup_event():
 # ---------------- Model Resolution Helper ----------------
 
 def load_model_by_path_or_key(target_path: str = "", context_length: int = 32768, gpu_offload: str = "max") -> str:
+    """Strictly loads the requested target model. Falls back to registered keys only if target_path is blank."""
     lms = get_lms_bin()
     registered_keys = []
     try:
@@ -82,16 +83,21 @@ def load_model_by_path_or_key(target_path: str = "", context_length: int = 32768
     candidates = []
     if target_path:
         fname = os.path.basename(target_path)
-        clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname).lower()
+        clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname, flags=re.IGNORECASE).lower()
         f_strip = re.sub(r'[^a-z0-9]', '', clean_fname)
+
+        # 1. Exact or strict substring match against registered keys
         for key in registered_keys:
             k_strip = re.sub(r'[^a-z0-9]', '', key.lower())
-            if k_strip in f_strip or f_strip in k_strip:
+            if k_strip == f_strip or k_strip in f_strip or f_strip in k_strip:
                 candidates.append(key)
                 break
+        
+        # 2. Add exact clean name, filename, and full absolute path
         candidates.extend([clean_fname, fname, target_path])
+    else:
+        candidates.extend(registered_keys)
 
-    candidates.extend(registered_keys)
     seen = set()
     dedup = [c for c in candidates if c and not (c in seen or seen.add(c))]
 
@@ -108,17 +114,30 @@ def load_model_by_path_or_key(target_path: str = "", context_length: int = 32768
     return loaded_now[0] if loaded_now else ""
 
 def ensure_active_model(model_identifier: str = "") -> str:
+    """Returns an active model identifier; loads specific model if requested or auto-loads first available."""
     loaded = get_loaded_models()
-    if loaded and not model_identifier:
-        return loaded[0]
+    
+    # Specific model requested
     if model_identifier and model_identifier not in ("default", "auto"):
-        if not loaded or not any(model_identifier.lower() in l.lower() for l in loaded):
-            loaded_key = load_model_by_path_or_key(model_identifier)
-            if loaded_key: return loaded_key
+        clean_req = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', os.path.basename(model_identifier), flags=re.IGNORECASE).lower()
+        clean_req_strip = re.sub(r'[^a-z0-9]', '', clean_req)
+
+        # Check if already loaded
+        for l in (loaded or []):
+            l_clean = re.sub(r'[^a-z0-9]', '', l.lower())
+            if clean_req_strip in l_clean or l_clean in clean_req_strip:
+                return l
+
+        # Not loaded -> load this specific requested model
+        loaded_key = load_model_by_path_or_key(model_identifier)
+        if loaded_key: return loaded_key
         return model_identifier
+
+    # Auto mode: if a model is already loaded, use it
     if loaded:
         return loaded[0]
 
+    # Auto mode: load first model on disk
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
             for f in sorted(filenames):
@@ -889,7 +908,7 @@ def api_validate(req: WorkspaceActionRequest):
         else: logs.append(f"✓ Bash OK: {rel}")
     return {"status": "error" if err else "success", "passed": not err, "logs": "\n".join(logs) if logs else "No testable scripts."}
 
-@app.post("/api/workspace/push")
+@app.post("/api/push")
 def api_push(req: WorkspaceActionRequest):
     w_path = os.path.join(WORKSPACES_ROOT, req.repo_dir_name)
     if not os.path.exists(w_path): return JSONResponse(status_code=404, content={"status": "error", "message": "Workspace not found"})
