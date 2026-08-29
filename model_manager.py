@@ -60,14 +60,46 @@ HF_HEADERS = {
 @app.on_event("startup")
 async def startup_event():
     TASK_QUEUE.start_worker()
+    ensure_models_indexed()
 
 # ---------------- Direct LMS Registry & Loading ----------------
 
+def ensure_models_indexed():
+    """Indexes all local GGUF models into LM Studio's registry via symbolic links and import."""
+    lms = get_lms_bin()
+    lms_dirs = [
+        os.path.join(STORAGE_PATH, ".cache", "lm-studio", "models"),
+        os.path.join(STORAGE_PATH, ".lmstudio", "models")
+    ]
+    for d in lms_dirs:
+        os.makedirs(d, exist_ok=True)
+
+    if not os.path.exists(MODELS_PATH):
+        return
+
+    for root, _, files in os.walk(MODELS_PATH, followlinks=True):
+        for f in files:
+            if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
+                src_file = os.path.join(root, f)
+                rel = os.path.relpath(root, MODELS_PATH)
+                for base in lms_dirs:
+                    target_dir = os.path.join(base, rel)
+                    os.makedirs(target_dir, exist_ok=True)
+                    link_dest = os.path.join(target_dir, f)
+                    if not os.path.exists(link_dest):
+                        try: os.symlink(src_file, link_dest)
+                        except Exception: pass
+                # Attempt silent background registry import
+                try:
+                    subprocess.run([lms, "import", "--yes", "--symbolic-link", src_file], env=LMS_ENV, capture_output=True, timeout=5)
+                except Exception: pass
+
 def list_registered_lms_keys() -> list[dict]:
-    """Retrieves exact model keys registered inside LM Studio via `lms ls`."""
+    """Retrieves clean model keys directly from LM Studio CLI (`lms ls`)."""
     lms = get_lms_bin()
     models = []
-    
+    seen = set()
+
     # 1. Try parsing JSON
     try:
         res = subprocess.run([lms, "ls", "--json"], env=LMS_ENV, capture_output=True, text=True, timeout=6)
@@ -75,7 +107,8 @@ def list_registered_lms_keys() -> list[dict]:
             data = json.loads(res.stdout)
             for m in data.get("models", data.get("llms", [])):
                 k = m.get("key") or m.get("identifier") or m.get("path")
-                if k:
+                if k and str(k).strip() not in seen:
+                    seen.add(str(k).strip())
                     models.append({
                         "key": str(k).strip(),
                         "display_name": m.get("name") or str(k).strip(),
@@ -104,31 +137,36 @@ def list_registered_lms_keys() -> list[dict]:
                     if parts:
                         candidate_key = parts[0].strip()
                         if candidate_key and not candidate_key.startswith("-") and candidate_key.upper() != "IDENTIFIER":
-                            models.append({
-                                "key": candidate_key,
-                                "display_name": candidate_key,
-                                "loaded": "LOADED" in raw.upper()
-                            })
+                            if candidate_key not in seen:
+                                seen.add(candidate_key)
+                                models.append({
+                                    "key": candidate_key,
+                                    "display_name": candidate_key,
+                                    "loaded": "LOADED" in raw.upper()
+                                })
     except Exception: pass
+
+    # 3. If LMS hasn't populated yet, scan disk as fallback
+    if not models and os.path.exists(MODELS_PATH):
+        for root, _, files in os.walk(MODELS_PATH, followlinks=True):
+            for f in files:
+                if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
+                    clean_name = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', f).lower()
+                    if clean_name not in seen:
+                        seen.add(clean_name)
+                        models.append({
+                            "key": clean_name,
+                            "display_name": clean_name,
+                            "loaded": False
+                        })
 
     return models
 
-def execute_lms_load(target: str, context_length: int = 32768, gpu_offload: str = "max") -> tuple[bool, str]:
-    """Executes `lms load <target>` trying exact key or importing path."""
+def execute_lms_load(target_key: str, context_length: int = 32768, gpu_offload: str = "max") -> tuple[bool, str]:
+    """Executes `lms load <key>` directly with fallback on context length if VRAM bounds are exceeded."""
     lms = get_lms_bin()
-    if not target or target in ("auto", "default"):
+    if not target_key or target_key in ("auto", "default"):
         return True, "Auto mode active"
-
-    # If full path was passed, import it first
-    candidates = [target]
-    if os.path.exists(target):
-        fname = os.path.basename(target)
-        parent_dir = os.path.basename(os.path.dirname(target))
-        clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname, flags=re.IGNORECASE).lower()
-        candidates.extend([f"{parent_dir}/{fname}", f"{parent_dir}/{clean_fname}", clean_fname, fname])
-        try:
-            subprocess.run([lms, "import", "--yes", "--symbolic-link", target], env=LMS_ENV, capture_output=True, timeout=10)
-        except Exception: pass
 
     # Context fallback ladder
     ctx_ladder = [context_length]
@@ -137,22 +175,21 @@ def execute_lms_load(target: str, context_length: int = 32768, gpu_offload: str 
             ctx_ladder.append(fallback)
 
     last_error = ""
-    for candidate in candidates:
-        for ctx in ctx_ladder:
-            cmd = [
-                lms, "load", candidate,
-                f"--gpu={gpu_offload}",
-                f"--context-length={ctx}",
-                "--ttl=3600",
-                "--yes"
-            ]
-            try:
-                res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=90)
-                if res.returncode == 0:
-                    return True, f"Loaded {candidate} successfully ({ctx} context)."
-                last_error = (res.stderr or res.stdout or "").strip()
-            except Exception as e:
-                last_error = str(e)
+    for ctx in ctx_ladder:
+        cmd = [
+            lms, "load", target_key,
+            f"--gpu={gpu_offload}",
+            f"--context-length={ctx}",
+            "--ttl=3600",
+            "--yes"
+        ]
+        try:
+            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=90)
+            if res.returncode == 0:
+                return True, f"Loaded {target_key} successfully ({ctx} context)."
+            last_error = (res.stderr or res.stdout or "").strip()
+        except Exception as e:
+            last_error = str(e)
 
     return False, last_error or "Failed to load model"
 
@@ -643,6 +680,7 @@ def api_get_tasks():
 
 @app.get("/api/local_models")
 def api_local_models():
+    ensure_models_indexed()
     files = []
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):

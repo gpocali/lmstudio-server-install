@@ -47,12 +47,12 @@
 </head>
 <body class="bg-slate-900 text-slate-100 h-screen w-screen flex flex-col font-sans overflow-hidden select-none">
   
-  <!-- Global Top Navbar -->
+  <!-- Global Top Navbar with Global Unload Button -->
   <header class="bg-slate-950 border-b border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-4 shrink-0 z-20">
     <div class="flex items-center gap-3">
       <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-black text-sm text-white shadow">M</div>
       <h1 class="text-lg font-bold bg-gradient-to-r from-sky-400 to-indigo-300 bg-clip-text text-transparent">Madison</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.3</span>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v3.5</span>
     </div>
 
     <!-- Navigation Page Buttons with Activity & Unread Indicators -->
@@ -91,7 +91,7 @@
       </button>
     </div>
 
-    <!-- Hardware Readouts -->
+    <!-- Hardware Readouts & Global Unload Action -->
     <div class="flex items-center gap-3 text-xs">
       <div class="bg-slate-900 px-3 py-1 rounded border border-slate-800 text-slate-400">
         VRAM: <span id="vramStat" class="font-semibold text-emerald-400">--</span>
@@ -99,13 +99,15 @@
       <div class="bg-slate-900 px-3 py-1 rounded border border-slate-800 text-slate-400">
         Storage: <span id="storageStat" class="font-semibold text-amber-400">--</span>
       </div>
+      <button onclick="unloadAllModelsGlobal(this)" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-rose-300 px-2.5 py-1 rounded font-medium transition" title="Unload all active models from VRAM">
+        ⏹ Unload
+      </button>
     </div>
   </header>
 
   <!-- ==================== VIEW 1: GENERAL CHAT ==================== -->
   <main id="viewChat" class="flex-1 flex overflow-hidden relative select-text">
     
-    <!-- Left Sidebar -->
     <aside class="w-80 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0 overflow-hidden">
       <div class="p-3.5 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
         <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Conversations</h2>
@@ -158,7 +160,7 @@
       <div class="bg-slate-950/80 border-b border-slate-800 px-6 py-2.5 flex justify-between items-center shrink-0 z-10">
         <div>
           <h2 class="text-sm font-bold text-slate-100" id="currentChatSessionTitle">General Conversation</h2>
-          <span class="text-[11px] text-slate-400" id="currentChatModelIndicator">Model: Auto</span>
+          <span class="text-[11px] text-slate-400" id="currentChatModelIndicator">Active Model: Checking...</span>
         </div>
         <div class="flex items-center gap-2">
           <button onclick="copyEntireChatHistory()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded border border-slate-700 transition flex items-center gap-1">
@@ -170,28 +172,42 @@
         </div>
       </div>
 
-      <!-- Messages Window (Centered Container) -->
+      <!-- Messages Window -->
       <div id="generalChatMessagesWindow" class="flex-1 overflow-y-auto p-4 md:p-6">
         <div class="max-w-4xl mx-auto w-full space-y-3.5">
           <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
             <div class="font-bold text-sky-400 mb-1">💬 Grounded Madison Assistant</div>
-            Background agent queue, temporal grounding, and dynamic engine selection are active.
+            Background agent queue, direct model registry lookup, and configurable runtime parameters are active.
           </div>
         </div>
       </div>
 
-      <!-- Chat Input Bar (Interactive Model Selector + Elastic Textarea) -->
+      <!-- Chat Input Bar with Direct Engine & Context Controls -->
       <div class="p-4 md:px-6 md:pb-6 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
+          
           <div class="flex flex-wrap items-center justify-between text-[11px] text-slate-400 px-1 gap-2">
-            <div class="flex items-center gap-1.5">
-              <span>Engine:</span>
-              <select id="chatModelSelector" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2 py-0.5 focus:border-sky-500 focus:outline-none">
-                <option value="auto">Auto (Auto-Load on demand)</option>
-              </select>
+            <div class="flex flex-wrap items-center gap-3">
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-slate-300">Engine:</span>
+                <select id="chatModelSelector" onchange="onModelDropdownSelected('chat')" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2.5 py-1 focus:border-sky-500 focus:outline-none">
+                  <option value="auto">Auto (Use Loaded)</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-slate-300">Context:</span>
+                <select id="chatContextSelector" onchange="onModelDropdownSelected('chat')" class="bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs rounded px-2 py-1 focus:border-sky-500 focus:outline-none">
+                  <option value="8192">8K (8192)</option>
+                  <option value="16384">16K (16384)</option>
+                  <option value="32768" selected>32K (32768)</option>
+                  <option value="65536">64K (65536)</option>
+                  <option value="131072">128K (131072)</option>
+                </select>
+              </div>
             </div>
             <span class="text-slate-500 italic">Press Enter to send, Shift+Enter for new line</span>
           </div>
+
           <div class="flex items-end gap-2 bg-slate-900 border border-slate-700 rounded-xl p-2 focus-within:border-sky-500 transition shadow-inner">
             <textarea id="generalChatInput" rows="1" 
                       oninput="autoResizeTextarea(this)"
@@ -313,18 +329,32 @@
         </div>
       </div>
 
-      <!-- Studio Input Bar (Interactive Model Selector + Elastic Textarea) -->
+      <!-- Studio Input Bar with Direct Engine & Context Controls -->
       <div class="p-4 md:px-6 md:pb-6 bg-slate-950 border-t border-slate-800 shrink-0 z-10">
         <div class="max-w-4xl mx-auto w-full space-y-2">
+          
           <div class="flex flex-wrap items-center justify-between text-[11px] text-slate-400 px-1 gap-2">
-            <div class="flex items-center gap-1.5">
-              <span>Engine:</span>
-              <select id="studioModelSelector" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2 py-0.5 focus:border-sky-500 focus:outline-none">
-                <option value="auto">Auto (Auto-Load on demand)</option>
-              </select>
+            <div class="flex flex-wrap items-center gap-3">
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-slate-300">Engine:</span>
+                <select id="studioModelSelector" onchange="onModelDropdownSelected('studio')" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2.5 py-1 focus:border-sky-500 focus:outline-none">
+                  <option value="auto">Auto (Use Loaded)</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-slate-300">Context:</span>
+                <select id="studioContextSelector" onchange="onModelDropdownSelected('studio')" class="bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs rounded px-2 py-1 focus:border-sky-500 focus:outline-none">
+                  <option value="8192">8K (8192)</option>
+                  <option value="16384">16K (16384)</option>
+                  <option value="32768" selected>32K (32768)</option>
+                  <option value="65536">64K (65536)</option>
+                  <option value="131072">128K (131072)</option>
+                </select>
+              </div>
             </div>
             <span id="selectedFilesSummary" class="text-slate-400 italic">0 files selected for context</span>
           </div>
+
           <div class="flex items-end gap-2 bg-slate-900 border border-slate-700 rounded-xl p-2 focus-within:border-sky-500 transition shadow-inner">
             <textarea id="studioPromptInput" rows="1" 
                       oninput="autoResizeTextarea(this)"
@@ -350,7 +380,7 @@
         <p class="text-xs text-slate-400">Summaries generated by the AI model along with Git commit logs.</p>
       </div>
 
-      <!-- Interactive Timeline Project Selector Dropdown -->
+      <!-- Timeline Project Selector Dropdown -->
       <div class="flex flex-wrap items-center gap-2">
         <label for="timelineProjectSelect" class="text-xs text-slate-400 font-medium">Project:</label>
         <select id="timelineProjectSelect" onchange="onTimelineProjectChanged()" class="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-xs text-sky-300 font-mono focus:border-sky-500 focus:outline-none">
@@ -524,9 +554,6 @@
             <h2 class="text-lg font-semibold">Installed Models on Server</h2>
             <span id="diskSubStat" class="text-xs text-slate-400">-- / -- GB</span>
           </div>
-          <button onclick="unloadActiveModel(this)" class="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-xs px-3 py-1.5 rounded transition">
-            ⏹ Unload All
-          </button>
         </div>
         <div id="localList" class="space-y-2 text-sm text-slate-300">Scanning...</div>
       </section>
@@ -579,7 +606,7 @@
       <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
         <button onclick="closeModelTuner()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded text-xs text-slate-300 transition">Cancel</button>
         <button id="tunerApplyBtn" onclick="applyTunerAndLoad()" class="px-5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold transition flex items-center gap-1.5">
-          🚀 Apply & Load into VRAM
+          🚀 Save Preset & Load in VRAM
         </button>
       </div>
     </div>
@@ -587,8 +614,7 @@
 
   <script>
     var currentActiveView = "chat";
-    var localModelSet = new Set();
-    var localModelObjects = [];
+    var lmsRegisteredKeys = [];
     var activeTasksMap = {};
     var loadedModelsList = [];
     var currentWorkspaceDir = "";
@@ -648,9 +674,11 @@
       if (viewName === 'chat') {
         loadPersonas();
         loadGeneralChatSessions();
+        syncLmsRegisteredModels();
         clearUnreadForCurrentChat();
       } else if (viewName === 'studio') {
         loadSidebarWorkspaces();
+        syncLmsRegisteredModels();
         if (currentWorkspaceDir) {
           refreshWorkspaceStatus();
           clearUnreadForCurrentStudioThread();
@@ -674,29 +702,82 @@
       });
     }
 
-    // ---------------- Model Dropdown Selectors Sync ----------------
+    // ---------------- Direct LMS Registry Sync ----------------
 
-    function syncModelDropdownSelectors() {
-      const chatSel = document.getElementById('chatModelSelector');
-      const studioSel = document.getElementById('studioModelSelector');
+    async function syncLmsRegisteredModels() {
+      try {
+        const res = await fetch('/api/lms/registered_models');
+        const data = await res.json();
+        lmsRegisteredKeys = data.models || [];
+        loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
 
-      const chatVal = chatSel ? chatSel.value : "auto";
-      const studioVal = studioSel ? studioSel.value : "auto";
+        const chatSel = document.getElementById('chatModelSelector');
+        const studioSel = document.getElementById('studioModelSelector');
 
-      const optionsHtml = '<option value="auto">Auto (Auto-Load on demand)</option>' + 
-        localModelObjects.map(m => {
-          const cleanFname = m.filename.replace('.gguf', '');
-          return `<option value="${m.path}">${escapeHtml(cleanFname)} (${m.size_gb})</option>`;
-        }).join('');
+        const chatVal = chatSel ? chatSel.value : "auto";
+        const studioVal = studioSel ? studioSel.value : "auto";
 
-      if (chatSel) {
-        chatSel.innerHTML = optionsHtml;
-        chatSel.value = chatVal;
+        const optionsHtml = '<option value="auto">Auto (Use Loaded)</option>' + 
+          lmsRegisteredKeys.map(m => {
+            const isLoaded = loadedModelsList.some(l => l.includes(m.key.toLowerCase()));
+            const tag = isLoaded ? '⚡ ' : '';
+            return `<option value="${escapeHtml(m.key)}">${tag}${escapeHtml(m.display_name)}</option>`;
+          }).join('');
+
+        if (chatSel) {
+          chatSel.innerHTML = optionsHtml;
+          chatSel.value = chatVal;
+        }
+        if (studioSel) {
+          studioSel.innerHTML = optionsHtml;
+          studioSel.value = studioVal;
+        }
+
+        const activeModelStr = loadedModelsList.length > 0 ? loadedModelsList[0] : "None Loaded (Auto-Load on demand)";
+        document.getElementById('currentChatModelIndicator').textContent = "Active Model: " + activeModelStr;
+      } catch(e) {}
+    }
+
+    async function onModelDropdownSelected(domain) {
+      const modelKey = document.getElementById(domain + 'ModelSelector').value;
+      const ctxLen = parseInt(document.getElementById(domain + 'ContextSelector').value) || 32768;
+
+      if (modelKey === 'auto') return;
+
+      const ind = document.getElementById('currentChatModelIndicator');
+      if (ind) ind.textContent = `Active Model: Loading ${modelKey}...`;
+
+      try {
+        const res = await fetch('/api/load_model', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            model_key: modelKey,
+            context_length: ctxLen,
+            gpu_offload: 'max'
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          await initHardwareInfo();
+          await syncLmsRegisteredModels();
+        } else {
+          alert('Load failure: ' + (data.message || JSON.stringify(data)));
+        }
+      } catch(e) {
+        alert('Communication error: ' + e.message);
       }
-      if (studioSel) {
-        studioSel.innerHTML = optionsHtml;
-        studioSel.value = studioVal;
-      }
+    }
+
+    async function unloadAllModelsGlobal(btn) {
+      if (btn) btn.textContent = '⏳ ...';
+      try {
+        await fetch('/api/unload_model', {method: 'POST'});
+      } catch(e) {}
+      if (btn) btn.textContent = '⏹ Unload';
+      await initHardwareInfo();
+      await syncLmsRegisteredModels();
+      await fetchLocalModels();
     }
 
     // ---------------- Personas Vault ----------------
@@ -952,7 +1033,7 @@
       if (currentChatMessages.length === 0) {
         windowEl.innerHTML = '<div class="max-w-4xl mx-auto w-full space-y-3.5"><div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">' +
           '<div class="font-bold text-sky-400 mb-1">💬 Grounded Madison Assistant</div>' +
-          'Background agent queue, temporal grounding, and dynamic engine selection are active.</div></div>';
+          'Background agent queue, direct model registry lookup, and configurable runtime parameters are active.</div></div>';
         return;
       }
 
@@ -997,6 +1078,7 @@
       const sysPrompt = document.getElementById('generalChatSystemPrompt').value.trim();
       const isWebSearchEnabled = document.getElementById('enableWebSearchToggle').checked;
       const modelIdentifier = document.getElementById('chatModelSelector').value;
+      const ctxLength = parseInt(document.getElementById('chatContextSelector').value) || 32768;
 
       if (!text) return;
 
@@ -1019,6 +1101,7 @@
             custom_system_prompt: sysPrompt,
             enable_web_search: isWebSearchEnabled,
             model_identifier: modelIdentifier === 'auto' ? '' : modelIdentifier,
+            context_length: ctxLength,
             temperature: 0.7,
             max_tokens: 4096
           })
@@ -1038,6 +1121,7 @@
       const promptInput = document.getElementById('studioPromptInput');
       const instruction = promptInput.value.trim();
       const modelIdentifier = document.getElementById('studioModelSelector').value;
+      const ctxLength = parseInt(document.getElementById('studioContextSelector').value) || 32768;
 
       if (!currentWorkspaceDir) return alert('Select an active workspace from the left pane first.');
       if (!instruction) return alert('Please enter a task or coding instruction.');
@@ -1060,7 +1144,8 @@
             instruction: instruction,
             thread_id: targetThreadId,
             persona_id: "coding",
-            model_identifier: modelIdentifier === 'auto' ? '' : modelIdentifier
+            model_identifier: modelIdentifier === 'auto' ? '' : modelIdentifier,
+            context_length: ctxLength
           })
         });
         const data = await res.json();
@@ -1181,7 +1266,7 @@
 
     function openModelTuner(model) {
       currentTunerModel = model;
-      document.getElementById('tunerModelName').textContent = "Tune & Load " + model.filename;
+      document.getElementById('tunerModelName').textContent = "Preset Settings: " + model.filename;
       document.getElementById('tunerModelFilename').textContent = model.path;
 
       const slider = document.getElementById('tunerContextSlider');
@@ -1211,26 +1296,25 @@
       const btn = document.getElementById('tunerApplyBtn');
       const ctxLen = parseInt(document.getElementById('tunerContextSlider').value);
       const gpuOffload = document.getElementById('tunerGpuOffload').value;
-      const ttl = parseInt(document.getElementById('tunerTtl').value);
 
       btn.disabled = true;
       btn.textContent = "⏳ Offloading & Loading...";
 
       try {
+        const cleanName = currentTunerModel.filename.replace('.gguf', '');
         const res = await fetch('/api/load_model', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
-            model_key: currentTunerModel.filename || "",
-            model_path: currentTunerModel.path || "",
+            model_key: cleanName,
+            model_path: currentTunerModel.path,
             context_length: ctxLen,
-            gpu_offload: gpuOffload,
-            ttl: ttl
+            gpu_offload: gpuOffload
           })
         });
         const data = await res.json();
         if (res.ok) {
-          alert(`Model loaded successfully!`);
+          alert(`Preset saved and model loaded into VRAM!`);
           closeModelTuner();
           await initHardwareInfo();
           await syncLmsRegisteredModels();
@@ -1243,40 +1327,7 @@
       }
 
       btn.disabled = false;
-      btn.textContent = "🚀 Apply & Load into VRAM";
-    }
-    
-    async function loadModelDirect(modelJsonStr, btn) {
-      const model = JSON.parse(decodeURIComponent(modelJsonStr));
-      const origText = btn.innerHTML;
-      btn.disabled = true;
-      btn.innerHTML = "⏳ Loading...";
-
-      try {
-        const res = await fetch('/api/load_model', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            model_key: model.filename || "",
-            model_path: model.path || "",
-            context_length: 32768,
-            gpu_offload: "max"
-          })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          await initHardwareInfo();
-          await syncLmsRegisteredModels();
-          await fetchLocalModels();
-        } else {
-          alert('Load error: ' + (data.message || JSON.stringify(data)));
-        }
-      } catch(e) {
-        alert('Communication error: ' + e.message);
-      }
-
-      btn.disabled = false;
-      btn.innerHTML = origText;
+      btn.textContent = "🚀 Save Preset & Load in VRAM";
     }
 
     // ---------------- Resizable Panels Engine ----------------
@@ -1348,7 +1399,6 @@
       try {
         const res = await fetch('/api/system_info');
         const data = await res.json();
-        loadedModelsList = (data.loaded_models || []).map(x => x.toLowerCase());
         
         if (data.gpu && data.gpu.has_gpu) {
           const freeStr = data.gpu.free_vram_gb > 0 ? (data.gpu.free_vram_gb + ' GB Free / ') : '';
@@ -1358,9 +1408,6 @@
         }
 
         if (data.storage) renderStorageMetrics(data.storage);
-
-        const primaryModel = loadedModelsList.length > 0 ? loadedModelsList[0] : "Auto";
-        document.getElementById('currentChatModelIndicator').textContent = "Model: " + primaryModel;
       } catch(e) {}
     }
 
@@ -1684,7 +1731,6 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({repo_dir_name: currentWorkspaceDir, branch: val})
         });
-        const data = await res.json();
         if (res.ok) {
           currentBranch = data.active_branch;
           loadSidebarWorkspaces();
@@ -2288,16 +2334,6 @@
       updateTasks();
     }
 
-    async function unloadActiveModel(btn) {
-      if (btn) btn.textContent = '⏳ Unloading...';
-      try {
-        await fetch('/api/unload_model', {method: 'POST'});
-      } catch(e) {}
-      if (btn) btn.textContent = '⏹ Unload All';
-      await initHardwareInfo();
-      await fetchLocalModels();
-    }
-
     async function deleteModel(filename) {
       if (!confirm("Are you sure you want to delete " + filename + " to free up space?")) return;
       try {
@@ -2310,6 +2346,7 @@
         localModelSet.delete(filename);
         if (data.storage) renderStorageMetrics(data.storage);
         fetchLocalModels();
+        syncLmsRegisteredModels();
       } catch(e) {}
     }
 
@@ -2365,18 +2402,9 @@
           const borderClass = isLoaded ? 'border-emerald-700/80 bg-emerald-950/20' : 'border-slate-700';
           const modelJson = encodeURIComponent(JSON.stringify(m));
 
-          let actionButtons = '';
-          if (isLoaded) {
-            actionButtons = `
-              <span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2.5 py-1 rounded text-xs flex items-center gap-1 font-semibold">⚡ Loaded in VRAM</span>
-              <button onclick="openModelTuner(JSON.parse(decodeURIComponent('${modelJson}')))" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sky-300 px-2.5 py-1 rounded text-xs transition" title="Tune Context & Parameters">🎛️ Tune</button>
-            `;
-          } else {
-            actionButtons = `
-              <button onclick="loadModelDirect('${modelJson}', this)" class="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1 rounded text-xs transition flex items-center gap-1">🚀 Load</button>
-              <button onclick="openModelTuner(JSON.parse(decodeURIComponent('${modelJson}')))" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sky-300 px-2.5 py-1 rounded text-xs transition" title="Tune Context & Parameters">🎛️ Tune</button>
-            `;
-          }
+          const statusBadge = isLoaded 
+            ? '<span class="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2.5 py-1 rounded text-xs flex items-center gap-1 font-semibold">⚡ Loaded in VRAM</span>'
+            : '<span class="bg-slate-800 text-slate-400 px-2 py-1 rounded text-xs">Installed</span>';
 
           return '<div class="flex justify-between items-center bg-slate-950 p-3 rounded-lg border ' + borderClass + ' text-xs gap-3 shadow-sm">' +
             '<div class="truncate pr-2">' +
@@ -2385,7 +2413,8 @@
             '</div>' +
             '<div class="flex items-center gap-2 shrink-0">' +
             '<span class="bg-slate-800 px-2 py-1 rounded text-slate-300 font-mono">' + m.size_gb + '</span>' +
-            actionButtons +
+            statusBadge +
+            '<button onclick="openModelTuner(JSON.parse(decodeURIComponent(\'' + modelJson + '\')))" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sky-300 px-2.5 py-1 rounded text-xs transition" title="Tune Context & Parameters">🎛️ Tune</button>' +
             '<button onclick="deleteModel(\'' + m.filename + '\')" class="bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 px-2 py-1 rounded text-xs transition" title="Delete from disk">🗑️</button>' +
             '</div></div>';
         }).join('');
@@ -2397,12 +2426,13 @@
     // Startup Initialization & Schedulers
     initHardwareInfo();
     initResizers();
+    syncLmsRegisteredModels();
     fetchLocalModels();
     switchView('chat');
     setInterval(updateTasks, 1000);
     setInterval(syncQueueStates, 1000);
     setInterval(initHardwareInfo, 5000);
-    setInterval(fetchLocalModels, 4000);
+    setInterval(syncLmsRegisteredModels, 4000);
     setInterval(() => { if (currentWorkspaceDir) refreshWorkspaceStatus(); }, 3000);
   </script>
 </body>
