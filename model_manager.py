@@ -1,6 +1,6 @@
 """
 Madison AI Core Server Entrypoint
-Asynchronous background job engine, model grouping, safe model loading, and persona vault.
+Direct LM Studio Registry Management, Background Task Queue, and Workspace Agent.
 """
 
 import os
@@ -60,188 +60,111 @@ HF_HEADERS = {
 @app.on_event("startup")
 async def startup_event():
     TASK_QUEUE.start_worker()
-    ensure_models_indexed()
 
-# ---------------- Model Registry & Linking ----------------
+# ---------------- Direct LMS Registry & Loading ----------------
 
-def ensure_models_indexed():
-    """Ensures all GGUF models in MODELS_PATH are symlinked into LM Studio model search paths."""
-    lms_dirs = [
-        os.path.join(STORAGE_PATH, ".cache", "lm-studio", "models"),
-        os.path.join(STORAGE_PATH, ".lmstudio", "models")
-    ]
-    for d in lms_dirs:
-        os.makedirs(d, exist_ok=True)
-
-    if not os.path.exists(MODELS_PATH):
-        return
-
-    for root, dirs, files in os.walk(MODELS_PATH, followlinks=True):
-        for f in files:
-            if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
-                rel = os.path.relpath(root, MODELS_PATH)
-                for base in lms_dirs:
-                    target_dir = os.path.join(base, rel)
-                    os.makedirs(target_dir, exist_ok=True)
-                    link_dest = os.path.join(target_dir, f)
-                    src_file = os.path.join(root, f)
-                    if not os.path.exists(link_dest):
-                        try:
-                            os.symlink(src_file, link_dest)
-                        except Exception:
-                            pass
-
-def get_lms_registered_models() -> dict[str, str]:
-    """
-    Parses `lms ls` preserving hierarchical tree paths (parent repo + child GGUF).
-    Returns mapping of clean_lookup_key -> exact_lms_load_key.
-    """
+def list_registered_lms_keys() -> list[dict]:
+    """Retrieves exact model keys registered inside LM Studio via `lms ls`."""
     lms = get_lms_bin()
-    model_map = {}
-
+    models = []
+    
+    # 1. Try parsing JSON
     try:
-        res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=8)
+        res = subprocess.run([lms, "ls", "--json"], env=LMS_ENV, capture_output=True, text=True, timeout=6)
+        if res.returncode == 0 and res.stdout.strip().startswith("{"):
+            data = json.loads(res.stdout)
+            for m in data.get("models", data.get("llms", [])):
+                k = m.get("key") or m.get("identifier") or m.get("path")
+                if k:
+                    models.append({
+                        "key": str(k).strip(),
+                        "display_name": m.get("name") or str(k).strip(),
+                        "loaded": m.get("loaded", False)
+                    })
+            if models:
+                return models
+    except Exception: pass
+
+    # 2. Text fallback parsing of `lms ls`
+    try:
+        res = subprocess.run([lms, "ls"], env=LMS_ENV, capture_output=True, text=True, timeout=6)
         if res.returncode == 0:
             in_llm = False
-            current_parent = ""
-
             for line in res.stdout.splitlines():
-                raw = line.rstrip()
-                clean = re.sub(r'^[├│└─\s•\*\-\>\|]+', '', raw).strip()
-
-                if "LLM" in clean.upper():
+                raw = line.strip()
+                if "LLM" in raw.upper():
                     in_llm = True
                     continue
-                if "EMBEDDING" in clean.upper() or clean.startswith("===") or clean.startswith("---"):
+                if "EMBEDDING" in raw.upper() or raw.startswith("===") or raw.startswith("---"):
                     in_llm = False
                     continue
+                if in_llm and raw:
+                    clean = re.sub(r'^[├│└─•\*\s\-\>\|]+', '', raw).strip()
+                    parts = clean.split()
+                    if parts:
+                        candidate_key = parts[0].strip()
+                        if candidate_key and not candidate_key.startswith("-") and candidate_key.upper() != "IDENTIFIER":
+                            models.append({
+                                "key": candidate_key,
+                                "display_name": candidate_key,
+                                "loaded": "LOADED" in raw.upper()
+                            })
+    except Exception: pass
 
-                if in_llm and clean:
-                    if "/" in clean and not clean.endswith(".gguf"):
-                        current_parent = clean.split()[0]
-                        model_map[current_parent.lower()] = current_parent
-                    else:
-                        token = clean.split()[0] if clean.split() else clean
-                        if current_parent:
-                            full_key = f"{current_parent}/{token}"
-                            model_map[full_key.lower()] = full_key
-                            model_map[token.lower()] = full_key
-                            model_map[token.replace('.gguf', '').lower()] = full_key
-                        else:
-                            model_map[token.lower()] = token
-                            model_map[token.replace('.gguf', '').lower()] = token
-    except Exception:
-        pass
+    return models
 
-    return model_map
-
-def load_model_by_path_or_key(target_path: str = "", context_length: int = 32768, gpu_offload: str = "max") -> tuple[str, str]:
-    """
-    Robustly resolves the model identifier and executes `lms load` with
-    context fallback (e.g. 32K -> 16K -> 8K -> 4K) if KV cache exceeds VRAM.
-    """
+def execute_lms_load(model_key: str, context_length: int = 32768, gpu_offload: str = "max") -> tuple[bool, str]:
+    """Executes direct `lms load <key>` with specified parameters."""
     lms = get_lms_bin()
-    ensure_models_indexed()
-    model_map = get_lms_registered_models()
+    if not model_key or model_key in ("auto", "default"):
+        return True, "Auto mode active"
 
-    candidates = []
+    cmd = [
+        lms, "load", model_key,
+        f"--gpu={gpu_offload}",
+        f"--context-length={context_length}",
+        "--ttl=3600",
+        "--yes"
+    ]
+    try:
+        res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=90)
+        if res.returncode == 0:
+            return True, f"Loaded {model_key} successfully."
+        return False, res.stderr or res.stdout or "Failed to load model"
+    except Exception as e:
+        return False, str(e)
 
-    if target_path:
-        fname = os.path.basename(target_path)
-        clean_fname = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', fname, flags=re.IGNORECASE).lower()
-        parent_dir = os.path.basename(os.path.dirname(target_path)).lower()
-        
-        # 1. Match from registered model map
-        for k, v in model_map.items():
-            if clean_fname in k or k in clean_fname or (parent_dir and parent_dir in k):
-                candidates.append(v)
-
-        # 2. Try registering path via `lms import`
-        if os.path.exists(target_path):
-            try:
-                imp_res = subprocess.run([lms, "import", "--yes", "--symbolic-link", target_path], env=LMS_ENV, capture_output=True, text=True, timeout=12)
-                # Check if import stdout specified a key
-                m = re.search(r'as:\s*([^\s]+)', imp_res.stdout or "")
-                if m:
-                    candidates.insert(0, m.group(1).strip())
-            except Exception:
-                pass
-
-        # 3. Direct key combinations
-        candidates.append(f"{parent_dir}/{fname}")
-        candidates.append(f"{parent_dir}/{clean_fname}")
-        candidates.append(clean_fname)
-        candidates.append(fname)
-        candidates.append(target_path)
-    else:
-        candidates.extend(list(model_map.values()))
-
-    seen = set()
-    dedup = [c for c in candidates if c and not (c in seen or seen.add(c))]
-
-    # Context fallback ladder
-    ctx_ladder = [context_length]
-    for fallback in [16384, 8192, 4096]:
-        if fallback < context_length:
-            ctx_ladder.append(fallback)
-
-    last_error = ""
-    for candidate in dedup:
-        for ctx in ctx_ladder:
-            try:
-                cmd = [
-                    lms, "load", candidate,
-                    f"--gpu={gpu_offload}",
-                    f"--context-length={ctx}",
-                    "--ttl=3600",
-                    "--yes"
-                ]
-                res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=90)
-                if res.returncode == 0:
-                    loaded = get_loaded_models()
-                    loaded_name = loaded[0] if loaded else candidate
-                    return loaded_name, ""
-                else:
-                    last_error = (res.stderr or res.stdout or "").strip()
-            except Exception as e:
-                last_error = str(e)
-
-    return "", last_error
-
-def ensure_active_model(model_identifier: str = "") -> str:
+def ensure_active_model(model_key: str = "", context_length: int = 32768) -> str:
+    """Ensures the selected model key is active; if none specified, uses whatever is loaded."""
     loaded = get_loaded_models()
-    
-    if model_identifier and model_identifier not in ("default", "auto"):
-        clean_req = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', os.path.basename(model_identifier), flags=re.IGNORECASE).lower()
-        clean_req_strip = re.sub(r'[^a-z0-9]', '', clean_req)
-
+    if model_key and model_key not in ("auto", "default"):
+        # Check if already loaded in VRAM
         for l in (loaded or []):
-            l_clean = re.sub(r'[^a-z0-9]', '', l.lower())
-            if clean_req_strip in l_clean or l_clean in clean_req_strip:
+            if model_key.lower() in l.lower() or l.lower() in model_key.lower():
                 return l
-
-        loaded_key, _ = load_model_by_path_or_key(model_identifier)
-        if loaded_key: return loaded_key
-        return model_identifier
+        # Otherwise load it directly
+        success, _ = execute_lms_load(model_key, context_length=context_length)
+        if success:
+            recheck = get_loaded_models()
+            return recheck[0] if recheck else model_key
 
     if loaded:
         return loaded[0]
 
-    if os.path.exists(MODELS_PATH):
-        for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
-            for f in sorted(filenames):
-                if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
-                    first_model_path = os.path.join(root, f)
-                    loaded_key, _ = load_model_by_path_or_key(first_model_path)
-                    if loaded_key: return loaded_key
+    # Auto fallback: load first available model in registry
+    reg = list_registered_lms_keys()
+    if reg:
+        first_key = reg[0]["key"]
+        execute_lms_load(first_key, context_length=context_length)
+        recheck = get_loaded_models()
+        return recheck[0] if recheck else first_key
 
-    loaded_key, _ = load_model_by_path_or_key()
-    return loaded_key
+    return "default"
 
 # ---------------- Execution Callables for Queue ----------------
 
-def _execute_chat_task_sync(messages: list, model_id: str, persona_id: str, custom_system_prompt: str, enable_web_search: bool, temperature: float, max_tokens: int, top_p: float):
-    active_model = ensure_active_model(model_id)
+def _execute_chat_task_sync(messages: list, model_id: str, context_length: int, persona_id: str, custom_system_prompt: str, enable_web_search: bool, temperature: float, max_tokens: int, top_p: float):
+    active_model = ensure_active_model(model_id, context_length=context_length)
     if not active_model:
         raise RuntimeError("No model could be initialized or loaded in VRAM.")
 
@@ -279,8 +202,8 @@ def _execute_chat_task_sync(messages: list, model_id: str, persona_id: str, cust
     data["loaded_model"] = active_model
     return data
 
-def _execute_agent_task_sync(repo_dir_name: str, target_files: list, instruction: str, thread_id: str, persona_id: str, custom_system_prompt: str, model_id: str):
-    effective_model = ensure_active_model(model_id)
+def _execute_agent_task_sync(repo_dir_name: str, target_files: list, instruction: str, thread_id: str, persona_id: str, custom_system_prompt: str, model_id: str, context_length: int):
+    effective_model = ensure_active_model(model_id, context_length=context_length)
     if not effective_model:
         raise RuntimeError("No model available to execute coding task.")
     
@@ -304,17 +227,16 @@ class DownloadRequest(BaseModel):
 class DeleteRequest(BaseModel):
     filename: str
 
-class LoadRequest(BaseModel):
-    model_path: str
-    identifier: str = ""
-    gpu_offload: str = "max"
+class DirectLoadRequest(BaseModel):
+    model_key: str
     context_length: int = 32768
-    ttl: int = 3600
+    gpu_offload: str = "max"
 
 class AsyncChatSubmitRequest(BaseModel):
     session_id: str
     messages: list[dict]
     model_identifier: str = ""
+    context_length: int = 32768
     persona_id: str = "chat"
     custom_system_prompt: str = ""
     enable_web_search: bool = False
@@ -330,6 +252,7 @@ class AsyncAgentSubmitRequest(BaseModel):
     persona_id: str = "coding"
     custom_system_prompt: str = ""
     model_identifier: str = ""
+    context_length: int = 32768
 
 class MarkTaskReadRequest(BaseModel):
     task_id: str
@@ -409,6 +332,31 @@ def serve_ui():
             return f.read()
     return HTMLResponse("<h2>Error: /storage/lmstudio/web/index.html not found</h2>", status_code=404)
 
+# ---------------- Model Registry & Control Endpoints ----------------
+
+@app.get("/api/lms/registered_models")
+def api_get_lms_models():
+    return {
+        "models": list_registered_lms_keys(),
+        "loaded_models": get_loaded_models()
+    }
+
+@app.post("/api/load_model")
+def api_load_model(req: DirectLoadRequest):
+    success, msg = execute_lms_load(req.model_key, context_length=req.context_length, gpu_offload=req.gpu_offload)
+    if success:
+        return {"status": "success", "loaded_target": req.model_key, "output": msg}
+    return JSONResponse(status_code=400, content={"status": "error", "message": msg})
+
+@app.post("/api/unload_model")
+def api_unload_model():
+    lms = get_lms_bin()
+    try:
+        res = subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, text=True, timeout=5)
+        return {"status": "success", "output": res.stdout}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
 # ---------------- Background Task Queue Endpoints ----------------
 
 @app.post("/api/queue/submit_chat")
@@ -420,6 +368,7 @@ async def api_queue_submit_chat(req: AsyncChatSubmitRequest):
         runner_kwargs={
             "messages": req.messages,
             "model_id": req.model_identifier,
+            "context_length": req.context_length,
             "persona_id": req.persona_id,
             "custom_system_prompt": req.custom_system_prompt,
             "enable_web_search": req.enable_web_search,
@@ -445,7 +394,8 @@ async def api_queue_submit_agent(req: AsyncAgentSubmitRequest):
             "thread_id": t_id,
             "persona_id": req.persona_id,
             "custom_system_prompt": req.custom_system_prompt,
-            "model_id": req.model_identifier
+            "model_id": req.model_identifier,
+            "context_length": req.context_length
         },
         preferred_model=req.model_identifier
     )
@@ -643,30 +593,6 @@ def api_model_files(repo_id: str):
     parsed.sort(key=lambda x: x["raw_size_gb"] if x["raw_size_gb"] > 0 else 999)
     return {"repo_id": repo_id, "hardware": hw, "files": parsed}
 
-@app.post("/api/load_model")
-def api_load_model(req: LoadRequest):
-    loaded_key, err = load_model_by_path_or_key(
-        target_path=req.model_path,
-        context_length=req.context_length,
-        gpu_offload=req.gpu_offload
-    )
-    if loaded_key:
-        return {"status": "success", "loaded_target": loaded_key, "context_length": req.context_length, "output": f"Loaded {loaded_key} into GPU VRAM."}
-    
-    return JSONResponse(
-        status_code=400,
-        content={"status": "error", "message": err or f"Could not load model '{os.path.basename(req.model_path)}' into GPU VRAM."}
-    )
-
-@app.post("/api/unload_model")
-def api_unload_model():
-    lms = get_lms_bin()
-    try:
-        res = subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, text=True, timeout=5)
-        return {"status": "success", "output": res.stdout}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
-
 @app.post("/api/download")
 def api_start_download(req: DownloadRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(run_download_job, req.repo_id, req.group_name, req.files)
@@ -696,7 +622,6 @@ def api_get_tasks():
 
 @app.get("/api/local_models")
 def api_local_models():
-    ensure_models_indexed()
     files = []
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
