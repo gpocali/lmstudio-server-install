@@ -78,7 +78,6 @@ def list_local_gguf_models() -> list[dict]:
         for f in files:
             if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
                 path = os.path.join(root, f)
-                # Strict verification that the file actually exists on disk
                 if not os.path.exists(path):
                     continue
                 parent_dir = os.path.basename(root)
@@ -94,19 +93,18 @@ def list_local_gguf_models() -> list[dict]:
     models.sort(key=lambda x: x["display_name"].lower())
     return models
 
-def execute_lms_load(target_path: str, context_length: int = 32768, gpu_offload: str = "max") -> tuple[bool, str]:
-    """Executes `lms load <absolute_path>` directly with context fallback."""
+def execute_lms_load(target_path: str, context_length: int = 131072, gpu_offload: str = "max") -> tuple[bool, str]:
+    """Executes `lms load` defaulting to max context window with automatic OOM fallback."""
     lms = get_lms_bin()
     if not target_path or target_path in ("auto", "default"):
         return True, "Auto mode active"
 
-    ctx_ladder = [context_length]
-    for fallback in [16384, 8192, 4096]:
-        if fallback < context_length:
-            ctx_ladder.append(fallback)
+    ctx_ladder = [context_length, 65536, 32768, 16384, 8192]
+    seen_ctx = set()
+    dedup_ladder = [c for c in ctx_ladder if not (c in seen_ctx or seen_ctx.add(c))]
 
     last_error = ""
-    for ctx in ctx_ladder:
+    for ctx in dedup_ladder:
         cmd = [
             lms, "load", target_path,
             f"--gpu={gpu_offload}",
@@ -115,9 +113,9 @@ def execute_lms_load(target_path: str, context_length: int = 32768, gpu_offload:
             "--yes"
         ]
         try:
-            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=90)
+            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=120)
             if res.returncode == 0:
-                return True, f"Loaded model successfully ({ctx} context)."
+                return True, f"Loaded model successfully with {ctx} context window."
             last_error = (res.stderr or res.stdout or "").strip()
         except Exception as e:
             last_error = str(e)
@@ -189,7 +187,7 @@ def _execute_chat_task_sync(messages: list, model_id: str, context_length: int, 
     data["loaded_model"] = active_model
     return data
 
-def _execute_agent_task_sync(repo_dir_name: str, target_files: list, instruction: str, change_name: str = "", thread_id: str = "", persona_id: str = "coding", custom_system_prompt: str = "", model_id: str = "", context_length: int = 32768):
+def _execute_agent_task_sync(repo_dir_name: str, target_files: list, instruction: str, thread_id: str, persona_id: str, custom_system_prompt: str, model_id: str, context_length: int):
     effective_model = ensure_active_model(model_id, context_length=context_length)
     if not effective_model:
         raise RuntimeError("No model available to execute coding task.")
@@ -198,7 +196,6 @@ def _execute_agent_task_sync(repo_dir_name: str, target_files: list, instruction
         repo_dir_name=repo_dir_name,
         target_files=target_files,
         instruction=instruction,
-        change_name=change_name,
         thread_id=thread_id,
         persona_id=persona_id,
         custom_system_prompt=custom_system_prompt,
@@ -218,7 +215,7 @@ class DeleteRequest(BaseModel):
 class LoadRequest(BaseModel):
     model_key: str = ""
     model_path: str = ""
-    context_length: int = 32768
+    context_length: int = 131072
     gpu_offload: str = "max"
     ttl: int = 3600
 
@@ -226,7 +223,7 @@ class AsyncChatSubmitRequest(BaseModel):
     session_id: str
     messages: list[dict]
     model_identifier: str = ""
-    context_length: int = 32768
+    context_length: int = 131072
     persona_id: str = "chat"
     custom_system_prompt: str = ""
     enable_web_search: bool = False
@@ -238,12 +235,26 @@ class AsyncAgentSubmitRequest(BaseModel):
     repo_dir_name: str
     target_files: list[str] = []
     instruction: str
-    change_name: str = ""
     thread_id: str = ""
     persona_id: str = "coding"
     custom_system_prompt: str = ""
     model_identifier: str = ""
-    context_length: int = 32768
+    context_length: int = 131072
+
+class AgentPlanRequest(BaseModel):
+    repo_dir_name: str
+    instruction: str
+    model_identifier: str = ""
+
+class AgentExecutePlanRequest(BaseModel):
+    repo_dir_name: str
+    target_files: list[str]
+    instruction: str
+    thread_id: str = ""
+    persona_id: str = "coding"
+    custom_system_prompt: str = ""
+    model_identifier: str = ""
+    context_length: int = 131072
 
 class MarkTaskReadRequest(BaseModel):
     task_id: str
@@ -353,6 +364,31 @@ def api_unload_model():
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
+@app.post("/api/agent/plan")
+def api_agent_plan(req: AgentPlanRequest):
+    effective_model = ensure_active_model(req.model_identifier)
+    res = generate_agent_plan(req.repo_dir_name, req.instruction, model_id=effective_model)
+    if res.get("status") == "error":
+        return JSONResponse(status_code=500, content=res)
+    return res
+
+@app.post("/api/agent/execute_plan")
+def api_agent_execute_plan(req: AgentExecutePlanRequest):
+    effective_model = ensure_active_model(req.model_identifier)
+    res = execute_approved_plan(
+        repo_dir_name=req.repo_dir_name,
+        target_files=req.target_files,
+        instruction=req.instruction,
+        thread_id=req.thread_id,
+        persona_id=req.persona_id,
+        custom_system_prompt=req.custom_system_prompt,
+        model_id=effective_model,
+        context_length=req.context_length
+    )
+    if res.get("status") == "error":
+        return JSONResponse(status_code=500, content=res)
+    return res
+
 # ---------------- Background Task Queue Endpoints ----------------
 
 @app.post("/api/queue/submit_chat")
@@ -387,7 +423,6 @@ async def api_queue_submit_agent(req: AsyncAgentSubmitRequest):
             "repo_dir_name": req.repo_dir_name,
             "target_files": req.target_files,
             "instruction": req.instruction,
-            "change_name": req.change_name,
             "thread_id": t_id,
             "persona_id": req.persona_id,
             "custom_system_prompt": req.custom_system_prompt,
@@ -945,54 +980,6 @@ def api_push(req: WorkspaceActionRequest):
         return JSONResponse(status_code=500, content={"status": "error", "message": res.stderr or res.stdout})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
-        
-class AgentPlanRequest(BaseModel):
-    repo_dir_name: str
-    instruction: str
-    model_identifier: str = ""
-
-class AgentExecutePlanRequest(BaseModel):
-    repo_dir_name: str
-    target_files: list[str] = []
-    instruction: str
-    change_name: str = ""
-    thread_id: str = ""
-    persona_id: str = "coding"
-    custom_system_prompt: str = ""
-    model_identifier: str = ""
-    context_length: int = 32768
-
-@app.post("/api/agent/plan")
-def api_agent_plan(req: AgentPlanRequest):
-    try:
-        effective_model = ensure_active_model(req.model_identifier)
-        res = generate_agent_plan(req.repo_dir_name, req.instruction, model_id=effective_model)
-        if res.get("status") == "error":
-            return JSONResponse(status_code=500, content=res)
-        return res
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": f"Plan server error: {str(e)}"})
-
-@app.post("/api/agent/execute_plan")
-def api_agent_execute_plan(req: AgentExecutePlanRequest):
-    try:
-        effective_model = ensure_active_model(req.model_identifier, context_length=req.context_length)
-        res = execute_approved_plan(
-            repo_dir_name=req.repo_dir_name,
-            target_files=req.target_files,
-            instruction=req.instruction,
-            change_name=req.change_name,
-            thread_id=req.thread_id,
-            persona_id=req.persona_id,
-            custom_system_prompt=req.custom_system_prompt,
-            model_id=effective_model,
-            context_length=req.context_length
-        )
-        if res.get("status") == "error":
-            return JSONResponse(status_code=500, content=res)
-        return res
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": f"Execution server error: {str(e)}"})
 
 if __name__ == "__main__":
     uvicorn.run("model_manager:app", host="0.0.0.0", port=8080, log_level="info")
