@@ -21,7 +21,6 @@ from core.hardware import (
     get_system_hardware_info,
     get_storage_usage,
     get_loaded_models,
-    calculate_optimal_context,
     STORAGE_PATH,
     MODELS_PATH,
     LMS_ENV
@@ -69,80 +68,41 @@ async def startup_event():
 
 # ---------------- Direct Absolute-Path Model Loading ----------------
 
-ACTIVE_MODEL_RUNTIME = {
-    "key": "",
-    "path": "",
-    "context_length": 0,
-    "last_loaded_at": ""
-}
-
 def list_local_gguf_models() -> list[dict]:
-    """Scans MODELS_PATH directly for existing .gguf files, computing VRAM context recommendations."""
+    """Scans MODELS_PATH directly for existing .gguf files, omitting any stale or deleted paths."""
     models = []
     if not os.path.exists(MODELS_PATH):
         return models
-
-    hw = get_system_hardware_info()
-    vram_total = hw.get("gpu", {}).get("total_vram_gb", 0.0)
 
     for root, _, files in os.walk(MODELS_PATH, followlinks=True):
         for f in files:
             if f.endswith(".gguf") and not re.search(r'-0000[2-9]-of-', f):
                 path = os.path.join(root, f)
+                # Strict verification that the file actually exists on disk
                 if not os.path.exists(path):
                     continue
                 parent_dir = os.path.basename(root)
                 clean_name = re.sub(r'(-0000\d-of-\d{5})?\.gguf$', '', f)
                 display_label = f"{parent_dir} / {clean_name}" if parent_dir else clean_name
-                try:
-                    size_gb = round(os.path.getsize(path) / (1024**3), 2)
-                except Exception:
-                    size_gb = 0.0
-
-                max_cap_ctx = 131072 if any(k in f.lower() for k in ["llama-3", "qwen", "nemotron", "gemma", "deepseek"]) else 32768
-                rec_ctx = calculate_optimal_context(size_gb, vram_total, max_cap=max_cap_ctx)
                 
                 models.append({
                     "key": path,  # Absolute path as key for reliable lms load
                     "display_name": display_label,
-                    "filename": f,
-                    "size_gb": size_gb,
-                    "recommended_context": rec_ctx,
-                    "max_context": max_cap_ctx
+                    "filename": f
                 })
     
     models.sort(key=lambda x: x["display_name"].lower())
     return models
 
-def execute_lms_load(target_path: str, context_length: int = 32768, gpu_offload: str = "max", force_reload: bool = False) -> tuple[bool, str]:
-    """Executes `lms load <absolute_path>` directly with context fallback and runtime tracking."""
+def execute_lms_load(target_path: str, context_length: int = 32768, gpu_offload: str = "max") -> tuple[bool, str]:
+    """Executes `lms load <absolute_path>` directly with context fallback."""
     lms = get_lms_bin()
-    loaded = get_loaded_models()
-
     if not target_path or target_path in ("auto", "default"):
-        # Auto mode resolution
-        if loaded and not force_reload and ACTIVE_MODEL_RUNTIME.get("context_length") == context_length:
-            return True, f"Auto mode active with model '{loaded[0]}' ({context_length} context)."
-        
-        ggufs = list_local_gguf_models()
-        if ggufs:
-            target_path = ggufs[0]["key"]
-            if loaded:
-                for g in ggufs:
-                    if any(l in g["key"].lower() or l in g["display_name"].lower() for l in loaded):
-                        target_path = g["key"]
-                        break
-        else:
-            return True, "Auto mode active (no local models to load)."
-
-    # If already loaded with the same context and reload not forced, skip reload
-    if not force_reload and ACTIVE_MODEL_RUNTIME.get("key") == target_path and ACTIVE_MODEL_RUNTIME.get("context_length") == context_length:
-        if loaded:
-            return True, f"Model already loaded with {context_length} context."
+        return True, "Auto mode active"
 
     ctx_ladder = [context_length]
-    for fallback in [131072, 65536, 32768, 16384, 8192, 4096]:
-        if fallback < context_length and fallback not in ctx_ladder:
+    for fallback in [16384, 8192, 4096]:
+        if fallback < context_length:
             ctx_ladder.append(fallback)
 
     last_error = ""
@@ -157,10 +117,6 @@ def execute_lms_load(target_path: str, context_length: int = 32768, gpu_offload:
         try:
             res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=90)
             if res.returncode == 0:
-                ACTIVE_MODEL_RUNTIME["key"] = target_path
-                ACTIVE_MODEL_RUNTIME["path"] = target_path
-                ACTIVE_MODEL_RUNTIME["context_length"] = ctx
-                ACTIVE_MODEL_RUNTIME["last_loaded_at"] = datetime.datetime.utcnow().isoformat()
                 return True, f"Loaded model successfully ({ctx} context)."
             last_error = (res.stderr or res.stdout or "").strip()
         except Exception as e:
@@ -170,24 +126,17 @@ def execute_lms_load(target_path: str, context_length: int = 32768, gpu_offload:
 
 def ensure_active_model(model_path: str = "", context_length: int = 32768) -> str:
     loaded = get_loaded_models()
-    
     if model_path and model_path not in ("auto", "default"):
         fname = os.path.basename(model_path).replace('.gguf', '').lower()
-        is_already_loaded = any(fname in l.lower() or l.lower() in fname for l in (loaded or []))
-        
-        if is_already_loaded and ACTIVE_MODEL_RUNTIME.get("context_length") == context_length:
-            return loaded[0]
-            
-        success, _ = execute_lms_load(model_path, context_length=context_length, force_reload=True)
+        for l in (loaded or []):
+            if fname in l.lower() or l.lower() in fname:
+                return l
+        success, _ = execute_lms_load(model_path, context_length=context_length)
         if success:
             recheck = get_loaded_models()
             return recheck[0] if recheck else model_path
 
     if loaded:
-        if context_length > 0 and ACTIVE_MODEL_RUNTIME.get("context_length") != context_length and ACTIVE_MODEL_RUNTIME.get("context_length") != 0:
-            execute_lms_load("auto", context_length=context_length, force_reload=True)
-            recheck = get_loaded_models()
-            return recheck[0] if recheck else loaded[0]
         return loaded[0]
 
     ggufs = list_local_gguf_models()
@@ -198,7 +147,6 @@ def ensure_active_model(model_path: str = "", context_length: int = 32768) -> st
         return recheck[0] if recheck else first_path
 
     return "default"
-
 
 # ---------------- Execution Callables for Queue ----------------
 
@@ -391,14 +339,9 @@ def api_resync_models():
 @app.post("/api/load_model")
 def api_load_model(req: LoadRequest):
     target = req.model_path or req.model_key
-    success, msg = execute_lms_load(target, context_length=req.context_length, gpu_offload=req.gpu_offload, force_reload=True)
+    success, msg = execute_lms_load(target, context_length=req.context_length, gpu_offload=req.gpu_offload)
     if success:
-        return {
-            "status": "success",
-            "loaded_target": target,
-            "context_length": ACTIVE_MODEL_RUNTIME.get("context_length", req.context_length),
-            "output": msg
-        }
+        return {"status": "success", "loaded_target": target, "output": msg}
     return JSONResponse(status_code=400, content={"status": "error", "message": msg})
 
 @app.post("/api/unload_model")
@@ -406,19 +349,9 @@ def api_unload_model():
     lms = get_lms_bin()
     try:
         res = subprocess.run([lms, "unload", "--all"], env=LMS_ENV, capture_output=True, text=True, timeout=5)
-        ACTIVE_MODEL_RUNTIME["key"] = ""
-        ACTIVE_MODEL_RUNTIME["path"] = ""
-        ACTIVE_MODEL_RUNTIME["context_length"] = 0
         return {"status": "success", "output": res.stdout}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
-
-@app.get("/api/model/runtime_status")
-def api_model_runtime_status():
-    return {
-        "runtime": ACTIVE_MODEL_RUNTIME,
-        "loaded_models": get_loaded_models()
-    }
 
 # ---------------- Background Task Queue Endpoints ----------------
 
@@ -650,8 +583,7 @@ def api_model_files(repo_id: str):
         is_dling = gname in DOWNLOAD_JOBS and DOWNLOAD_JOBS[gname].get("status") == "downloading"
         shard_info = f" ({len(gdata['paths'])} Shards)" if len(gdata['paths']) > 1 else ""
 
-        max_cap_ctx = 131072 if any(k in gname.lower() for k in ["llama-3", "qwen", "nemotron", "gemma", "deepseek"]) else 32768
-        rec_ctx = calculate_optimal_context(size_gb, vram_total, max_cap=max_cap_ctx)
+        max_cap_ctx = 131072 if any(k in gname.lower() for k in ["llama-3", "qwen", "nemotron", "gemma"]) else 32768
 
         parsed.append({
             "group_name": gname, "display_name": gname + shard_info, "paths": gdata["paths"],
@@ -660,7 +592,6 @@ def api_model_files(repo_id: str):
             "size_gb": f"{size_gb} GB" if size_gb > 0 else "Pending...", "raw_size_gb": size_gb,
             "est_vram": f"~{est_mem} GB" if est_mem > 0 else "N/A",
             "max_context": max_cap_ctx,
-            "recommended_context": rec_ctx,
             "fit_status": fit, "is_downloaded": is_dl, "is_downloading": is_dling
         })
 
@@ -697,8 +628,6 @@ def api_get_tasks():
 @app.get("/api/local_models")
 def api_local_models():
     files = []
-    hw = get_system_hardware_info()
-    vram_total = hw.get("gpu", {}).get("total_vram_gb", 0)
     if os.path.exists(MODELS_PATH):
         for root, _, filenames in os.walk(MODELS_PATH, followlinks=True):
             for f in filenames:
@@ -707,8 +636,7 @@ def api_local_models():
                     try: size_gb = round(os.path.getsize(path) / (1024**3), 2)
                     except Exception: size_gb = 0.0
                     weight, variant = parse_model_metadata(f, root)
-                    max_cap_ctx = 131072 if any(k in f.lower() for k in ["llama-3", "qwen", "nemotron", "gemma", "deepseek"]) else 32768
-                    rec_ctx = calculate_optimal_context(size_gb, vram_total, max_cap=max_cap_ctx)
+                    max_cap_ctx = 131072 if any(k in f.lower() for k in ["llama-3", "qwen", "nemotron", "gemma"]) else 32768
                     files.append({
                         "filename": f,
                         "weight": weight,
@@ -716,7 +644,6 @@ def api_local_models():
                         "size_gb": f"{size_gb} GB",
                         "raw_size_gb": size_gb,
                         "max_context": max_cap_ctx,
-                        "recommended_context": rec_ctx,
                         "path": path
                     })
     return {"files": files, "storage": get_storage_usage(), "loaded_models": get_loaded_models()}

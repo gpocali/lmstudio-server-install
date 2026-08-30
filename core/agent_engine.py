@@ -187,87 +187,6 @@ def generate_agent_plan(repo_dir_name: str, instruction: str, model_id: str = ""
             "plan_summary": f"Implementation Plan:\n1. Analyze task requirements for '{instruction.strip()}'.\n2. Update target files to apply changes.\n3. Validate syntax and review git diff."
         }
 
-def apply_search_replace_blocks(original_content: str, llm_response: str) -> tuple[bool, str, int, list[str]]:
-    """
-    Parses and applies SEARCH/REPLACE blocks to file content.
-    Supports exact matching and fuzzy line-by-line whitespace-trimmed matching.
-    Returns: (success: bool, modified_content: str, applied_blocks_count: int, log_msgs: list[str])
-    """
-    pattern = re.compile(
-        r'<{3,7}\s*SEARCH(?:[^\n\r]*)\r?\n([\s\S]*?)\r?\n={3,7}\r?\n([\s\S]*?)\r?\n>{3,7}',
-        re.MULTILINE
-    )
-    
-    matches = list(pattern.finditer(llm_response))
-    if not matches:
-        return False, original_content, 0, ["No SEARCH/REPLACE blocks found."]
-
-    current_content = original_content
-    applied_count = 0
-    logs = []
-
-    for idx, m in enumerate(matches, 1):
-        search_block = m.group(1)
-        replace_block = m.group(2)
-
-        # 1. Exact match
-        if search_block in current_content:
-            current_content = current_content.replace(search_block, replace_block, 1)
-            applied_count += 1
-            logs.append(f"Block #{idx}: Exact match applied successfully.")
-            continue
-
-        # 2. Line-by-line fuzzy match (ignoring trailing whitespace / line endings)
-        search_lines = [l.rstrip() for l in search_block.splitlines()]
-        if not search_lines:
-            continue
-
-        content_lines = current_content.splitlines(keepends=True)
-        content_stripped = [l.rstrip() for l in content_lines]
-
-        match_start = -1
-        search_len = len(search_lines)
-
-        for i in range(len(content_stripped) - search_len + 1):
-            if content_stripped[i:i + search_len] == search_lines:
-                match_start = i
-                break
-
-        if match_start != -1:
-            before = "".join(content_lines[:match_start])
-            after = "".join(content_lines[match_start + search_len:])
-            line_ending = "\r\n" if "\r\n" in current_content else "\n"
-            rep_text = replace_block
-            if not rep_text.endswith("\n") and not rep_text.endswith("\r\n") and (after or before):
-                rep_text += line_ending
-
-            current_content = before + rep_text + after
-            applied_count += 1
-            logs.append(f"Block #{idx}: Fuzzy line-match applied successfully.")
-        else:
-            logs.append(f"Block #{idx}: Failed to match search block in target file.")
-
-    success = applied_count > 0 and applied_count == len(matches)
-    return success, current_content, applied_count, logs
-
-def extract_code_block(response_text: str, target_rel_path: str = "") -> str | None:
-    """Extracts code block from markdown fences or file markers."""
-    if target_rel_path:
-        escaped_path = re.escape(target_rel_path)
-        file_pat = re.compile(rf'###\s*File:\s*{escaped_path}[\r\n]+\x60\x60\x60(?:[a-zA-Z0-9_\-]+)?[\r\n]+([\s\S]*?)[\r\n]+\x60\x60\x60', re.MULTILINE | re.IGNORECASE)
-        m = file_pat.search(response_text)
-        if m: return m.group(1)
-
-    generic_file_pat = re.compile(r'###\s*File:\s*[^\n\r]+[\r\n]+\x60\x60\x60(?:[a-zA-Z0-9_\-]+)?[\r\n]+([\s\S]*?)[\r\n]+\x60\x60\x60', re.MULTILINE)
-    m = generic_file_pat.search(response_text)
-    if m: return m.group(1)
-
-    fence_pat = re.compile(r'\x60\x60\x60(?:[a-zA-Z0-9_\-]+)?[\r\n]+([\s\S]*?)[\r\n]+\x60\x60\x60', re.MULTILINE)
-    m = fence_pat.search(response_text)
-    if m: return m.group(1)
-
-    return None
-
 def execute_approved_plan(
     repo_dir_name: str,
     target_files: list,
@@ -283,146 +202,74 @@ def execute_approved_plan(
     if not os.path.exists(workspace_path):
         return {"status": "error", "message": "Workspace not found"}
 
-    selected_model = model_id or get_active_model_for_agent()
-    system_prompt = get_persona_prompt(persona_id, custom_system_prompt, domain="coding")
-    modified_files = []
-    response_sections = []
+    context_blocks = []
+    for rel_file in target_files:
+        full_p = os.path.join(workspace_path, rel_file)
+        if os.path.exists(full_p):
+            try:
+                with open(full_p, "r", encoding="utf-8") as f:
+                    content = f.read()
+                if len(content) > 16000:
+                    content = content[:16000] + "\n... [File truncated for context limit] ..."
+                context_blocks.append(f"### File: {rel_file}\n```\n{content}\n```")
+            except Exception: pass
 
-    clean_targets = []
-    for tf in (target_files or []):
-        if tf and isinstance(tf, str):
-            c_tf = tf.strip().lstrip("./\\").replace("\\", "/")
-            if c_tf and c_tf not in clean_targets:
-                clean_targets.append(c_tf)
+    context_str = "\n\n".join(context_blocks) if context_blocks else "No existing files selected as context."
+
+    system_prompt = get_persona_prompt(persona_id, custom_system_prompt, domain="coding")
+    user_prompt = (
+        f"Target Files Existing Contents:\n\n{context_str}\n\n"
+        f"Task Instruction & Approved Plan:\n{instruction}\n\n"
+        "Provide the complete, updated file implementations using the format:\n"
+        "### File: path/to/file\n```python\n[complete updated file content]\n```"
+    )
+
+    selected_model = model_id or get_active_model_for_agent()
 
     try:
-        if clean_targets:
-            # Segmented execution: process each file individually to eliminate output token starvation
-            for idx, rel_file in enumerate(clean_targets, 1):
-                full_dest_path = os.path.join(workspace_path, rel_file)
-                file_exists = os.path.exists(full_dest_path)
-                
-                if file_exists:
-                    try:
-                        with open(full_dest_path, "r", encoding="utf-8", errors="replace") as f:
-                            existing_content = f.read()
-                    except Exception as e:
-                        existing_content = ""
+        payload = {
+            "model": selected_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 16384
+        }
+        
+        resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=300)
+        if resp.status_code != 200:
+            return {"status": "error", "message": f"LM Studio API Error: {resp.text[:300]}"}
 
-                    user_prompt = (
-                        f"TASK INSTRUCTION & APPROVED PLAN:\n{instruction}\n\n"
-                        f"FILE TO MODIFY ({idx}/{len(clean_targets)}): `{rel_file}`\n\n"
-                        f"CURRENT FILE CONTENTS (`{rel_file}`):\n"
-                        f"```\n{existing_content}\n```\n\n"
-                        "OUTPUT INSTRUCTIONS:\n"
-                        "Make minimal, surgical changes using SEARCH/REPLACE blocks formatted exactly as:\n"
-                        "<<<<<<< SEARCH\n"
-                        "[exact code snippet to replace]\n"
-                        "=======\n"
-                        "[new replacement code snippet]\n"
-                        ">>>>>>>\n\n"
-                        "Include 2-4 lines of surrounding context in the SEARCH block to make it match uniquely.\n"
-                        "If a complete rewrite of this file is necessary, output:\n"
-                        f"### File: {rel_file}\n```\n[complete new file content]\n```"
-                    )
+        ai_response = resp.json()["choices"][0]["message"]["content"]
+        
+        file_pattern = re.compile(r'###\s*File:\s*([^\n\r]+)[\r\n]+\x60\x60\x60(?:[a-zA-Z0-9_\-]+)?[\r\n]+([\s\S]*?)[\r\n]+\x60\x60\x60', re.MULTILINE)
+        matches = file_pattern.findall(ai_response)
+        
+        modified_files = []
+        if matches:
+            for file_rel_path, file_content in matches:
+                clean_rel = file_rel_path.strip().lstrip("./\\").replace("\\", "/")
+                dest_file_path = os.path.join(workspace_path, clean_rel)
+                os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
+                with open(dest_file_path, "w", encoding="utf-8") as f:
+                    f.write(file_content.strip() + "\n")
+                modified_files.append(clean_rel)
+        elif len(target_files) == 1:
+            fallback_pattern = re.compile(r'\x60\x60\x60(?:[a-zA-Z0-9_\-]+)?\n([\s\S]*?)\n\x60\x60\x60')
+            code_match = fallback_pattern.search(ai_response)
+            if code_match:
+                single_rel = target_files[0].strip().lstrip("./\\").replace("\\", "/")
+                dest_p = os.path.join(workspace_path, single_rel)
+                os.makedirs(os.path.dirname(dest_p), exist_ok=True)
+                with open(dest_p, "w", encoding="utf-8") as f:
+                    f.write(code_match.group(1).strip() + "\n")
+                modified_files.append(single_rel)
 
-                    payload = {
-                        "model": selected_model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        "temperature": 0.15,
-                        "max_tokens": 8192
-                    }
-
-                    resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=240)
-                    if resp.status_code != 200:
-                        return {"status": "error", "message": f"LM Studio API Error modifying {rel_file}: {resp.text[:300]}"}
-
-                    file_ai_resp = resp.json()["choices"][0]["message"]["content"]
-                    
-                    # Try applying SEARCH/REPLACE blocks first
-                    sr_ok, new_content, applied_count, logs = apply_search_replace_blocks(existing_content, file_ai_resp)
-                    
-                    if sr_ok or applied_count > 0:
-                        os.makedirs(os.path.dirname(full_dest_path), exist_ok=True)
-                        with open(full_dest_path, "w", encoding="utf-8") as f:
-                            f.write(new_content)
-                        modified_files.append(rel_file)
-                        response_sections.append(f"### `{rel_file}` (Applied {applied_count} Search/Replace chunk{'s' if applied_count > 1 else ''})\n{file_ai_resp}")
-                    else:
-                        # Fallback: check for full file code fence
-                        extracted = extract_code_block(file_ai_resp, rel_file)
-                        if extracted:
-                            os.makedirs(os.path.dirname(full_dest_path), exist_ok=True)
-                            with open(full_dest_path, "w", encoding="utf-8") as f:
-                                f.write(extracted.strip() + "\n")
-                            modified_files.append(rel_file)
-                            response_sections.append(f"### `{rel_file}` (Full update applied)\n{file_ai_resp}")
-                        else:
-                            response_sections.append(f"### `{rel_file}` (No modifications could be parsed)\n{file_ai_resp}")
-
-                else:
-                    # Brand new file creation
-                    user_prompt = (
-                        f"TASK INSTRUCTION & APPROVED PLAN:\n{instruction}\n\n"
-                        f"NEW FILE TO CREATE ({idx}/{len(clean_targets)}): `{rel_file}`\n\n"
-                        "OUTPUT INSTRUCTIONS:\n"
-                        f"Provide the complete file implementation formatted as:\n"
-                        f"### File: {rel_file}\n"
-                        "```\n[complete file content]\n```"
-                    )
-
-                    payload = {
-                        "model": selected_model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        "temperature": 0.15,
-                        "max_tokens": 8192
-                    }
-
-                    resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=240)
-                    if resp.status_code != 200:
-                        return {"status": "error", "message": f"LM Studio API Error creating {rel_file}: {resp.text[:300]}"}
-
-                    file_ai_resp = resp.json()["choices"][0]["message"]["content"]
-                    extracted = extract_code_block(file_ai_resp, rel_file)
-                    if extracted:
-                        os.makedirs(os.path.dirname(full_dest_path), exist_ok=True)
-                        with open(full_dest_path, "w", encoding="utf-8") as f:
-                            f.write(extracted.strip() + "\n")
-                        modified_files.append(rel_file)
-                        response_sections.append(f"### `{rel_file}` (New file created)\n{file_ai_resp}")
-                    else:
-                        response_sections.append(f"### `{rel_file}` (Failed to parse new file implementation)\n{file_ai_resp}")
-
-        else:
-            # Fallback for tasks with no specific target files (advisory or repo-wide inquiry)
-            user_prompt = f"Task Instruction:\n{instruction}\n\nPlease analyze and provide code changes or recommendations."
-            payload = {
-                "model": selected_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": 0.2,
-                "max_tokens": 8192
-            }
-            resp = requests.post("http://127.0.0.1:1234/v1/chat/completions", json=payload, timeout=240)
-            if resp.status_code == 200:
-                file_ai_resp = resp.json()["choices"][0]["message"]["content"]
-                response_sections.append(file_ai_resp)
-            else:
-                return {"status": "error", "message": f"LM Studio API Error: {resp.text[:300]}"}
-
-        ai_response = "\n\n".join(response_sections)
         git_status = get_workspace_git_status(repo_dir_name)
         ai_summary_meta = generate_commit_msg_from_diff(repo_dir_name, modified_files, selected_model)
 
-        effective_commit_msg = change_name.strip() or ai_summary_meta.get("commit_msg", f"Update {', '.join(modified_files[:2])}" if modified_files else "Update workspace")
+        effective_commit_msg = change_name.strip() or ai_summary_meta.get("commit_msg", f"Update {', '.join(modified_files[:2])}")
         effective_summary = change_name.strip() or ai_summary_meta.get("summary", instruction)
 
         hist = load_workspace_history(repo_dir_name)
@@ -484,7 +331,6 @@ def execute_approved_plan(
         }
     except Exception as e:
         return {"status": "error", "message": f"Execution error: {str(e)}"}
-
 
 # Backwards compatibility alias for queue workers
 def process_agent_task(

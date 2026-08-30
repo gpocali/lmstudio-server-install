@@ -180,14 +180,13 @@
             <div class="flex flex-wrap items-center gap-3">
               <div class="flex items-center gap-1.5">
                 <span class="font-bold text-slate-300">Engine:</span>
-                <select id="chatModelSelector" onchange="onModelDropdownSelected('chat', 'model')" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2.5 py-1 focus:border-sky-500 focus:outline-none">
+                <select id="chatModelSelector" onchange="onModelDropdownSelected('chat')" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2.5 py-1 focus:border-sky-500 focus:outline-none">
                   <option value="auto">Auto (Use Loaded)</option>
                 </select>
               </div>
               <div class="flex items-center gap-1.5">
                 <span class="font-bold text-slate-300">Context:</span>
-                <select id="chatContextSelector" onchange="onModelDropdownSelected('chat', 'context')" class="bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs rounded px-2 py-1 focus:border-sky-500 focus:outline-none">
-                  <option value="4096">4K (4096)</option>
+                <select id="chatContextSelector" onchange="onModelDropdownSelected('chat')" class="bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs rounded px-2 py-1 focus:border-sky-500 focus:outline-none">
                   <option value="8192">8K (8192)</option>
                   <option value="16384">16K (16384)</option>
                   <option value="32768" selected>32K (32768)</option>
@@ -322,14 +321,13 @@
             <div class="flex flex-wrap items-center gap-3">
               <div class="flex items-center gap-1.5">
                 <span class="font-bold text-slate-300">Engine:</span>
-                <select id="studioModelSelector" onchange="onModelDropdownSelected('studio', 'model')" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2.5 py-1 focus:border-sky-500 focus:outline-none">
+                <select id="studioModelSelector" onchange="onModelDropdownSelected('studio')" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2.5 py-1 focus:border-sky-500 focus:outline-none">
                   <option value="auto">Auto (Use Loaded)</option>
                 </select>
               </div>
               <div class="flex items-center gap-1.5">
                 <span class="font-bold text-slate-300">Context:</span>
-                <select id="studioContextSelector" onchange="onModelDropdownSelected('studio', 'context')" class="bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs rounded px-2 py-1 focus:border-sky-500 focus:outline-none">
-                  <option value="4096">4K (4096)</option>
+                <select id="studioContextSelector" onchange="onModelDropdownSelected('studio')" class="bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs rounded px-2 py-1 focus:border-sky-500 focus:outline-none">
                   <option value="8192">8K (8192)</option>
                   <option value="16384">16K (16384)</option>
                   <option value="32768" selected>32K (32768)</option>
@@ -748,30 +746,14 @@
       btn.innerHTML = origText;
     }
 
-    async function onModelDropdownSelected(domain, source = 'model') {
-      const modelSel = document.getElementById(domain + 'ModelSelector');
-      const ctxSel = document.getElementById(domain + 'ContextSelector');
-      if (!modelSel || !ctxSel) return;
+    async function onModelDropdownSelected(domain) {
+      const modelKey = document.getElementById(domain + 'ModelSelector').value;
+      const ctxLen = parseInt(document.getElementById(domain + 'ContextSelector').value) || 32768;
 
-      const modelKey = modelSel.value;
-      
-      // Auto-select recommended context if a specific model was chosen
-      if (source === 'model' && modelKey !== 'auto') {
-        const found = lmsRegisteredKeys.find(m => m.key === modelKey);
-        if (found && found.recommended_context) {
-          const recCtx = String(found.recommended_context);
-          if (Array.from(ctxSel.options).some(o => o.value === recCtx)) {
-            ctxSel.value = recCtx;
-          }
-        }
-      }
-
-      const ctxLen = parseInt(ctxSel.value) || 32768;
-      const kCtx = Math.round(ctxLen / 1024);
+      if (modelKey === 'auto') return;
 
       const ind = document.getElementById('currentChatModelIndicator');
-      const labelName = modelKey === 'auto' ? 'Active Model' : (modelKey.split(/[\\/]/).pop() || modelKey);
-      if (ind) ind.textContent = `Active Model: Configuring ${labelName} (${kCtx}K Context)...`;
+      if (ind) ind.textContent = `Active Model: Loading ${modelKey}...`;
 
       try {
         const res = await fetch('/api/load_model', {
@@ -787,16 +769,11 @@
         if (res.ok) {
           await initHardwareInfo();
           await syncLmsRegisteredModels();
-          if (ind) {
-            const activeStr = loadedModelsList.length > 0 ? loadedModelsList[0] : (data.loaded_target || "Loaded");
-            ind.textContent = `Active Model: ${activeStr} (${kCtx}K Context)`;
-          }
         } else {
-          console.warn('Model load notification:', data.message);
-          await syncLmsRegisteredModels();
+          alert('Load failure: ' + (data.message || JSON.stringify(data)));
         }
       } catch(e) {
-        console.error('Communication error:', e.message);
+        alert('Communication error: ' + e.message);
       }
     }
 
@@ -1309,9 +1286,8 @@
       const modelIdentifier = document.getElementById('studioModelSelector').value;
       const ctxLength = parseInt(document.getElementById('studioContextSelector').value) || 32768;
 
-      const filesCountStr = targetFiles.length > 0 ? `${targetFiles.length} target file${targetFiles.length > 1 ? 's' : ''}` : 'files';
       card.className = 'bg-slate-950 p-4 rounded-xl border border-emerald-800/80 text-xs text-emerald-300 space-y-3 font-mono max-w-[95%] mr-auto shadow-md';
-      card.innerHTML = `<div class="flex items-center gap-2 font-bold text-emerald-400 animate-pulse"><svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg><span>⚙️ Applying Search/Replace chunk edits to ${filesCountStr}...</span></div>`;
+      card.innerHTML = '<div class="flex items-center gap-2 font-bold text-emerald-400 animate-pulse"><svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg><span>⚙️ Implementing changes & modifying files on disk...</span></div>';
 
       try {
         const res = await fetch('/api/agent/execute_plan', {
@@ -1557,7 +1533,7 @@
       const slider = document.getElementById('tunerContextSlider');
       const maxCap = model.max_context || 131072;
       slider.max = maxCap;
-      slider.value = model.recommended_context || Math.min(32768, maxCap);
+      slider.value = Math.min(32768, maxCap);
 
       document.getElementById('tunerMinContext').textContent = "2K (2048)";
       document.getElementById('tunerMaxContext').textContent = Math.round(maxCap / 1024) + "K (" + maxCap + " Max Capacity)";
