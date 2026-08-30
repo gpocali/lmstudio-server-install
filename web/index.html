@@ -180,13 +180,20 @@
             <div class="flex flex-wrap items-center gap-3">
               <div class="flex items-center gap-1.5">
                 <span class="font-bold text-slate-300">Engine:</span>
-                <select id="chatModelSelector" onchange="onModelDropdownSelected('chat')" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2.5 py-1 focus:border-sky-500 focus:outline-none">
+                <select id="chatModelSelector" onchange="onModelDropdownSelected('chat', 'model')" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2.5 py-1 focus:border-sky-500 focus:outline-none">
                   <option value="auto">Auto (Use Loaded)</option>
                 </select>
               </div>
               <div class="flex items-center gap-1.5">
                 <span class="font-bold text-slate-300">Context:</span>
-                <span id="chatContextBadge" class="text-emerald-400 font-mono text-xs bg-slate-900 border border-slate-700 px-2 py-0.5 rounded font-semibold flex items-center gap-1">⚡ Auto VRAM</span>
+                <select id="chatContextSelector" onchange="onModelDropdownSelected('chat', 'context')" class="bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs rounded px-2 py-1 focus:border-sky-500 focus:outline-none">
+                  <option value="4096">4K (4096)</option>
+                  <option value="8192">8K (8192)</option>
+                  <option value="16384">16K (16384)</option>
+                  <option value="32768" selected>32K (32768)</option>
+                  <option value="65536">64K (65536)</option>
+                  <option value="131072">128K (131072)</option>
+                </select>
               </div>
             </div>
             <span class="text-slate-500 italic">Press Enter to send, Shift+Enter for new line</span>
@@ -315,13 +322,20 @@
             <div class="flex flex-wrap items-center gap-3">
               <div class="flex items-center gap-1.5">
                 <span class="font-bold text-slate-300">Engine:</span>
-                <select id="studioModelSelector" onchange="onModelDropdownSelected('studio')" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2.5 py-1 focus:border-sky-500 focus:outline-none">
+                <select id="studioModelSelector" onchange="onModelDropdownSelected('studio', 'model')" class="bg-slate-900 border border-slate-700 text-sky-400 font-mono text-xs rounded px-2.5 py-1 focus:border-sky-500 focus:outline-none">
                   <option value="auto">Auto (Use Loaded)</option>
                 </select>
               </div>
               <div class="flex items-center gap-1.5">
                 <span class="font-bold text-slate-300">Context:</span>
-                <span id="studioContextBadge" class="text-emerald-400 font-mono text-xs bg-slate-900 border border-slate-700 px-2 py-0.5 rounded font-semibold flex items-center gap-1">⚡ Auto VRAM</span>
+                <select id="studioContextSelector" onchange="onModelDropdownSelected('studio', 'context')" class="bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs rounded px-2 py-1 focus:border-sky-500 focus:outline-none">
+                  <option value="4096">4K (4096)</option>
+                  <option value="8192">8K (8192)</option>
+                  <option value="16384">16K (16384)</option>
+                  <option value="32768" selected>32K (32768)</option>
+                  <option value="65536">64K (65536)</option>
+                  <option value="131072">128K (131072)</option>
+                </select>
               </div>
             </div>
             <span id="selectedFilesSummary" class="text-slate-400 italic">0 files selected for context</span>
@@ -711,14 +725,6 @@
 
         const activeModelStr = loadedModelsList.length > 0 ? loadedModelsList[0] : "None Loaded (Auto-Load on demand)";
         document.getElementById('currentChatModelIndicator').textContent = "Active Model: " + activeModelStr;
-
-        // Auto update context badges based on loaded or selected model
-        const activeRec = lmsRegisteredKeys.find(m => loadedModelsList.some(l => m.key.toLowerCase().includes(l) || l.includes(m.key.toLowerCase())));
-        const badgeCtx = activeRec && activeRec.recommended_context ? Math.round(activeRec.recommended_context / 1024) + "K Auto VRAM" : "⚡ Auto VRAM";
-        const cBadge = document.getElementById('chatContextBadge');
-        const sBadge = document.getElementById('studioContextBadge');
-        if (cBadge) cBadge.textContent = "⚡ " + badgeCtx;
-        if (sBadge) sBadge.textContent = "⚡ " + badgeCtx;
       } catch(e) {}
     }
 
@@ -742,22 +748,30 @@
       btn.innerHTML = origText;
     }
 
-    async function onModelDropdownSelected(domain) {
+    async function onModelDropdownSelected(domain, source = 'model') {
       const modelSel = document.getElementById(domain + 'ModelSelector');
-      if (!modelSel) return;
+      const ctxSel = document.getElementById(domain + 'ContextSelector');
+      if (!modelSel || !ctxSel) return;
 
       const modelKey = modelSel.value;
-      const found = lmsRegisteredKeys.find(m => m.key === modelKey);
-      const recCtx = (found && found.recommended_context) ? found.recommended_context : 0;
       
-      const badge = document.getElementById(domain + 'ContextBadge');
-      if (badge && recCtx > 0) {
-        badge.textContent = `⚡ ${Math.round(recCtx/1024)}K Auto VRAM`;
+      // Auto-select recommended context if a specific model was chosen
+      if (source === 'model' && modelKey !== 'auto') {
+        const found = lmsRegisteredKeys.find(m => m.key === modelKey);
+        if (found && found.recommended_context) {
+          const recCtx = String(found.recommended_context);
+          if (Array.from(ctxSel.options).some(o => o.value === recCtx)) {
+            ctxSel.value = recCtx;
+          }
+        }
       }
+
+      const ctxLen = parseInt(ctxSel.value) || 32768;
+      const kCtx = Math.round(ctxLen / 1024);
 
       const ind = document.getElementById('currentChatModelIndicator');
       const labelName = modelKey === 'auto' ? 'Active Model' : (modelKey.split(/[\\/]/).pop() || modelKey);
-      if (ind) ind.textContent = `Active Model: Loading ${labelName}...`;
+      if (ind) ind.textContent = `Active Model: Configuring ${labelName} (${kCtx}K Context)...`;
 
       try {
         const res = await fetch('/api/load_model', {
@@ -765,7 +779,7 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             model_key: modelKey,
-            context_length: recCtx,
+            context_length: ctxLen,
             gpu_offload: 'max'
           })
         });
@@ -775,7 +789,7 @@
           await syncLmsRegisteredModels();
           if (ind) {
             const activeStr = loadedModelsList.length > 0 ? loadedModelsList[0] : (data.loaded_target || "Loaded");
-            ind.textContent = `Active Model: ${activeStr}`;
+            ind.textContent = `Active Model: ${activeStr} (${kCtx}K Context)`;
           }
         } else {
           console.warn('Model load notification:', data.message);
@@ -1095,7 +1109,7 @@
       const sysPrompt = document.getElementById('generalChatSystemPrompt').value.trim();
       const isWebSearchEnabled = document.getElementById('enableWebSearchToggle').checked;
       const modelIdentifier = document.getElementById('chatModelSelector').value;
-      const ctxLength = 0; // Auto-managed optimal VRAM context
+      const ctxLength = parseInt(document.getElementById('chatContextSelector').value) || 32768;
 
       if (!text) return;
 
@@ -1293,7 +1307,7 @@
       }
 
       const modelIdentifier = document.getElementById('studioModelSelector').value;
-      const ctxLength = 0; // Auto-managed optimal VRAM context
+      const ctxLength = parseInt(document.getElementById('studioContextSelector').value) || 32768;
 
       const filesCountStr = targetFiles.length > 0 ? `${targetFiles.length} target file${targetFiles.length > 1 ? 's' : ''}` : 'files';
       card.className = 'bg-slate-950 p-4 rounded-xl border border-emerald-800/80 text-xs text-emerald-300 space-y-3 font-mono max-w-[95%] mr-auto shadow-md';

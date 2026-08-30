@@ -114,15 +114,15 @@ def list_local_gguf_models() -> list[dict]:
     models.sort(key=lambda x: x["display_name"].lower())
     return models
 
-def execute_lms_load(target_path: str, context_length: int = 0, gpu_offload: str = "max", force_reload: bool = False) -> tuple[bool, str]:
-    """Executes `lms load <path_or_identifier>` directly with automatic VRAM context calculation and multi-stage fallback."""
+def execute_lms_load(target_path: str, context_length: int = 32768, gpu_offload: str = "max", force_reload: bool = False) -> tuple[bool, str]:
+    """Executes `lms load <absolute_path>` directly with context fallback and runtime tracking."""
     lms = get_lms_bin()
     loaded = get_loaded_models()
 
     if not target_path or target_path in ("auto", "default"):
-        # Auto mode resolution: if already loaded and no force reload, we are ready
-        if loaded and not force_reload:
-            return True, f"Auto mode active with model '{loaded[0]}'."
+        # Auto mode resolution
+        if loaded and not force_reload and ACTIVE_MODEL_RUNTIME.get("context_length") == context_length:
+            return True, f"Auto mode active with model '{loaded[0]}' ({context_length} context)."
         
         ggufs = list_local_gguf_models()
         if ggufs:
@@ -133,18 +133,7 @@ def execute_lms_load(target_path: str, context_length: int = 0, gpu_offload: str
                         target_path = g["key"]
                         break
         else:
-            return False, "No local models found in /storage/lmstudio/models to load."
-
-    # Determine optimal context length if not provided or 0
-    if context_length <= 0:
-        hw = get_system_hardware_info()
-        vram_total = hw.get("gpu", {}).get("total_vram_gb", 0.0)
-        size_gb = 0.0
-        if os.path.exists(target_path):
-            try: size_gb = round(os.path.getsize(target_path) / (1024**3), 2)
-            except Exception: pass
-        max_cap_ctx = 131072 if any(k in target_path.lower() for k in ["llama-3", "qwen", "nemotron", "gemma", "deepseek"]) else 32768
-        context_length = calculate_optimal_context(size_gb, vram_total, max_cap=max_cap_ctx)
+            return True, "Auto mode active (no local models to load)."
 
     # If already loaded with the same context and reload not forced, skip reload
     if not force_reload and ACTIVE_MODEL_RUNTIME.get("key") == target_path and ACTIVE_MODEL_RUNTIME.get("context_length") == context_length:
@@ -152,66 +141,61 @@ def execute_lms_load(target_path: str, context_length: int = 0, gpu_offload: str
             return True, f"Model already loaded with {context_length} context."
 
     ctx_ladder = [context_length]
-    for fallback in [65536, 32768, 16384, 8192, 4096]:
+    for fallback in [131072, 65536, 32768, 16384, 8192, 4096]:
         if fallback < context_length and fallback not in ctx_ladder:
             ctx_ladder.append(fallback)
 
     last_error = ""
     for ctx in ctx_ladder:
-        candidate_cmds = [
-            [lms, "load", target_path, "--gpu", str(gpu_offload), "--context-length", str(ctx), "--ttl", "3600", "--yes"],
-            [lms, "load", target_path, f"--gpu={gpu_offload}", f"--context-length={ctx}", "--ttl=3600", "--yes"],
-            [lms, "load", target_path, "--gpu", str(gpu_offload), "--yes"],
-            [lms, "load", target_path, "--yes"]
+        cmd = [
+            lms, "load", target_path,
+            f"--gpu={gpu_offload}",
+            f"--context-length={ctx}",
+            "--ttl=3600",
+            "--yes"
         ]
-        for cmd in candidate_cmds:
-            try:
-                res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=120)
-                if res.returncode == 0:
-                    ACTIVE_MODEL_RUNTIME["key"] = target_path
-                    ACTIVE_MODEL_RUNTIME["path"] = target_path
-                    ACTIVE_MODEL_RUNTIME["context_length"] = ctx
-                    ACTIVE_MODEL_RUNTIME["last_loaded_at"] = datetime.datetime.utcnow().isoformat()
-                    return True, f"Loaded model successfully ({ctx} context)."
-                last_error = (res.stderr or res.stdout or "").strip()
-            except Exception as e:
-                last_error = str(e)
+        try:
+            res = subprocess.run(cmd, env=LMS_ENV, capture_output=True, text=True, timeout=90)
+            if res.returncode == 0:
+                ACTIVE_MODEL_RUNTIME["key"] = target_path
+                ACTIVE_MODEL_RUNTIME["path"] = target_path
+                ACTIVE_MODEL_RUNTIME["context_length"] = ctx
+                ACTIVE_MODEL_RUNTIME["last_loaded_at"] = datetime.datetime.utcnow().isoformat()
+                return True, f"Loaded model successfully ({ctx} context)."
+            last_error = (res.stderr or res.stdout or "").strip()
+        except Exception as e:
+            last_error = str(e)
 
     return False, last_error or "Failed to load model"
 
-def ensure_active_model(model_path: str = "", context_length: int = 0) -> str:
-    """Ensures a model is actively loaded in LM Studio and returns its active identifier."""
+def ensure_active_model(model_path: str = "", context_length: int = 32768) -> str:
     loaded = get_loaded_models()
     
-    # 1. If a specific model was requested:
     if model_path and model_path not in ("auto", "default"):
         fname = os.path.basename(model_path).replace('.gguf', '').lower()
-        for l in (loaded or []):
-            if fname in l.lower() or l.lower() in fname:
-                return l
-
-        # Load the requested model
+        is_already_loaded = any(fname in l.lower() or l.lower() in fname for l in (loaded or []))
+        
+        if is_already_loaded and ACTIVE_MODEL_RUNTIME.get("context_length") == context_length:
+            return loaded[0]
+            
         success, _ = execute_lms_load(model_path, context_length=context_length, force_reload=True)
-        recheck = get_loaded_models()
-        if recheck:
-            return recheck[0]
         if success:
-            return os.path.basename(model_path).replace('.gguf', '')
+            recheck = get_loaded_models()
+            return recheck[0] if recheck else model_path
 
-    # 2. If any model is currently loaded, return its active identifier
     if loaded:
+        if context_length > 0 and ACTIVE_MODEL_RUNTIME.get("context_length") != context_length and ACTIVE_MODEL_RUNTIME.get("context_length") != 0:
+            execute_lms_load("auto", context_length=context_length, force_reload=True)
+            recheck = get_loaded_models()
+            return recheck[0] if recheck else loaded[0]
         return loaded[0]
 
-    # 3. If nothing loaded, auto-load first local GGUF model
     ggufs = list_local_gguf_models()
     if ggufs:
         first_path = ggufs[0]["key"]
-        success, _ = execute_lms_load(first_path, context_length=context_length, force_reload=True)
+        execute_lms_load(first_path, context_length=context_length)
         recheck = get_loaded_models()
-        if recheck:
-            return recheck[0]
-        if success:
-            return os.path.basename(first_path).replace('.gguf', '')
+        return recheck[0] if recheck else first_path
 
     return "default"
 
