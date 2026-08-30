@@ -52,7 +52,7 @@
     <div class="flex items-center gap-3">
       <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-black text-sm text-white shadow">M</div>
       <h1 class="text-lg font-bold bg-gradient-to-r from-sky-400 to-indigo-300 bg-clip-text text-transparent">Madison</h1>
-      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v4.0</span>
+      <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded border border-slate-700">Workstation v4.1</span>
     </div>
 
     <!-- Navigation Page Buttons with Activity & Unread Indicators -->
@@ -1556,6 +1556,13 @@
 
         if (data.storage) renderStorageMetrics(data.storage);
       } catch(e) {}
+    }
+
+    function renderStorageMetrics(storage) {
+      const mainStat = document.getElementById('storageStat');
+      const subStat = document.getElementById('diskSubStat');
+      if (mainStat && storage) mainStat.innerHTML = storage.used_gb + ' / ' + storage.total_gb + ' GB';
+      if (subStat && storage) subStat.innerHTML = 'Storage: <span class="text-amber-300">' + storage.used_gb + ' GB</span> / ' + storage.total_gb + ' GB (' + storage.percent_used + '%)';
     }
 
     async function fetchLocalModels() {
