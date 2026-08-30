@@ -59,7 +59,7 @@ sudo -u "$SERVICE_USER" git config --global --add safe.directory "*" 2>/dev/null
 # 3. Install System & Python Dependencies
 echo "[+] Installing system packages and runtime dependencies..."
 apt-get update -y
-apt-get install -y curl ca-certificates jq gnupg git python3 python3-pip python3-venv python3-uvicorn python3-fastapi python3-requests
+apt-get install -y curl ca-certificates jq gnupg git python3 python3-pip python3-venv python3-uvicorn python3-fastapi python3-requests ufw
 
 pip3 install -U duckduckgo_search --break-system-packages 2>/dev/null || pip3 install -U duckduckgo_search || true
 
@@ -207,7 +207,19 @@ systemctl daemon-reload
 systemctl enable --now lmstudio.service modelmanager.service
 systemctl restart lmstudio.service modelmanager.service
 
-# 9. Save Configuration
+# 9. Configure UFW Firewall Access
+echo ""
+echo "--- [ Configuring UFW Firewall Rules ] ---"
+if command -v ufw >/dev/null 2>&1; then
+  ufw allow "${MANAGER_PORT}/tcp"
+  ufw allow "${LM_PORT}/tcp"
+  ufw --force reload
+  echo "[✓] Firewall rules added for ports ${MANAGER_PORT} and ${LM_PORT}."
+else
+  echo "[!] UFW not found, skipping firewall configuration."
+fi
+
+# 10. Save Configuration
 cat > "$CONFIG_FILE" <<EOF
 INSTALLED_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 BASE_STORAGE="${BASE_STORAGE}"
